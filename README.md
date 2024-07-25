@@ -6,7 +6,7 @@ Your `SELECT` queries are transpiled to DuckDB and run locally on your computer,
 Once you start proxy server locally, you can connect to UniverSQL from any SQL client that supports Snowflake.
 
 > Your Snowflake account is single source of truth and the local queries are real-only data downloaded from your cloud storage, linked with Snowflake. 
-> We use your local credentials for cloud storage so [make sure you configure the cloud SDKs](#your-local-credentials-are-used-to-access-the-data-in-data-lake).
+> We use your local credentials for cloud storage so [make sure you configure the cloud SDKs](#install-data-lake-sdks).
 > UniverSQL doesn't support writing data to Snowflake and designed to be complementary to Snowflake.
 
 # How it works?
@@ -92,13 +92,11 @@ By default, UniverSQL uses your default AWS profile, you can pass `--aws_profile
 #### Google Cloud
 
 [Install](https://cloud.google.com/sdk/docs/initializing) and [configure](https://cloud.google.com/sdk/docs/authorizing) Google Cloud SDK.
-
 By default, UniverSQL uses your default GCP account attached to `gcloud`, you can pass `--gcp_account` option to `universql` to use a different profile than the default account.
 
 #### Azure
 
-Install [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli)) and [configure it](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli-interactively).
-
+Install [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) and [configure it](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli-interactively).
 By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.com/en-us/cli/azure/manage-azure-subscriptions-azure-cli?tabs=bash#change-the-active-tenant) attached to `az`, you can pass `--azure_tenant` option to `universql` to use a different profile than the default account.
 
 ## Compute Strategies
