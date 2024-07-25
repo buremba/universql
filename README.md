@@ -1,4 +1,4 @@
-# `UniverSQL` X-Local warehouse for your Snowflake
+# `UniverSQL` X-Duck warehouse for your Snowflake
 
 UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake tables joining your local datasets, **without any need for a running warehouse**.
 
@@ -54,13 +54,25 @@ Install UniverSQL from PyPI as follows:
 pip install universql
 ```
 
-Setup snowflake account and credentials in your environment variables.
+You can start Universql with the passing your account identifier:
 
 ```bash
 universql --account-url lt51601.europe-west2.gcp
 ```
 
-1. Setup a Snowflake connection for Python Connector [here](https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect#connecting-using-the-connections-toml-file).
+```
+> universql --help
+Usage: universql [OPTIONS]
+
+Options:
+  --account TEXT                  The account to use (ex: rt21601.europe-
+                                  west2.gcp)
+  --port INTEGER                  Port for proxy server (default: 8084)
+  --host TEXT                     Host for proxy server (default: 127.0.0.1)
+  --compute [local|hybrid|cloud]  The compute strategy to use (default: hybrid)
+  --help                          Show this message and exit.
+
+```
 
 # Limitations
 
