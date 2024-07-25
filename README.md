@@ -1,8 +1,11 @@
 # `UniverSQL` X-Local warehouse for your Snowflake
 
-UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake tables joining your local datasets, **without any need for a running warehouse**.
+UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and joining them with your local datasets, **without any need for a running warehouse**.
 
-Once you start proxy server locally, you can connect to UniverSQL from any SQL client that supports Snowflake. We make sure all your `SELECT` queries are executed locally on your computer, [while other queries]() are executed on Snowflake.
+Your `SELECT` queries are transpiled to DuckDB and run locally on your computer, while other queries are executed on your Snowflake account.
+Once you start proxy server locally, you can connect to UniverSQL from any SQL client that supports Snowflake.
+
+> Your Snowflake account is single source of truth and the local queries are real-onl
 
 # How it works?
 
@@ -72,6 +75,14 @@ Options:
   --help                          Show this message and exit.
 
 ```
+
+# Compute Strategies
+
+`hybrid`: Runs the queries locally if they're `SELECT` queries and can be transpiled into DuckDB query. Otherwise runs queries on Snowflake. This is the default strategy.
+`local`: If the query requires a running warehouse on Snowflake, fails the query. Otherwise runs the query locally.
+`cloud`: Runs the queries directly on Snowflake, use it as a passthrough.
+
+By default, UniverSQL uses `hybrid` compute strategy, which runs the queries locally if they're `SELECT` queries and runs them on Snowflake if they're not.
 
 # Limitations
 
