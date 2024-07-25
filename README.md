@@ -5,7 +5,8 @@ UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on
 Your `SELECT` queries are transpiled to DuckDB and run locally on your computer, while other queries are executed on your Snowflake account.
 Once you start proxy server locally, you can connect to UniverSQL from any SQL client that supports Snowflake.
 
-> Your Snowflake account is single source of truth and the local queries are real-only data downloaded from your cloud storage, linked with Snowflake. We use your local credentials for cloud storage so make sure you install the cloud SDKs and configure them with your credentials.
+> Your Snowflake account is single source of truth and the local queries are real-only data downloaded from your cloud storage, linked with Snowflake. 
+> We use your local credentials for cloud storage so [make sure you configure the cloud SDKs](#your-local-credentials-are-used-to-access-the-data-in-data-lake).
 > UniverSQL doesn't support writing data to Snowflake and designed to be complementary to Snowflake.
 
 # How it works?
@@ -77,10 +78,35 @@ Options:
 
 ```
 
-# Compute Strategies
+## Install data lake SDKs
+
+UniverSQL uses the native cloud SDKs to download the data from your data lake. You should install the your cloud's SDK and configure it with your credentials.
+
+### AWS
+
+Install AWS CLI and [configure it](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) based on the IAM settings in your organization. 
+If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
+
+By default, UniverSQL uses your default AWS profile, you can pass `--aws_profile` option to `universql` to use a different profile than the default profile.
+
+#### Google Cloud
+
+[Install](https://cloud.google.com/sdk/docs/initializing) and [configure](https://cloud.google.com/sdk/docs/authorizing) Google Cloud SDK.
+
+By default, UniverSQL uses your default GCP account attached to `gcloud`, you can pass `--gcp_account` option to `universql` to use a different profile than the default account.
+
+#### Azure
+
+Install [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli)) and [configure it](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli-interactively).
+
+By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.com/en-us/cli/azure/manage-azure-subscriptions-azure-cli?tabs=bash#change-the-active-tenant) attached to `az`, you can pass `--azure_tenant` option to `universql` to use a different profile than the default account.
+
+## Compute Strategies
 
 `hybrid`: Runs the queries locally if they're `SELECT` queries and can be transpiled into DuckDB query. Otherwise runs queries on Snowflake. This is the default strategy.
+
 `local`: If the query requires a running warehouse on Snowflake, fails the query. Otherwise runs the query locally.
+
 `cloud`: Runs the queries directly on Snowflake, use it as a passthrough.
 
 By default, UniverSQL uses `hybrid` compute strategy, which runs the queries locally if they're `SELECT` queries and runs them on Snowflake if they're not.
@@ -180,17 +206,3 @@ The workaround is to use a public tunnel service to expose your local server to 
 
 While SQL V1 API is internal, most Snowflake clients are using SQL V1 API, including JDBC, Python, ODBC etc. Feel free to help supporting [SQL V2 API](https://docs.snowflake.com/en/developer-guide/sql-api/intro) by contributing to the project. It should be easy enough as we already use Arrow interface for the V1 API, which is the interface for V2.
 
-## Your local credentials are used to access the data in data lake
-
-You should install the your cloud's SDK and configure it with your credentials. UniverSQL uses the native cloud SDKs to download the data from your data lake.
-
-### AWS
-
-Install AWS CLI and [configure it](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) based on the IAM settings in your organization. 
-If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
-
-You can pass
-
-#### Google Cloud
-
-#### Azure
