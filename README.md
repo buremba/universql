@@ -5,7 +5,8 @@ UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on
 Your `SELECT` queries are transpiled to DuckDB and run locally on your computer, while other queries are executed on your Snowflake account.
 Once you start proxy server locally, you can connect to UniverSQL from any SQL client that supports Snowflake.
 
-> Your Snowflake account is single source of truth and the local queries are real-onl
+> Your Snowflake account is single source of truth and the local queries are real-only data downloaded from your cloud storage, linked with Snowflake. We use your local credentials for cloud storage so make sure you install the cloud SDKs and configure them with your credentials.
+> UniverSQL doesn't support writing data to Snowflake and designed to be complementary to Snowflake.
 
 # How it works?
 
@@ -185,11 +186,10 @@ You should install the your cloud's SDK and configure it with your credentials. 
 
 ### AWS
 
-Install AWS CLI and [configure it](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) based on the IAM settings in your organization.
+Install AWS CLI and [configure it](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) based on the IAM settings in your organization. 
+If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
 
-```bash
-
-```
+You can pass
 
 #### Google Cloud
 
