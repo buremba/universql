@@ -113,7 +113,7 @@ By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.c
 
 `local`: If the query requires a running warehouse on Snowflake, fails the query. Otherwise runs the query locally.
 
-`snowflake`: Runs the queries directly on Snowflake, use it as a passthrough.
+`snowflake`: Runs the queries directly on Snowflake, use UniverSQL as a passthrough.
 
 # Limitations
 
@@ -124,6 +124,7 @@ Snowflake V1 API requires valid CA certificate, which is [not possible with self
 If you don't need to expose UniverSQL to public internet with a public tunnel service, UniverSQL ships SSL certificate of [http://localhost.universql.com]() domain in the binary, which has [DNS record to 127.0.0.1](https://mxtoolbox.com/SuperTool.aspx?action=a%3alocalhost.universql.com&run=toolpage). 
 It gives you free https connection to your local server and it's the default host. 
 
+> [!NOTE] 
 > Your data doesn't go through an external server with this approach as the DNS resolves to your localhost. Using `localhost.universql.com` will save you from the hassle of setting up a self-signed or CA-trusted certificates.
 > 
 > If you would like to use localhost (or `127.0.0.1`) directly, you can install [mkcert](https://github.com/FiloSottile/mkcert) to have a self-signed certificate for localhost and use `--ssl_keyfile` and `--ssl_certfile` options to pass the certificate and key files.
