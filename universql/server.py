@@ -65,7 +65,7 @@ async def login_request(request: Request) -> JSONResponse:
     except OAuthError as e:
         message = e.args[0]
 
-    logger.info(f"[{token}] Created local session for user {credentials.get('user')}")
+    logger.info(f"[{token}] Created local session for user {credentials.get('user')} from {request.client.host}:{request.client.port}")
     return JSONResponse(
         {
             "data":
@@ -74,10 +74,10 @@ async def login_request(request: Request) -> JSONResponse:
                     "masterToken": token,
                     "parameters": parameters,
                     "sessionInfo": {
-                        "databaseName": "MY_CUSTOM_APP",
-                        "schemaName": "PUBLIC",
-                        "warehouseName": "PC_DBT_WH",
-                        "roleName": "ACCOUNTADMIN"
+                        "databaseName": credentials.get('database'),
+                        "schemaName": credentials.get('schema'),
+                        "warehouseName": credentials.get('warehouse'),
+                        "roleName": credentials.get('role')
                     },
                     "idToken": None,
                     "idTokenValidityInSeconds": 0,
