@@ -7,6 +7,7 @@ import typing
 from pathlib import Path
 
 import click
+import pkg_resources
 import psutil
 import requests
 import uvicorn
@@ -22,7 +23,14 @@ DEFAULTS = {
     "max_cache_size": sizeof_fmt(psutil.disk_usage("./").free * 0.8)
 }
 
-@click.command("snowflake", epilog='Check out our docs at https://github.com/buremba/universql for more details')
+
+@click.group()
+@click.version_option(version=pkg_resources.get_distribution('universql').version)
+def cli():
+    pass
+
+
+@cli.command(epilog='Check out our docs at https://github.com/buremba/universql for more details')
 @click.option('--account',
               help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
               prompt='Account ID')
@@ -48,7 +56,7 @@ DEFAULTS = {
               type=str)
 @click.option('--max-cache-size', type=str, default=DEFAULTS["max_cache_size"],
               help='DuckDB max_temp_directory_size and total total (default: 80% of total memory)')
-def cli(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, **kwargs):
+def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, **kwargs):
     context__params = click.get_current_context().params
     params = {k: v for k, v in context__params.items() if
               v is not None and k not in ["host", "port"]}
@@ -66,7 +74,7 @@ def cli(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, **kwar
 
     adjective = "apparently" if auto_catalog_mode else ""
     logger.info(f"UniverSQL is starting reverse proxy for {account}.snowflakecomputing.com, "
-                 f"it's {adjective} a {context__params['catalog']} server. Happy compute!")
+                f"it's {adjective} a {context__params['catalog']} server. Happy compute!")
 
     if compute == Compute.AUTO.value:
         logger.info("The queries run on DuckDB and fallback to Snowflake if they fail.")
@@ -121,4 +129,4 @@ uvicorn_logger.addFilter(EndpointFilter(path="/queries/v1/query-request"))
 uvicorn_logger.addFilter(EndpointFilter(path="/session/v1/login-request"))
 
 if __name__ == '__main__':
-    cli()
+    cli(prog_name="universql")
