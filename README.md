@@ -18,7 +18,7 @@ Any SQL client that supports Snowflake, also supports UniverSQL.
   * You can connect UniverSQL using Snowflake Python Connector, Snowflake JDBC, ODBC or any other Snowflake client.
   * UniverSQL uses Snowflake Arrow integration to fetch the data from Snowflake and convert it to DuckDB relation.
 * [SQLGlot](https://sqlglot.com) for query translation from Snowflake to DuckDB,
-* [Snowflake Iceberg tables]() and Polaris as data catalog.
+* [Snowflake Iceberg tables]() and [Polaris]() as data catalog.
   * Polaris integration will be added once Snowflake supports managed Polaris for Iceberg tables.
 * Your local disk for the storage with direct access to data lakes (S3, GCS) for the cloud storage.
 * [DuckDB](https://duckdb.org) as local compute engine.
@@ -123,7 +123,7 @@ By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.c
 
 Snowflake V1 API requires valid CA certificate, which is [not possible with self-signed certificates](https://letsencrypt.org/docs/certificates-for-localhost/). 
 
-If you don't need to expose UniverSQL to public internet with a public tunnel service, UniverSQL ships SSL certificate of [http://localhostcomputing.com]() domain in the binary, which has [DNS record to 127.0.0.1](https://mxtoolbox.com/SuperTool.aspx?action=a%3alocalhostcomputing.com&run=toolpage). 
+If you don't need to expose UniverSQL to public internet with a public tunnel service, UniverSQL ships SSL certificate of [localhostcomputing.com](https://localhostcomputing.com) domain in the binary, which has [DNS record to 127.0.0.1](https://mxtoolbox.com/SuperTool.aspx?action=a%3alocalhostcomputing.com&run=toolpage). 
 It gives you free https connection to your local server and it's the default host. 
 
 > [!NOTE] 
