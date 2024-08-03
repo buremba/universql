@@ -1,4 +1,4 @@
-# `UniverSQL` Unofficial X-Duck Snowflake, multi-engine SQL proxy
+# `UniverSQL` Snowflake + DuckDB, multi-engine SQL proxy
 
 UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and Polaris catalog, using DuckDB. You can join Snowflake data with your local datasets, **without any need for a running warehouse**.
 
@@ -7,10 +7,6 @@ Any SQL client that supports Snowflake, also supports UniverSQL.
 
 > [!WARNING]  
 > UniverSQL is in early development stage and actively being developed. If you run into any problem running UniverSQL, please [create an issue on Github](https://github.com/buremba/universql/issues/new).
-
-> Your Snowflake account is single source of truth and the local queries are real-only data downloaded from your cloud storage, linked with Snowflake. 
-> We use your local credentials for cloud storage so [make sure you configure the cloud SDKs](#install-data-lake-sdks).
-> UniverSQL doesn't support writing data to Snowflake and designed to be complementary to Snowflake.
 
 # How it works?
 
@@ -61,6 +57,10 @@ The subsequent queries (hot run) on the same table will be served from the cache
 The same data is never downloaded more than once.
 Iceberg supports predicate pushdown, which helps with partitioned tables to reduce the amount of data downloaded for partitioned tables.
 
+# Governance
+
+UniverSQL relies on Snowflake for access control and 
+
 # Getting Started
 
 Install UniverSQL from PyPI as follows:
@@ -89,29 +89,39 @@ Options:
 
 ```
 
-## Install data lake SDKs
+## Access to Data Lake
 
-UniverSQL uses the native cloud SDKs to download the data from your data lake. You should install the your cloud's SDK and configure it with your credentials.
+### Polaris
 
-### AWS
+Polaris Catalog is a managed Iceberg table catalog that is available in Snowflake.
+It manages access credentials to data lake and the metadata of the Iceberg tables.
+If your Snowflake account (`snowflake --account`) is a Polaris Catalog, UniverSQL will use PyIceberg to fetch data from your data lake and map them as Arrow tables in DuckDB.
+
+
+### Snowflake
+
+Since Snowflake doesn't provide direct access to data lake, UniverSQL uses your local credentials for cloud storage so [make sure you configure the cloud SDKs](#install-data-lake-sdks).
+You should install the your cloud's SDK and configure it with your credentials.
+
+#### AWS
 
 [Install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and [configure](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) AWS CLI.
 If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
 By default, UniverSQL uses your default AWS profile, you can pass `--aws-profile` option to `universql` to use a different profile than the default profile.
 
-#### Google Cloud
+##### Google Cloud
 
 [Install](https://cloud.google.com/sdk/docs/initializing) and [configure](https://cloud.google.com/sdk/docs/authorizing) Google Cloud SDK. You can use `gcloud auth application-default login` to login with your Google Cloud account.
 By default, UniverSQL uses your default GCP account attached to `gcloud`, you can pass `--gcp-account` option to `universql` to use a different profile than the default account.
 
-#### Azure
+##### Azure
 
 [Install](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) and [configure](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli-interactively) Azure CLI.
 By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.com/en-us/cli/azure/manage-azure-subscriptions-azure-cli?tabs=bash#change-the-active-tenant) attached to `az`, you can pass `--azure-tenant` option to `universql` to use a different profile than the default account.
 
 ## Compute Strategies
 
-`hybrid` (default): Runs the queries locally if they're `SELECT` queries and can be transpiled into DuckDB query. Otherwise runs queries on Snowflake.
+`auto` (default): Runs the queries locally if they're `SELECT` queries and can be transpiled into DuckDB query. Otherwise runs queries on Snowflake.
 
 `local`: If the query requires a running warehouse on Snowflake, fails the query. Otherwise runs the query locally.
 
@@ -135,7 +145,7 @@ It gives you free https connection to your local server and it's the default hos
 For Catalog, [Snowflake](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-snowflake) and [Object Store](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-iceberg-files) catalogs are supported at the moment.
 For Data lake, S3 and GCS supported.
 
-## Can't query all Snowflake types
+## Can't query all Snowflake types locally
 
 Here is a Markdown table of some Snowflake data types with a "Supported" column. The checkbox indicates whether the type is supported or not. Please replace the checkboxes with the correct values according to your project's support for each data type.
 
@@ -169,7 +179,7 @@ Here is a Markdown table of some Snowflake data types with a "Supported" column.
 
 ¹: No Support in DuckDB yet.
 
-## Can't query native Snowflake tables
+## Can't query native Snowflake tables locally
 
 UniverSQL doesn't support querying native Snowflake tables as they're not accessible from outside of Snowflake. If you try to query a Snowflake table directly, it will return an error.
 
