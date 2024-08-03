@@ -14,11 +14,9 @@ Any SQL client that supports Snowflake, also supports UniverSQL.
   * You can connect UniverSQL using Snowflake Python Connector, Snowflake JDBC, ODBC or any other Snowflake client.
   * UniverSQL uses Snowflake Arrow integration to fetch the data from Snowflake and convert it to DuckDB relation.
 * [SQLGlot](https://sqlglot.com) for query translation from Snowflake to DuckDB,
-* [Snowflake Iceberg tables]() and [Polaris]() as data catalog.
-  * Polaris integration will be added once Snowflake supports managed Polaris for Iceberg tables.
+* [Snowflake Iceberg tables](https://docs.snowflake.com/en/user-guide/tables-iceberg) and [Polaris](https://other-docs.snowflake.com/en/polaris/overview) as data catalog, depending on `--account' you proxy to.
 * Your local disk for the storage with direct access to data lakes (S3, GCS) for the cloud storage.
 * [DuckDB](https://duckdb.org) as local compute engine.
-
 
 When you query an Iceberg table on Snowflake for the first time, UniverSQL looks up Iceberg metadata from Snowflake, (metadata operation, no compute cost) re-writes the query for DuckDB dialect, 
 sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) that connects to your data lake with [your cloud credentials](#install-data-lake-sdks) and caches the Parquet files and executes the query on DuckDB.
@@ -72,11 +70,11 @@ pip install universql
 You can start Universql with the passing your account identifier:
 
 ```bash
-universql --account-url lt51601.europe-west2.gcp
+universql snowflake --account-url lt51601.europe-west2.gcp
 ```
 
 ```
-> universql --help
+> universql snowflake --help
 Usage: universql [OPTIONS]
 
 Options:
