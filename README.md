@@ -101,7 +101,7 @@ If your Snowflake account (`snowflake --account`) is a Polaris Catalog, UniverSQ
 Since Snowflake doesn't provide direct access to data lake, UniverSQL uses your local credentials for cloud storage so [make sure you configure the cloud SDKs](#install-data-lake-sdks).
 You should install the your cloud's SDK and configure it with your credentials.
 
-##### AWS
+###### AWS
 
 [Install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and [configure](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) AWS CLI.
 If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
