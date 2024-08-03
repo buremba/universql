@@ -1,0 +1,40 @@
+[tool.poetry]
+name = "universql"
+version = "0.1.0"
+description = ""
+authors = ["Burak Kabakcı <emrekabakci@gmail.com>"]
+readme = "README.md"
+license = "Apache 2.0"
+keywords = ["dbt", "server", "streamlit", "git", "refine", "data-app", "snowflake"]
+documentation = "https://github.com/jinjat-data/jinjat"
+repository = "https://github.com/jinjat-data/jinjat"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+duckdb = "1.0.0"
+fastapi = "^0.111.0"
+uvicorn = "^0.30.1"
+snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], version = "^3.11.0"}
+eval-type-backport = "^0.2.0"
+pip-system-certs = "^4.0"
+sqlglot = {extras = ["rs"], version = "^25.5.1"}
+chdb = "^1.4.1"
+fsspec = "^2024.6.1"
+gcsfs = "^2024.6.1"
+click = ">7"
+acryl-datahub = "^0.13.3.4"
+s3fs = "^2024.6.1"
+textual = "^0.74.0"
+pyiceberg = "^0.7.0"
+sqlalchemy = "^2.0.31"
+fastapi-utils = "^0.7.0"
+
+[tool.poetry.dev-dependencies]
+pylint = ">=2.11.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+universql = 'universql.main:cli'

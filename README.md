@@ -1,12 +1,12 @@
-# `UniverSQL` X-Duck warehouse for your Snowflake
+# `UniverSQL` Unofficial X-Duck Snowflake, multi-engine SQL proxy
+
+UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and Polaris catalog, using DuckDB. You can join Snowflake data with your local datasets, **without any need for a running warehouse**.
+
+Your `SELECT` queries are transpiled to DuckDB and run locally on your computer, with a fallback option to execute them directly on your Snowflake account.
+Any SQL client that supports Snowflake, also supports UniverSQL.
 
 > [!WARNING]  
 > UniverSQL is in early development stage and actively being developed. If you run into any problem running UniverSQL, please [create an issue on Github](https://github.com/buremba/universql/issues/new).
-
-UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and joining them with your local datasets, **without any need for a running warehouse**.
-
-Your `SELECT` queries are transpiled to DuckDB and run locally on your computer, while other queries are executed on your Snowflake account.
-Once you start proxy server locally, you can connect to UniverSQL from any SQL client that supports Snowflake.
 
 > Your Snowflake account is single source of truth and the local queries are real-only data downloaded from your cloud storage, linked with Snowflake. 
 > We use your local credentials for cloud storage so [make sure you configure the cloud SDKs](#install-data-lake-sdks).
@@ -18,9 +18,9 @@ Once you start proxy server locally, you can connect to UniverSQL from any SQL c
   * You can connect UniverSQL using Snowflake Python Connector, Snowflake JDBC, ODBC or any other Snowflake client.
   * UniverSQL uses Snowflake Arrow integration to fetch the data from Snowflake and convert it to DuckDB relation.
 * [SQLGlot](https://sqlglot.com) for query translation from Snowflake to DuckDB,
-* [Snowflake Iceberg tables]() for the data catalog.
-  * Polaris integration will be added in the future once it's released.
-* Your local disk for the storage with direct access to data lakes such as [S3](), [GCS](), [Azure Blob]() for the cloud storage.
+* [Snowflake Iceberg tables]() and Polaris as data catalog.
+  * Polaris integration will be added once Snowflake supports managed Polaris for Iceberg tables.
+* Your local disk for the storage with direct access to data lakes (S3, GCS) for the cloud storage.
 * [DuckDB](https://duckdb.org) as local compute engine.
 
 
@@ -30,10 +30,12 @@ sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) tha
 # Use Cases
 
 * Smart caching for your Snowflake queries, reducing the compute costs.
-  * Snowflake's caching is limited
+  * Snowflake's caching is limited and even small changes in the query will result in an active warehouse. UniverSQL caches the SQL AST locally and re-uses the cache across multiple runs.
 * Query local files without any need to upload them to Snowflake and join them with remote Snowflake tables, downloading the data from data lake.
 * Query Snowflake Iceberg tables without any need to run a warehouse, using your local computer's resources.
 * Develop end-user facing applications on top Snowflake without worrying about the costs.
+* Snowflake API on top of your Polaris Catalog.
+  * You can run cross-cloud queries with UniverSQL, Polaris handles the 
 
 ### Cost
 
@@ -99,7 +101,7 @@ By default, UniverSQL uses your default AWS profile, you can pass `--aws-profile
 
 #### Google Cloud
 
-[Install](https://cloud.google.com/sdk/docs/initializing) and [configure](https://cloud.google.com/sdk/docs/authorizing) Google Cloud SDK.
+[Install](https://cloud.google.com/sdk/docs/initializing) and [configure](https://cloud.google.com/sdk/docs/authorizing) Google Cloud SDK. You can use `gcloud auth application-default login` to login with your Google Cloud account.
 By default, UniverSQL uses your default GCP account attached to `gcloud`, you can pass `--gcp-account` option to `universql` to use a different profile than the default account.
 
 #### Azure
@@ -121,16 +123,17 @@ By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.c
 
 Snowflake V1 API requires valid CA certificate, which is [not possible with self-signed certificates](https://letsencrypt.org/docs/certificates-for-localhost/). 
 
-If you don't need to expose UniverSQL to public internet with a public tunnel service, UniverSQL ships SSL certificate of [http://localhost.universql.com]() domain in the binary, which has [DNS record to 127.0.0.1](https://mxtoolbox.com/SuperTool.aspx?action=a%3alocalhost.universql.com&run=toolpage). 
+If you don't need to expose UniverSQL to public internet with a public tunnel service, UniverSQL ships SSL certificate of [http://localhostcomputing.com]() domain in the binary, which has [DNS record to 127.0.0.1](https://mxtoolbox.com/SuperTool.aspx?action=a%3alocalhostcomputing.com&run=toolpage). 
 It gives you free https connection to your local server and it's the default host. 
 
 > [!NOTE] 
-> Your data doesn't go through an external server with this approach as the DNS resolves to your localhost. Using `localhost.universql.com` will save you from the hassle of setting up a self-signed or CA-trusted certificates.
+> Your data doesn't go through an external server with this approach as the DNS resolves to your localhost. Using `localhostcomputing.com` will save you from the hassle of setting up a self-signed or CA-trusted certificates.
 > 
 > If you would like to use localhost (or `127.0.0.1`) directly, you can install [mkcert](https://github.com/FiloSottile/mkcert) to have a self-signed certificate for localhost and use `--ssl_keyfile` and `--ssl_certfile` options to pass the certificate and key files.
 
-## Glue catalog is not supported yet
-UniverSQL only supports [Snowflake](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-snowflake) and [Object Store](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-iceberg-files) catalogs at the moment.
+## Glue catalog and Azure storage are not supported yet
+For Catalog, [Snowflake](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-snowflake) and [Object Store](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-iceberg-files) catalogs are supported at the moment.
+For Data lake, S3 and GCS supported.
 
 ## Can't query all Snowflake types
 
