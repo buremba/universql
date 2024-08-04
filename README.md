@@ -143,40 +143,6 @@ It gives you free https connection to your local server and it's the default hos
 For Catalog, [Snowflake](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-snowflake) and [Object Store](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-iceberg-files) catalogs are supported at the moment.
 For Data lake, S3 and GCS supported.
 
-## Can't query all Snowflake types locally
-
-Here is a Markdown table of some Snowflake data types with a "Supported" column. The checkbox indicates whether the type is supported or not. Please replace the checkboxes with the correct values according to your project's support for each data type.
-
-| Snowflake Data Type | Supported                      |
-| --- |--------------------------------|
-| NUMBER | &check;                        |
-| DECIMAL | &check;                        |
-| INT | &check;                        |
-| BIGINT | &check;                        |
-| SMALLINT | &check;                        |
-| TINYINT | &check;                        |
-| FLOAT | &check;                        |
-| DOUBLE | &check;                        |
-| VARCHAR | &check;                        |
-| CHAR | &check;                        |
-| STRING | &check;                        |
-| TEXT | &check;                        |
-| BOOLEAN | &check;                        |
-| DATE | &check;                        |
-| DATETIME | &check;                        |
-| TIME | &check;                        |
-| TIMESTAMP | &check;                        |
-| TIMESTAMP_LTZ | &cross; ¹                       |
-| TIMESTAMP_NTZ | &cross; ¹ |
-| TIMESTAMP_TZ | &cross;¹                       |
-| VARIANT | &check;                     |
-| OBJECT | &check;                          |
-| ARRAY | &check;                           |
-| GEOGRAPHY | &cross; ¹                         |
-| VECTOR | &cross; ¹                          |
-
-¹: No Support in DuckDB yet.
-
 ## Can't query native Snowflake tables locally
 
 UniverSQL doesn't support querying native Snowflake tables as they're not accessible from outside of Snowflake. If you try to query a Snowflake table directly, it will return an error.

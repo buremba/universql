@@ -60,7 +60,7 @@ async def login_request(request: Request) -> JSONResponse:
     token = str(uuid4())
     message = None
     try:
-        session = UniverSQLSession(token, credentials, login_data.get("SESSION_PARAMETERS"))
+        session = UniverSQLSession(current_context, token, credentials, login_data.get("SESSION_PARAMETERS"))
         sessions[session.token] = session
     except OAuthError as e:
         message = e.args[0]

@@ -66,10 +66,6 @@ parameters = [
         "value": False
     },
     {
-        "name": "ENABLE_STAGE_S3_PRIVATELINK_FOR_US_EAST_1",
-        "value": False
-    },
-    {
         "name": "TIMESTAMP_NTZ_OUTPUT_FORMAT",
         "value": "YYYY-MM-DD HH24:MI:SS.FF3"
     },

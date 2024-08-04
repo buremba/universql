@@ -9,6 +9,7 @@ jobs:
   pip:
     name: Release PyPI
     runs-on: ubuntu-latest
+    environment: deploy
     steps:
       - name: Check out the repository
         uses: actions/checkout@v3

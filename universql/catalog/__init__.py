@@ -6,7 +6,6 @@ import sqlglot
 from snowflake.connector.options import pyarrow
 
 from universql import util
-from universql.lake.cloud import CACHE_DIRECTORY_KEY
 from universql.util import Catalog
 
 
@@ -25,7 +24,7 @@ def get_catalog(context: dict, query_id: str, credentials: dict):
 
 class Cursor(ABC):
     @abstractmethod
-    def execute(self, ast: sqlglot.exp.Expression) -> None:
+    def execute(self, ast: typing.Optional[sqlglot.exp.Expression], raw_query : str) -> None:
         pass
 
     @abstractmethod

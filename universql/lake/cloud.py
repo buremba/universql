@@ -49,8 +49,3 @@ def get_iceberg_table_from_data_lake(metadata_file_path: str, cache_directory):
         CACHE_DIRECTORY_KEY: cache_directory,
     })
     return from_metadata
-
-
-def register_data_lake(duckdb: DuckDBPyConnection, args: dict):
-    duckdb.register_filesystem(s3(args.get('cache_directory'), args.get('aws_profile')))
-    duckdb.register_filesystem(gcs(args.get('cache_directory'), args.get('gcp_project')))

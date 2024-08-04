@@ -104,3 +104,4 @@ celerybeat.pid
 .clickhouse/*
 .DS_STORE
 .certs/*
+.rill/*
