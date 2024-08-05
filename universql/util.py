@@ -4,7 +4,8 @@ import json
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, List
+from pathlib import Path
+from typing import Any, List, Tuple
 
 import humanize
 from pyarrow import Schema
@@ -326,9 +327,27 @@ def prepend_to_lines(input_string, prepend_string=" ", vertical_string='------')
     return modified_string + '\n' + vertical_string
 
 
-def print_dict_as_markdown_table(input_dict, footer_message : str, column_width=(8, 80)):
+def print_dict_as_markdown_table(input_dict, footer_message: Tuple[str], column_width=(8, 80)):
     top_bottom_line = "─" * (87 + 8)
     result = top_bottom_line
     for key, value in input_dict.items():
         result += f"\n│ {str(key).ljust(column_width[0])} │ {str(value).ljust(column_width[1])} │"
-    return result + '\n' + top_bottom_line + "\n│ " + footer_message.ljust(92) + '│\n' + top_bottom_line
+
+    footer = '\n' + top_bottom_line + '\n' + '\n'.join(
+        ["│ " + message.ljust(92) + '│' for message in footer_message]) + '\n'
+    return result + footer + top_bottom_line
+
+
+def time_me(func):
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        original_return_val = func(*args, **kwargs)
+        end = time.perf_counter()
+        print("time elapsed in ", func.__name__, ": ", end - start, sep='')
+        return original_return_val
+
+    return wrapper
+
+
+def get_total_directory_size(directory: str):
+    return sum(f.stat().st_size for f in Path(directory).glob('**/*') if f.is_file())

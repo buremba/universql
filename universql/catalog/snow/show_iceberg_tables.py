@@ -183,7 +183,10 @@ class SnowflakeShowIcebergTables(IcebergCatalog):
     def __init__(self, account: str, query_id: str, credentials: dict):
         super().__init__(query_id, credentials)
         self.databases = {}
-        self.connection = snowflake.connector.connect(**credentials, account=account)
+        try:
+            self.connection = snowflake.connector.connect(**credentials, account=account)
+        except DatabaseError as e:
+            raise SnowflakeError(self.query_id, e.msg, e.sqlstate)
 
     def cursor(self) -> Cursor:
         return SnowflakeIcebergCursor(self.query_id, self.connection.cursor())

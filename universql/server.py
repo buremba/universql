@@ -13,14 +13,14 @@ from uuid import uuid4
 import click
 import psutil
 import pyarrow as pa
+import yaml
 
 from fastapi import FastAPI
-from pyiceberg.exceptions import OAuthError
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from universql.lake.fsspec_util import pprint_disk_usage
+from universql.lake.fsspec_util import get_friendly_disk_usage
 from universql.util import unpack_request_body, session_from_request, SnowflakeError, parameters, \
     print_dict_as_markdown_table
 from fastapi.encoders import jsonable_encoder
@@ -62,11 +62,18 @@ async def login_request(request: Request) -> JSONResponse:
     try:
         session = UniverSQLSession(current_context, token, credentials, login_data.get("SESSION_PARAMETERS"))
         sessions[session.token] = session
-    except OAuthError as e:
-        message = e.args[0]
+    except SnowflakeError as e:
+        message = e.message
 
-    logger.info(
-        f"[{token}] Created local session for user {credentials.get('user')} from {request.client.host}:{request.client.port}")
+    client = f"{request.client.host}:{request.client.port}"
+
+    if message is None:
+        logger.info(
+            f"[{token}] Created local session for user {credentials.get('user')} from {client}")
+    else:
+        logger.error(
+            f"Rejected login request from {client} for user {credentials.get('user')}. Reason: {message}")
+
     return JSONResponse(
         {
             "data":
@@ -111,6 +118,7 @@ async def delete_session(request: Request):
                 return JSONResponse({"success": True})
 
         del sessions[session.token]
+        logger.info(f"[{session.token}] Session closed, cleaning up resources.")
         session.close()
         return JSONResponse({"success": True})
     return Response(status_code=404)
@@ -181,7 +189,7 @@ async def query_request(request: Request) -> JSONResponse:
 
 @app.get("/")
 async def home(request: Request) -> JSONResponse:
-    return JSONResponse({"success": True})
+    return JSONResponse({"success": True, "status": "X-Duck is ducking 🐥"})
 
 
 @app.get("/monitoring/queries/{query_id:str}")  # type: ignore[arg-type]
@@ -193,16 +201,20 @@ async def query_monitoring_query(self, request: Request) -> JSONResponse:
     return JSONResponse({"data": {"queries": [{"status": "SUCCESS"}]}, "success": True})
 
 
+ENABLE_DEBUG_WATCH_TOWER = False
+WATCH_TOWER_SCHEDULE_SECONDS = 3
+
+
 def watch_tower(cache_directory, **kwargs):
     while True:
-        time.sleep(3)
+        time.sleep(WATCH_TOWER_SCHEDULE_SECONDS)
         processing_sessions = sum(session.processing for token, session in sessions.items())
-        if processing_sessions > 0:
+        if ENABLE_DEBUG_WATCH_TOWER or processing_sessions > 0:
             process = psutil.Process()
             percent = psutil.cpu_percent()
             cpu_percent = "%.1f" % percent
             memory_percent = "%.1f" % process.memory_percent()
-            disk_info = pprint_disk_usage(cache_directory)
+            disk_info = get_friendly_disk_usage(cache_directory)
             logger.info(f"[CPU: {cpu_percent}%] [Memory: {memory_percent}%] [Disk: {disk_info}] "
                         f"Currently {len(sessions)} sessions running {processing_sessions} queries. ")
 
@@ -239,7 +251,13 @@ async def startup_event():
         "Python": f"snowflake.connector.connect(host='{current_context.get('host')}', port='{current_context.get('port')}')",
         "PHP": f"new PDO('snowflake:host={host_port}', '<user>', '<password>')",
         "Go": f"sql.Open('snowflake', 'user:pass@{host_port}/dbname')",
-        ".NET": f"host=;{host_port};db=testdb",
+        ".NET": f"host={host_port};db=testdb",
         "ODBC": f"Server={current_context.get('host')}; Database=dbname; Port={current_context.get('port')}",
     }
-    click.secho(print_dict_as_markdown_table(connections, footer_message=f"For other clients and applications, see https://github.com/buremba/universql",))
+    params = {k: v for k, v in current_context.items() if
+              v is not None and k not in ["host", "port"]}
+    click.secho(yaml.dump(params).strip())
+    click.secho(print_dict_as_markdown_table(connections,
+                                             footer_message=(
+                                                 "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
+                                                 "For application support, see https://github.com/buremba/universql",)))

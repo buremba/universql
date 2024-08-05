@@ -5,7 +5,7 @@ You can join Snowflake data with your local datasets, **without any need for a r
 UniverSQL relies on Snowflake and Polaris for access control and data catalog so it's complementary to your Snowflake workloads.  
 
 > [!WARNING]  
-> Any SQL client that supports Snowflake, also supports UniverSQL but we need to support Snowflake's API to support compatibility. If you run into any problem with a client, please [create an issue on Github](https://github.com/buremba/universql/issues/new).
+> Any SQL client that supports Snowflake, also supports UniverSQL as we implement Snowflake's API to support compatibility. If you run into any issue using an app or client, feel free to [create a discussion](https://github.com/buremba/universql/discussions/categories/quality-testing). 
 
 # How it works?
 
@@ -54,19 +54,51 @@ Iceberg supports predicate pushdown, which helps with partitioned tables to redu
 
 # Getting Started
 
-Install UniverSQL from PyPI as follows:
+Install UniverSQL as a Python package:
 
 ```bash
-pip install universql
+python3 -m pip install universql
 ```
 
-You can start Universql with the passing your account identifier:
+## Using virtual environments
+
+We recommend using virtual environments (venv) to namespace pip modules. Create a new venv as follows:
 
 ```bash
-universql snowflake --account-url lt51601.europe-west2.gcp
+python -m venv universql-env              # create the environment
+```
+
+Activate that same virtual environment each time you create a shell window or session:
+
+```
+source universql-env/bin/activate         # activate the environment for Mac and Linux OR
+universql-env\Scripts\activate            # activate the environment for Windows
+```
+
+Alternatively, pull the Docker image: (recommended for running in background)
+
+```bash
+docker pull buremba/universql
+```
+
+And then:
+
+```bash
+universql 
+  --network=host \
+  --mount type=bind,source=,target=/usr/app \
+    snowflake --account-url lt51601.europe-west2.gcp
+```
+
+For Docker:
+
+```bash
+docker run buremba/universql snowflake --account eq06461.eu-west-2.aws
 ```
 
 ```
+> universql snowflake --help
+
 Usage: universql snowflake [OPTIONS]
 
 Options:
@@ -96,7 +128,7 @@ Options:
   --max-memory TEXT               DuckDB Max memory to use for the server
                                   (default: 80% of total memory)
   --cache-directory TEXT          Data lake cache directory (default:
-                                  /Users/bkabak/.universql/cache)
+                                  ~/.universql/cache)
   --max-cache-size TEXT           DuckDB maximum cache used in local disk
                                   (default: 80% of total available disk)
   --help                          Show this message and exit.

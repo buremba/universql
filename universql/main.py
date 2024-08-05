@@ -59,8 +59,6 @@ def cli():
               help='DuckDB maximum cache used in local disk (default: 80% of total available disk)')
 def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, **kwargs):
     context__params = click.get_current_context().params
-    params = {k: v for k, v in context__params.items() if
-              v is not None and k not in ["host", "port"]}
     auto_catalog_mode = catalog is None
     if auto_catalog_mode:
         try:
@@ -82,16 +80,14 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
 
     adjective = "apparently" if auto_catalog_mode else ""
     logger.info(f"UniverSQL is starting reverse proxy for {account}.snowflakecomputing.com, "
-                f"it's {adjective} a {context__params['catalog']} server. Happy compute!")
+                f"it's {adjective} a {context__params['catalog']} server.")
 
     if compute == Compute.AUTO.value:
-        logger.info("The queries run on DuckDB and fallback to Snowflake if they fail.")
+        logger.info("The queries will run on DuckDB and fallback to Snowflake if they fail.")
     elif compute == Compute.LOCAL.value:
         logger.info("The queries will run locally")
     elif compute == Compute.SNOWFLAKE.value:
         logger.info("The queries will run directly on Snowflake")
-
-    click.secho(yaml.dump(params).strip())
 
     if not ssl_keyfile or not ssl_certfile:
         data = socket.gethostbyname_ex("localhostcomputing.com")
@@ -132,6 +128,7 @@ class EndpointFilter(logging.Filter):
 
 uvicorn_logger = logging.getLogger("uvicorn.access")
 uvicorn_logger.addFilter(EndpointFilter(path="/session/heartbeat"))
+uvicorn_logger.addFilter(EndpointFilter(path="/session/delete"))
 uvicorn_logger.addFilter(EndpointFilter(path="/telemetry/send"))
 uvicorn_logger.addFilter(EndpointFilter(path="/queries/v1/query-request"))
 uvicorn_logger.addFilter(EndpointFilter(path="/session/v1/login-request"))

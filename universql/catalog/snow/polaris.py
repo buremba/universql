@@ -5,7 +5,7 @@ import duckdb
 import pyiceberg
 import sqlglot
 from pyiceberg.catalog import load_catalog
-from pyiceberg.exceptions import NoSuchTableError
+from pyiceberg.exceptions import NoSuchTableError, OAuthError
 from pyiceberg.io import PY_IO_IMPL
 from pyiceberg.typedef import Identifier
 from snowflake.connector.options import pyarrow
@@ -45,7 +45,10 @@ class PolarisCatalog(IcebergCatalog):
             "warehouse": current_database,
             "scope": "PRINCIPAL_ROLE:ALL"
         }
-        self.rest_catalog = load_catalog(None, **iceberg_rest_credentials)
+        try:
+            self.rest_catalog = load_catalog(None, **iceberg_rest_credentials)
+        except OAuthError as e:
+            raise SnowflakeError(self.query_id, e.args[0])
         self.rest_catalog.properties[CACHE_DIRECTORY_KEY] = cache_directory
         self.rest_catalog.properties[PY_IO_IMPL] = "universql.lake.cloud.iceberg"
 

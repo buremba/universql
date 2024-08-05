@@ -1,12 +1,22 @@
 import time
+from pathlib import Path
+
+import psutil
 import pyarrow as pa
 
 import duckdb
 import sqlglot
-from fakesnow.fakes import FakeSnowflakeCursor, FakeSnowflakeConnection
 
+from universql.util import time_me
 from universql.warehouse.duckdb import fix_snowflake_to_duckdb_types
 
+cache = "/Users/bkabak/.universql/cache"
+@time_me
+def test_cache_size():
+    print(sum(f.stat().st_size for f in Path(cache).glob('**/*') if f.is_file()))
+
+test_cache_size()
+test_cache_size()
 # queries = sqlglot.parse("""
 # SET tables = (SHOW TABLES);
 #
@@ -28,7 +38,8 @@ fields = [
     pa.field("timezone", nullable=False, type=pa.int32()),
 ]
 pa_type = pa.struct(fields)
-pa.StructArray.from_arrays(arrays=[pa.array([1, 2, 3], type=pa.int64()), pa.array([1, 2, 3], type=pa.int32()), pa.array([1, 2, 3], type=pa.int32())], fields=fields)
+pa.StructArray.from_arrays(arrays=[pa.array([1, 2, 3], type=pa.int64()), pa.array([1, 2, 3], type=pa.int32()),
+                                   pa.array([1, 2, 3], type=pa.int32())], fields=fields)
 
 query = """
 SELECT

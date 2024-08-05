@@ -8,6 +8,8 @@ import psutil
 from fsspec.implementations.cache_mapper import AbstractCacheMapper
 from fsspec.implementations.cached import SimpleCacheFileSystem
 
+from universql.util import get_total_directory_size
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fsspec")
 
@@ -62,13 +64,14 @@ last_free = None
 first_free = None
 
 
-def pprint_disk_usage(storage: str) -> str:
+def get_friendly_disk_usage(storage: str) -> str:
     global last_free
     global first_free
     usage = psutil.disk_usage(storage)
     if first_free is None:
         first_free = usage.free
-    message = f"(free {sizeof_fmt(usage.free)} {int(100 - usage.percent)}%)"
+    current_usage = get_total_directory_size(storage)
+    message = f"(usage {sizeof_fmt(current_usage)} free {sizeof_fmt(usage.free)} {int(100 - usage.percent)}%)"
     if last_free is not None:
         downloaded_recently = last_free - usage.free
         if downloaded_recently > 10_000_000:
