@@ -70,6 +70,7 @@ class UniverSQLSession:
         if views:
             self.duckdb.execute(views_sql)
             logger.info(f"[{self.token}] Creating views for Iceberg tables: \n{views_sql}")
+
         def replace_icebergs_with_duckdb_reference(
                 expression: sqlglot.exp.Expression) -> sqlglot.exp.Expression:
             if isinstance(expression, sqlglot.exp.Table):
@@ -87,6 +88,7 @@ class UniverSQLSession:
     def _do_query(self, raw_query: str) -> (str, List, pyarrow.Table):
         start_time = time.perf_counter()
         compute = self.context.get('compute')
+        catalog = self.context.get('catalog')
         local_error_message = ""
 
         try:
@@ -101,7 +103,7 @@ class UniverSQLSession:
 
         if can_run_locally and should_run_locally:
             for ast in queries:
-                if ast.key in queries_that_doesnt_need_warehouse:
+                if ast.key in queries_that_doesnt_need_warehouse and catalog == Catalog.SNOWFLAKE.value:
                     self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
                     run_snowflake_already = True
                 else:
@@ -123,10 +125,10 @@ class UniverSQLSession:
                         can_run_locally = False
                         break
 
-        catalog = self.context.get('catalog')
-        if compute == Compute.LOCAL.value or catalog == Catalog.POLARIS.value:
-            raise SnowflakeError(self.token, f"Can't run the query locally, {local_error_message}")
-
+        if compute == Compute.LOCAL.value:
+            if not should_run_locally:
+                raise SnowflakeError(self.token, f"Can't run the query locally, {local_error_message}")
+            return self.get_snowflake_result()
         if can_run_locally and not run_snowflake_already and should_run_locally:
             formatting = (self.token, datetime.timedelta(seconds=time.perf_counter() - start_time))
             logger.info(f"[{self.token}] Run locally 🚀 ({formatting})")
@@ -134,7 +136,6 @@ class UniverSQLSession:
         else:
             self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
             return self.get_snowflake_result()
-
 
     def do_snowflake_query(self, queries, raw_query, start_time, local_error_message):
         try:
@@ -167,7 +168,7 @@ class UniverSQLSession:
         value = arrow_table[idx]
 
         if field_type == 'NUMBER':
-            pa_type = pa.decimal128(getattr(value.type, 'precision', 38) , getattr(value.type, 'scale', 0))
+            pa_type = pa.decimal128(getattr(value.type, 'precision', 38), getattr(value.type, 'scale', 0))
             value = value.cast(pa_type)
             metadata["logicalType"] = "FIXED"
             metadata["precision"] = "1"
