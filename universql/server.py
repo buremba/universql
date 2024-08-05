@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import signal
-import time
+import threading
 from threading import Thread
 from uuid import uuid4
 
@@ -201,13 +201,16 @@ async def query_monitoring_query(self, request: Request) -> JSONResponse:
     return JSONResponse({"data": {"queries": [{"status": "SUCCESS"}]}, "success": True})
 
 
-ENABLE_DEBUG_WATCH_TOWER = False
+ENABLE_DEBUG_WATCH_TOWER = True
 WATCH_TOWER_SCHEDULE_SECONDS = 3
+kill_event = threading.Event()
 
 
 def watch_tower(cache_directory, **kwargs):
     while True:
-        time.sleep(WATCH_TOWER_SCHEDULE_SECONDS)
+        kill_event.wait(timeout=WATCH_TOWER_SCHEDULE_SECONDS)
+        if kill_event.is_set():
+            break
         processing_sessions = sum(session.processing for token, session in sessions.items())
         if ENABLE_DEBUG_WATCH_TOWER or processing_sessions > 0:
             process = psutil.Process()
@@ -215,35 +218,44 @@ def watch_tower(cache_directory, **kwargs):
             cpu_percent = "%.1f" % percent
             memory_percent = "%.1f" % process.memory_percent()
             disk_info = get_friendly_disk_usage(cache_directory)
-            logger.info(f"[CPU: {cpu_percent}%] [Memory: {memory_percent}%] [Disk: {disk_info}] "
+            logger.info(f"System: [CPU: {cpu_percent}%] [Memory: {memory_percent}%] [Disk: {disk_info}] "
                         f"Currently {len(sessions)} sessions running {processing_sessions} queries. ")
 
 
 thread = Thread(target=watch_tower, kwargs=(current_context))
+thread.daemon = False
 thread.start()
 
 
-def harakiri(_, frame):
-    os.kill(os.getpid(), signal.SIGTERM)
+# If the user intends to kill the server, not wait for DuckDB to gracefully shutdown.
+# It's nice to treat the Duck better giving it time but user's time is more valuable than the duck's.
+def harakiri(sig, frame):
+    print("Killing the server, bye!")
+    kill_event.set()
+    os.kill(os.getpid(), signal.SIGKILL)
 
 
-last_intent_to_kill = time.time()
+# last_intent_to_kill = time.time()
+# def graceful_shutdown(_, frame):
+#     global last_intent_to_kill
+#     processing_sessions = sum(session.processing for token, session in sessions.items())
+#     if processing_sessions == 0 or (time.time() - last_intent_to_kill) < 5000:
+#         harakiri(signal, frame)
+#     else:
+#         print(f'Repeat sigint to confirm killing {processing_sessions} running queries.')
+#         last_intent_to_kill = time.time()
 
-
-def graceful_shutdown(_, frame):
-    global last_intent_to_kill
-    processing_sessions = sum(session.processing for token, session in sessions.items())
-    if processing_sessions == 0 or (time.time() - last_intent_to_kill) < 5000:
-        harakiri(signal, frame)
-    else:
-        print(f'Repeat sigint to confirm killing {processing_sessions} running queries.')
-        last_intent_to_kill = time.time()
+@app.on_event("shutdown")
+async def startup_event():
+    kill_event.set()
+    for token, session in sessions.items():
+        session.close()
+    thread.join()
 
 
 @app.on_event("startup")
 async def startup_event():
-    import signal
-    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signal.SIGINT, harakiri)
     host_port = f"{current_context.get('host')}:{current_context.get('port')}"
     connections = {
         "Node.js": f"snowflake.createConnection({{accessUrl: 'https://{host_port}'}})",
