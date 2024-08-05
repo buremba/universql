@@ -74,6 +74,8 @@ For Docker:
 docker run buremba/universql snowflake --account eq06461.eu-west-2.aws
 ```
 
+# CLI Usage
+
 ```
 > universql snowflake --help
 
