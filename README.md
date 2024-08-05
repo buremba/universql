@@ -102,7 +102,7 @@ Options:
   --help                          Show this message and exit.
 ```
 
-## Access to Data Lake
+## Access to Storage
 
 ### Polaris
 
@@ -153,13 +153,11 @@ It gives you free https connection to your local server and it's the default hos
 > 
 > If you would like to use localhost (or `127.0.0.1`) directly, you can install [mkcert](https://github.com/FiloSottile/mkcert) to have a self-signed certificate for localhost and use `--ssl_keyfile` and `--ssl_certfile` options to pass the certificate and key files.
 
-## Glue catalog and Azure storage are not supported yet
-For Catalog, [Snowflake](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-snowflake) and [Object Store](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-iceberg-files) catalogs are supported at the moment.
-For Data lake, S3 and GCS supported.
-
 ## Can't query native Snowflake tables locally
 
 UniverSQL doesn't support querying native Snowflake tables as they're not accessible from outside of Snowflake. If you try to query a Snowflake table directly, it will return an error.
+For Catalog, [Snowflake](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-snowflake) and [Object Store](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-iceberg-files) catalogs are supported at the moment.
+For Data lake, S3 and GCS supported.
 
  ```sql
     SELECT * FROM my_snowflake_table;
@@ -181,7 +179,7 @@ You have two alternatives:
 ```
 Dynamic tables is the recommended approach **if your natives tables have more than 2B+ of rows** so that you can filter / aggregate them before pulling them into your local environment. If your native tables are small enough, consider switching them to use Iceberg from Native.
 
-2. You can use `universql.execute` function to run queries directly in Snowflake and return the result as a table. You can join native Snowflake table with your local files as follows: 
+2. (coming soon) You can use `universql.execute` function to run queries directly in Snowflake and return the result as a table. You can join native Snowflake table with your local files as follows: 
 
 ```sql
 SELECT * FROM table(universql.execute('select col1 from my_snowflake_table', {'target_lag': '1h'})) t1 join 'local://./my_local_table.csv' as t2 on t1.col1 = t2.col1;
