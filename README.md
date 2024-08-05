@@ -5,7 +5,7 @@ You can join Snowflake data with your local datasets, **without any need for a r
 UniverSQL relies on Snowflake and Polaris for access control and data catalog so it's complementary to your Snowflake workloads.  
 
 > [!WARNING]  
-> Any SQL client that supports Snowflake, also supports UniverSQL but we need to support Snowflake's API to support compatibility. If you run into any error in your workload, please [create an issue on Github](https://github.com/buremba/universql/issues/new).
+> Any SQL client that supports Snowflake, also supports UniverSQL but we need to support Snowflake's API to support compatibility. If you run into any problem with a client, please [create an issue on Github](https://github.com/buremba/universql/issues/new).
 
 # How it works?
 
