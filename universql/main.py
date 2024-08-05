@@ -30,7 +30,7 @@ def cli():
     pass
 
 
-@cli.command(epilog='Check out our docs at https://github.com/buremba/universql for more details')
+@cli.command(epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
 @click.option('--account',
               help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
               prompt='Account ID')
@@ -39,15 +39,15 @@ def cli():
               default="localhostcomputing.com",
               type=str)
 @click.option('--compute', type=click.Choice([e.value for e in Compute], case_sensitive=False),
-              default=Compute.AUTO.value, help=f'The compute strategy to use (default: {Compute.AUTO.value})')
+              default=Compute.AUTO.value, help=f'Enforce the query execution layer (default: {Compute.AUTO.value}, try with DuckDB and use Snowflake if it fails)')
 @click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
-              help='Type of the remove server.')
+              help='Type of the Snowflake account. Automatically detected if not provided.')
 @click.option('--aws-profile', help='AWS profile to access S3 (default: `default`)', type=str)
 @click.option('--gcp-project',
               help='GCP project to access GCS and apply quota. (to see how to setup auth for GCP and use different accounts, visit https://cloud.google.com/docs/authentication/application-default-credentials)',
               type=str)
 # @click.option('--azure-tenant', help='Azure account to access Blob Storage (ex: default az credentials)', type=str)
-@click.option('--ssl_keyfile', help='SSL keyfile for the proxy server, optional. ', type=str)
+@click.option('--ssl_keyfile', help='SSL keyfile for the proxy server, optional. Use it if you don\'t want to use localhostcomputing.com', type=str)
 @click.option('--ssl_certfile', help='SSL certfile for the proxy server, optional. ', type=str)
 @click.option('--max-memory', type=str, default=DEFAULTS["max_memory"],
               help='DuckDB Max memory to use for the server (default: 80% of total memory)')
@@ -55,7 +55,7 @@ def cli():
               default=Path.home() / ".universql" / "cache",
               type=str)
 @click.option('--max-cache-size', type=str, default=DEFAULTS["max_cache_size"],
-              help='DuckDB max_temp_directory_size and total total (default: 80% of total memory)')
+              help='DuckDB maximum cache used in local disk (default: 80% of total available disk)')
 def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, **kwargs):
     context__params = click.get_current_context().params
     params = {k: v for k, v in context__params.items() if
