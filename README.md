@@ -2,11 +2,10 @@
 
 UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and Polaris catalog, using DuckDB. 
 You can join Snowflake data with your local datasets, **without any need for a running warehouse**.
-Any SQL client that supports Snowflake, also supports UniverSQL. 
-UniverSQL relies on Snowflake and Polaris for access control and data catalog features and 
+UniverSQL relies on Snowflake and Polaris for access control and data catalog so it's complementary to your Snowflake workloads.  
 
 > [!WARNING]  
-> UniverSQL is in early development stage and actively being developed. If you run into any problem running UniverSQL, please [create an issue on Github](https://github.com/buremba/universql/issues/new).
+> Any SQL client that supports Snowflake, also supports UniverSQL but we need to support Snowflake's API to support compatibility. If you run into any error in your workload, please [create an issue on Github](https://github.com/buremba/universql/issues/new).
 
 # How it works?
 
