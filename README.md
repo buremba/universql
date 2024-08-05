@@ -1,4 +1,4 @@
-# `UniverSQL` Run Snowflake queries locally using DuckDB
+# `UniverSQL` runs Snowflake queries locally on DuckDB
 
 UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and Polaris catalog, using DuckDB. 
 You can join Snowflake data with your local datasets, **without any need for a running warehouse**.
@@ -30,13 +30,13 @@ sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) tha
 
 # Getting Started
 
-Install UniverSQL as a Python package:
+### Python
 
 ```bash
 python3 -m pip install universql
 ```
 
-## Using virtual environments
+#### Using virtual environments
 
 We recommend using virtual environments (venv) to namespace pip modules. Create a new venv as follows:
 
@@ -50,6 +50,8 @@ Activate that same virtual environment each time you create a shell window or se
 source universql-env/bin/activate         # activate the environment for Mac and Linux OR
 universql-env\Scripts\activate            # activate the environment for Windows
 ```
+
+### Docker
 
 Alternatively, pull the Docker image: (recommended for running in background)
 
