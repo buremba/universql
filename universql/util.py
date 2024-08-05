@@ -324,3 +324,11 @@ def prepend_to_lines(input_string, prepend_string=" ", vertical_string='------')
     modified_lines = [prepend_string + line for line in lines]
     modified_string = '\n'.join(modified_lines)
     return modified_string + '\n' + vertical_string
+
+
+def print_dict_as_markdown_table(input_dict, footer_message : str, column_width=(8, 80)):
+    top_bottom_line = "─" * (87 + 8)
+    result = top_bottom_line
+    for key, value in input_dict.items():
+        result += f"\n│ {str(key).ljust(column_width[0])} │ {str(value).ljust(column_width[1])} │"
+    return result + '\n' + top_bottom_line + "\n│ " + footer_message.ljust(92) + '│\n' + top_bottom_line

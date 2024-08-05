@@ -24,7 +24,7 @@ sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) tha
 
 * Smart caching for your Snowflake queries, reducing the compute costs. UniverSQL caches the SQL AST locally and re-uses the cache across multiple runs, better than Snowflake's [result cache](https://docs.snowflake.com/en/user-guide/querying-persisted-results). 
 * Query local files without any need to upload them to Snowflake for prototyping and only upload them when you want to share data with your colleagues.
-* Utilize your hardware for running queries faster on small datasets and run queries on your data even when you're offline.
+* Utilize your hardware for running queries faster on small datasets and run queries on your data even when you don't have internet connectivity.
 * Develop end-user facing applications on top Snowflake, using DuckDB to query the data.
 * Use DuckDB warehouse for managed and on-premise Polaris Catalog.
 

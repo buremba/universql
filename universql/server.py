@@ -8,7 +8,6 @@ import os
 import signal
 import time
 from threading import Thread
-from traceback import print_exc
 from uuid import uuid4
 
 import click
@@ -22,7 +21,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from universql.lake.fsspec_util import pprint_disk_usage
-from universql.util import unpack_request_body, session_from_request, SnowflakeError, parameters
+from universql.util import unpack_request_body, session_from_request, SnowflakeError, parameters, \
+    print_dict_as_markdown_table
 from fastapi.encoders import jsonable_encoder
 
 from universql.warehouse.duckdb import UniverSQLSession
@@ -65,7 +65,8 @@ async def login_request(request: Request) -> JSONResponse:
     except OAuthError as e:
         message = e.args[0]
 
-    logger.info(f"[{token}] Created local session for user {credentials.get('user')} from {request.client.host}:{request.client.port}")
+    logger.info(
+        f"[{token}] Created local session for user {credentials.get('user')} from {request.client.host}:{request.client.port}")
     return JSONResponse(
         {
             "data":
@@ -215,6 +216,8 @@ def harakiri(_, frame):
 
 
 last_intent_to_kill = time.time()
+
+
 def graceful_shutdown(_, frame):
     global last_intent_to_kill
     processing_sessions = sum(session.processing for token, session in sessions.items())
@@ -228,5 +231,15 @@ def graceful_shutdown(_, frame):
 @app.on_event("startup")
 async def startup_event():
     import signal
-
     signal.signal(signal.SIGINT, graceful_shutdown)
+    host_port = f"{current_context.get('host')}:{current_context.get('port')}"
+    connections = {
+        "Node.js": f"snowflake.createConnection({{accessUrl: 'https://{host_port}'}})",
+        "JDBC": f"jdbc:snowflake://{host_port}/dbname",
+        "Python": f"snowflake.connector.connect(host='{current_context.get('host')}', port='{current_context.get('port')}')",
+        "PHP": f"new PDO('snowflake:host={host_port}', '<user>', '<password>')",
+        "Go": f"sql.Open('snowflake', 'user:pass@{host_port}/dbname')",
+        ".NET": f"host=;{host_port};db=testdb",
+        "ODBC": f"Server={current_context.get('host')}; Database=dbname; Port={current_context.get('port')}",
+    }
+    click.secho(print_dict_as_markdown_table(connections, footer_message=f"For other clients and applications, see https://github.com/buremba/universql",))

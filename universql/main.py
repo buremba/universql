@@ -14,7 +14,7 @@ import uvicorn
 import yaml
 from requests.exceptions import SSLError
 
-from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Compute, Catalog, sizeof_fmt
+from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Compute, Catalog, sizeof_fmt, prepend_to_lines
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🏠")
@@ -91,7 +91,7 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
     elif compute == Compute.SNOWFLAKE.value:
         logger.info("The queries will run directly on Snowflake")
 
-    print(yaml.dump(params).strip())
+    click.secho(yaml.dump(params).strip())
 
     if not ssl_keyfile or not ssl_certfile:
         data = socket.gethostbyname_ex("localhostcomputing.com")
