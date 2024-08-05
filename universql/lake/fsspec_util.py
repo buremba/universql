@@ -71,14 +71,14 @@ def get_friendly_disk_usage(storage: str) -> str:
     if first_free is None:
         first_free = usage.free
     current_usage = get_total_directory_size(storage)
-    message = f"(usage {sizeof_fmt(current_usage)} free {sizeof_fmt(usage.free)} {int(100 - usage.percent)}%)"
+    message = f"{sizeof_fmt(current_usage)} used {sizeof_fmt(usage.free)} available"
     if last_free is not None:
         downloaded_recently = last_free - usage.free
         if downloaded_recently > 10_000_000:
             downloaded_since_start = first_free - usage.free
             if downloaded_recently != downloaded_since_start:
-                message += f" (delta: {sizeof_fmt(downloaded_recently)})"
-            message += f" (delta since start: {sizeof_fmt(downloaded_since_start)})"
+                message += f" delta: {sizeof_fmt(downloaded_recently)}"
+            message += f" delta since start: {sizeof_fmt(downloaded_since_start)}"
 
     last_free = usage.free
     return message
