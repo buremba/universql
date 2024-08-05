@@ -1,9 +1,9 @@
 # `UniverSQL` Snowflake + DuckDB, multi-engine SQL proxy
 
-UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and Polaris catalog, using DuckDB. You can join Snowflake data with your local datasets, **without any need for a running warehouse**.
-
-Your `SELECT` queries are transpiled to DuckDB and run locally on your computer, with a fallback option to execute them directly on your Snowflake account.
-Any SQL client that supports Snowflake, also supports UniverSQL.
+UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and Polaris catalog, using DuckDB. 
+You can join Snowflake data with your local datasets, **without any need for a running warehouse**.
+Any SQL client that supports Snowflake, also supports UniverSQL. 
+UniverSQL relies on Snowflake and Polaris for access control and data catalog features and 
 
 > [!WARNING]  
 > UniverSQL is in early development stage and actively being developed. If you run into any problem running UniverSQL, please [create an issue on Github](https://github.com/buremba/universql/issues/new).
@@ -52,10 +52,6 @@ Cold runs will likely to be slower than running the query on Snowflake as the da
 The subsequent queries (hot run) on the same table will be served from the cache. If the Iceberg table is updated, only the new data is downloaded from the data lake. 
 The same data is never downloaded more than once.
 Iceberg supports predicate pushdown, which helps with partitioned tables to reduce the amount of data downloaded for partitioned tables.
-
-### Governance
-
-UniverSQL relies on Snowflake for access control and 
 
 # Getting Started
 
