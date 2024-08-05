@@ -12,6 +12,7 @@ import psutil
 import requests
 import uvicorn
 import yaml
+from requests.exceptions import SSLError
 
 from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Compute, Catalog, sizeof_fmt
 
@@ -62,9 +63,16 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
               v is not None and k not in ["host", "port"]}
     auto_catalog_mode = catalog is None
     if auto_catalog_mode:
-        polaris_server_check = requests.get(
-            f"https://{account}.snowflakecomputing.com/polaris/api/catalog/v1/oauth/tokens")
-        is_polaris = polaris_server_check.status_code == 405
+        try:
+            polaris_server_check = requests.get(
+                f"https://{account}.snowflakecomputing.com/polaris/api/catalog/v1/oauth/tokens")
+            is_polaris = polaris_server_check.status_code == 405
+        except SSLError as e:
+            error_message = (f"Unable to find Snowflake account (https://{account}.snowflakecomputing.com), make sure if you have access to the Snowflake account. (maybe need VPN access?) \n"
+                             f"You can set `--catalog` property to avoid this error. \n {str(e.args[0])}")
+            logger.error(error_message)
+            sys.exit(1)
+
         context__params["catalog"] = Catalog.POLARIS.value if is_polaris else Catalog.SNOWFLAKE.value
 
     if context__params["catalog"] == Catalog.POLARIS.value:
