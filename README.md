@@ -12,7 +12,7 @@ UniverSQL relies on Snowflake and Polaris for access control and data catalog so
 * Snowflake SQL API implementation to handle the Snowflake connections, acting as a proxy between DuckDB and Snowflake.
   * You can connect UniverSQL using Snowflake Python Connector, Snowflake JDBC, ODBC or any other Snowflake client.
   * UniverSQL uses Snowflake Arrow integration to fetch the data from Snowflake and convert it to DuckDB relation.
-* [SQLGlot](https://sqlglot.com) for query translation from Snowflake to DuckDB,
+* [SQLGlot](https://sqlglot.com) and [Fakesnow](https://github.com/tekumara/fakesnow) for query translation from Snowflake to DuckDB,
 * [Snowflake Iceberg tables](https://docs.snowflake.com/en/user-guide/tables-iceberg) and [Polaris](https://other-docs.snowflake.com/en/polaris/overview) as data catalog, depending on `--account' you proxy to.
 * Your local disk for the storage with direct access to data lakes (S3, GCS) for the cloud storage.
 * [DuckDB](https://duckdb.org) as local compute engine.

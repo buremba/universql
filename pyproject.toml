@@ -17,17 +17,13 @@ uvicorn = "^0.30.1"
 snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], version = "^3.11.0"}
 eval-type-backport = "^0.2.0"
 pip-system-certs = "^4.0"
-chdb = "^1.4.1"
 fsspec = "^2024.6.1"
 gcsfs = "^2024.6.1"
 click = ">7"
-acryl-datahub = "^0.13.3.4"
 s3fs = "^2024.6.1"
-textual = "^0.74.0"
 pyiceberg = "^0.7.0"
 sqlalchemy = "^2.0.31"
 fastapi-utils = "^0.7.0"
-
 fakesnow = "^0.9.20"
 humanize = "^4.10.0"
 [tool.poetry.dev-dependencies]
