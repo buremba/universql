@@ -1,8 +1,8 @@
 import aiobotocore
 import gcsfs
 import s3fs
-from duckdb import DuckDBPyConnection
-# from fsspec.utils import setup_logging
+from fsspec.core import logger
+from fsspec.utils import setup_logging
 from pyiceberg.io import PY_IO_IMPL
 from pyiceberg.io.fsspec import FsspecFileIO
 from pyiceberg.table import StaticTable
@@ -21,7 +21,7 @@ def s3(cache_storage: str, profile: str = "default"):
 
 
 def gcs(cache_storage, project=None, token=None):
-    # setup_logging(logger=logger, level="DEBUG")
+    setup_logging(logger=logger, level="ERROR")
     gcs_file_system = gcsfs.GCSFileSystem(project=project, token=token)
     caching_fs = MonitoredSimpleCacheFileSystem(
         fs=gcs_file_system,

@@ -58,7 +58,7 @@ class PolarisCatalog(IcebergCatalog):
         try:
             iceberg_table = self.rest_catalog.load_table(table_ref)
         except NoSuchTableError:
-            raise SnowflakeError(self.query_id, f"Table {table_ref} doesn't exist in Polaris catalog!")
+            raise SnowflakeError(self.query_id, f"Table {table_ref} doesn't exist in Polaris catalog `{self.credentials.get('database')}` or your role doesn't have access to the table.")
         table_ref_sql = table.sql()
         cursor.register(table_ref_sql, iceberg_table.scan().to_arrow())
         return sqlglot.exp.parse_identifier(table_ref_sql)

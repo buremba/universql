@@ -29,6 +29,7 @@ sqlalchemy = "^2.0.31"
 fastapi-utils = "^0.7.0"
 
 fakesnow = "^0.9.20"
+humanize = "^4.10.0"
 [tool.poetry.dev-dependencies]
 pylint = ">=2.11.1"
 

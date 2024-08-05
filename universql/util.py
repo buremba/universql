@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List
 
+import humanize
 from pyarrow import Schema
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
@@ -311,3 +312,15 @@ def sizeof_fmt(num, suffix="B"):
             return f"{num:3.1f}{unit}{suffix}"
         num /= 1000.0
     return f"{num:.1f}Y{suffix}"
+
+
+def get_friendly_time_since(start_time):
+    return humanize.precisedelta(datetime.timedelta(seconds=time.perf_counter() - start_time),
+                                 suppress=["days"], format="%0.3f")
+
+
+def prepend_to_lines(input_string, prepend_string=" ", vertical_string='------'):
+    lines = input_string.split('\n')
+    modified_lines = [prepend_string + line for line in lines]
+    modified_string = '\n'.join(modified_lines)
+    return modified_string + '\n' + vertical_string

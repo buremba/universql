@@ -6,6 +6,7 @@ import typing
 from typing import List, Optional
 
 import duckdb
+import humanize
 import pyarrow
 import pyarrow as pa
 import sqlglot
@@ -19,7 +20,8 @@ from sqlglot.optimizer.simplify import simplify
 from universql.catalog import get_catalog
 from universql.catalog.snow.show_iceberg_tables import cloud_logger
 from universql.lake.cloud import s3, gcs
-from universql.util import get_columns_for_duckdb, SnowflakeError, Compute, Catalog
+from universql.util import get_columns_for_duckdb, SnowflakeError, Compute, Catalog, get_friendly_time_since, \
+    prepend_to_lines
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🐥")
@@ -57,7 +59,7 @@ class UniverSQLSession:
     def sync_duckdb_catalog(self, tables: List[sqlglot.exp.Expression], ast: sqlglot.exp.Expression) -> Optional[
         sqlglot.exp.Expression]:
         try:
-            locations = self.catalog.get_table_references(self.duckdb_emulator, tables)
+            locations = self.catalog.get_table_references(self.duckdb, tables)
         except DatabaseError as e:
             error_message = (f"[{self.token}] Unable to find location of Iceberg tables. "
                              f"See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}")
@@ -69,7 +71,7 @@ class UniverSQLSession:
         views_sql = "\n".join(views)
         if views:
             self.duckdb.execute(views_sql)
-            logger.info(f"[{self.token}] Creating views for Iceberg tables: \n{views_sql}")
+            logger.info(f"[{self.token}] DuckDB environment is setting up, creating views for remote tables: \n{prepend_to_lines(views_sql)}")
 
         def replace_icebergs_with_duckdb_reference(
                 expression: sqlglot.exp.Expression) -> sqlglot.exp.Expression:
@@ -113,12 +115,10 @@ class UniverSQLSession:
                         can_run_locally = False
                         break
                     sql = transformed_ast.sql(dialect="duckdb", pretty=True)
-                    planned_duration = time.perf_counter() - start_time
 
                     try:
                         self.duckdb_emulator.execute(sql)
-                        timedelta = datetime.timedelta(seconds=planned_duration)
-                        logger.info("[%s] Duckdb environment is prepared. (%s)\n%s" % (self.token, timedelta, sql))
+                        logger.info(f"[{self.token}] executing DuckDB query:\n{prepend_to_lines(sql)}")
                     # except duckdb.Error as e:
                     except DatabaseError as e:
                         local_error_message = f"Unable to run the query locally on DuckDB. {e.msg}"
@@ -126,8 +126,7 @@ class UniverSQLSession:
                         break
 
         if can_run_locally and not run_snowflake_already and should_run_locally:
-            formatting = (self.token, datetime.timedelta(seconds=time.perf_counter() - start_time))
-            logger.info(f"[{self.token}] Run locally 🚀 ({formatting[1]})")
+            logger.info(f"[{self.token}] Run locally 🚀 ({get_friendly_time_since(start_time)})")
             return self.get_duckdb_result()
         else:
             if local_error_message:
@@ -140,15 +139,15 @@ class UniverSQLSession:
     def do_snowflake_query(self, queries, raw_query, start_time, local_error_message):
         try:
             self.snowflake.execute(queries, raw_query)
-            formatting = (self.token, datetime.timedelta(seconds=time.perf_counter() - start_time))
-            logger.info(f"[{self.token}] Query is done. ({formatting[1]})")
+            logger.info(f"[{self.token}] Query is done. ({get_friendly_time_since(start_time)})")
         except SnowflakeError as e:
             final_error = f"{local_error_message}. {e.message}"
             cloud_logger.error(f"[{self.token}] {final_error}")
             raise SnowflakeError(self.token, final_error, e.sql_state)
 
+
     def do_query(self, raw_query: str) -> (str, List, pyarrow.Table):
-        logger.info("[%s] Executing \n%s" % (self.token, raw_query))
+        logger.info(f"[{self.token}] Executing \n{prepend_to_lines(raw_query)}")
         self.processing = True
         try:
             return self._do_query(raw_query)
