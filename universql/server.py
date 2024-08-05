@@ -201,7 +201,7 @@ async def query_monitoring_query(self, request: Request) -> JSONResponse:
     return JSONResponse({"data": {"queries": [{"status": "SUCCESS"}]}, "success": True})
 
 
-ENABLE_DEBUG_WATCH_TOWER = True
+ENABLE_DEBUG_WATCH_TOWER = False
 WATCH_TOWER_SCHEDULE_SECONDS = 3
 kill_event = threading.Event()
 

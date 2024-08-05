@@ -1,4 +1,3 @@
-import datetime
 import logging
 import os
 import time
@@ -6,7 +5,6 @@ import typing
 from typing import List, Optional
 
 import duckdb
-import humanize
 import pyarrow
 import pyarrow as pa
 import sqlglot
@@ -71,7 +69,8 @@ class UniverSQLSession:
         views_sql = "\n".join(views)
         if views:
             self.duckdb.execute(views_sql)
-            logger.info(f"[{self.token}] DuckDB environment is setting up, creating views for remote tables: \n{prepend_to_lines(views_sql)}")
+            logger.info(
+                f"[{self.token}] DuckDB environment is setting up, creating views for remote tables: \n{prepend_to_lines(views_sql)}")
 
         def replace_icebergs_with_duckdb_reference(
                 expression: sqlglot.exp.Expression) -> sqlglot.exp.Expression:
@@ -119,7 +118,10 @@ class UniverSQLSession:
                     try:
                         self.duckdb_emulator.execute(sql)
                         logger.info(f"[{self.token}] executing DuckDB query:\n{prepend_to_lines(sql)}")
-                    # except duckdb.Error as e:
+                    except duckdb.Error as e:
+                        local_error_message = f"Unable to run the parse locally on DuckDB. {e.args}"
+                        can_run_locally = False
+                        break
                     except DatabaseError as e:
                         local_error_message = f"Unable to run the query locally on DuckDB. {e.msg}"
                         can_run_locally = False
@@ -145,7 +147,6 @@ class UniverSQLSession:
             cloud_logger.error(f"[{self.token}] {final_error}")
             raise SnowflakeError(self.token, final_error, e.sql_state)
 
-
     def do_query(self, raw_query: str) -> (str, List, pyarrow.Table):
         logger.info(f"[{self.token}] Executing \n{prepend_to_lines(raw_query)}")
         self.processing = True
@@ -167,7 +168,13 @@ class UniverSQLSession:
         value = arrow_table[idx]
 
         if field_type == 'NUMBER':
-            pa_type = pa.decimal128(getattr(value.type, 'precision', 38), getattr(value.type, 'scale', 0))
+
+            if (  # no harm for int types
+                    pa_type != pa.int64() and
+                    pa_type != pa.int32() and
+                    pa_type != pa.int16() and
+                    pa_type != pa.int8()):
+                pa_type = pa.decimal128(getattr(value.type, 'precision', 38), getattr(value.type, 'scale', 0))
             value = value.cast(pa_type)
             metadata["logicalType"] = "FIXED"
             metadata["precision"] = "1"

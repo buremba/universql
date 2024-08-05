@@ -127,11 +127,9 @@ class EndpointFilter(logging.Filter):
 
 
 uvicorn_logger = logging.getLogger("uvicorn.access")
-uvicorn_logger.addFilter(EndpointFilter(path="/session/heartbeat"))
-uvicorn_logger.addFilter(EndpointFilter(path="/session/delete"))
 uvicorn_logger.addFilter(EndpointFilter(path="/telemetry/send"))
 uvicorn_logger.addFilter(EndpointFilter(path="/queries/v1/query-request"))
-uvicorn_logger.addFilter(EndpointFilter(path="/session/v1/login-request"))
+uvicorn_logger.addFilter(EndpointFilter(path="/session"))
 
 if __name__ == '__main__':
     cli(prog_name="universql")
