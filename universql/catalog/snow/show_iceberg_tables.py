@@ -201,7 +201,7 @@ class SnowflakeShowIcebergTables(IcebergCatalog):
         result = cur.fetchall()
         used_tables = ",".join(set(table.sql() for table in tables))
         logging.getLogger("❄️cloud").info(
-            f"Executed metadata query to get Iceberg table locations for tables {used_tables}")
+            f"[{self.query_id}] Executed metadata query to get Iceberg table locations for tables {used_tables}")
         return {table: SnowflakeShowIcebergTables._get_ref(json.loads(result[0][idx])) for idx, table in
                 enumerate(tables)}
 

@@ -114,26 +114,26 @@ class UniverSQLSession:
                         break
                     sql = transformed_ast.sql(dialect="duckdb", pretty=True)
                     planned_duration = time.perf_counter() - start_time
-                    timedelta = datetime.timedelta(seconds=planned_duration)
 
-                    logger.info("[%s] Re-written for DuckDB as: (%s)\n%s" % (self.token, timedelta, sql))
                     try:
                         self.duckdb_emulator.execute(sql)
+                        timedelta = datetime.timedelta(seconds=planned_duration)
+                        logger.info("[%s] Duckdb environment is prepared. (%s)\n%s" % (self.token, timedelta, sql))
                     # except duckdb.Error as e:
                     except DatabaseError as e:
-                        local_error_message = f"DuckDB error: {e.args}"
+                        local_error_message = f"Unable to run the query locally on DuckDB. {e.msg}"
                         can_run_locally = False
                         break
 
-        if compute == Compute.LOCAL.value:
-            if not should_run_locally:
-                raise SnowflakeError(self.token, f"Can't run the query locally, {local_error_message}")
-            return self.get_snowflake_result()
         if can_run_locally and not run_snowflake_already and should_run_locally:
             formatting = (self.token, datetime.timedelta(seconds=time.perf_counter() - start_time))
-            logger.info(f"[{self.token}] Run locally 🚀 ({formatting})")
+            logger.info(f"[{self.token}] Run locally 🚀 ({formatting[1]})")
             return self.get_duckdb_result()
         else:
+            if local_error_message:
+                logger.error(f"[{self.token}] {local_error_message}")
+                if not should_run_locally:
+                    raise SnowflakeError(self.token, f"Can't run the query locally. {local_error_message}")
             self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
             return self.get_snowflake_result()
 
@@ -141,7 +141,7 @@ class UniverSQLSession:
         try:
             self.snowflake.execute(queries, raw_query)
             formatting = (self.token, datetime.timedelta(seconds=time.perf_counter() - start_time))
-            logger.info(f"[{self.token}] Query is done. ({formatting})")
+            logger.info(f"[{self.token}] Query is done. ({formatting[1]})")
         except SnowflakeError as e:
             final_error = f"{local_error_message}. {e.message}"
             cloud_logger.error(f"[{self.token}] {final_error}")
