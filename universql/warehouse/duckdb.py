@@ -133,7 +133,7 @@ class UniverSQLSession:
             if local_error_message:
                 logger.error(f"[{self.token}] {local_error_message}")
                 if not should_run_locally:
-                    raise SnowflakeError(self.token, f"Can't run the query locally. {local_error_message}")
+                    raise SnowflakeError(self.token, local_error_message)
             self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
             return self.get_snowflake_result()
 

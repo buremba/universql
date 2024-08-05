@@ -1,4 +1,4 @@
-FROM python:3.10-slim-bullseye
+FROM python:3.11-slim-bullseye
 
 RUN apt-get update && apt-get -y upgrade \
     && apt-get install gcc -y  \
@@ -19,7 +19,7 @@ COPY . .
 # Jinjat itself won't be installed.
 RUN poetry install
 
-EXPOSE 8581
+EXPOSE 8084
 ENV UNIVERSQL_HOST=0.0.0.0
 
 ENTRYPOINT ["poetry", "run", "universql"]
