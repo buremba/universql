@@ -23,13 +23,11 @@ sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) tha
 
 # Use Cases
 
-* Smart caching for your Snowflake queries, reducing the compute costs.
-  * Snowflake's caching is limited and even small changes in the query will result in an active warehouse. UniverSQL caches the SQL AST locally and re-uses the cache across multiple runs.
-* Query local files without any need to upload them to Snowflake and join them with remote Snowflake tables, downloading the data from data lake.
-* Query Snowflake Iceberg tables without any need to run a warehouse, using your local computer's resources.
+* Smart caching for your Snowflake queries, reducing the compute costs. UniverSQL caches the SQL AST locally and re-uses the cache across multiple runs, better than Snowflake's [result cache](https://docs.snowflake.com/en/user-guide/querying-persisted-results). 
+* Query local files without any need to upload them to Snowflake for prototyping and only upload them when you want to share data with your colleagues.
+* Utilize your hardware for running queries faster on small datasets and run queries on your data even when you're offline.
 * Develop end-user facing applications on top Snowflake without worrying about the costs.
-* Snowflake API on top of your Polaris Catalog.
-  * You can run cross-cloud queries with UniverSQL, Polaris handles the 
+* Use DuckDB warehouse for managed and on-premise Polaris Catalog.
 
 ### Cost
 
@@ -74,17 +72,39 @@ universql snowflake --account-url lt51601.europe-west2.gcp
 ```
 
 ```
-> universql snowflake --help
-Usage: universql [OPTIONS]
+Usage: universql snowflake [OPTIONS]
 
 Options:
-  --account TEXT                  The account to use (ex: rt21601.europe-
-                                  west2.gcp)
-  --port INTEGER                  Port for proxy server (default: 8084)
-  --host TEXT                     Host for proxy server (default: 127.0.0.1)
-  --compute [local|hybrid|cloud]  The compute strategy to use (default: hybrid)
+  --account TEXT                  The account to use. Supports both Snowflake
+                                  and Polaris (ex: rt21601.europe-west2.gcp)
+  --port INTEGER                  Port for Snowflake proxy server (default:
+                                  8084)
+  --host TEXT                     Host for Snowflake proxy server (default:
+                                  localhostcomputing.com)
+  --compute [local|auto|snowflake]
+                                  Enforce the query execution layer (default:
+                                  auto, try with DuckDB and use Snowflake if
+                                  it fails)
+  --catalog [snowflake|polaris]   Type of the Snowflake account. Automatically
+                                  detected if not provided.
+  --aws-profile TEXT              AWS profile to access S3 (default:
+                                  `default`)
+  --gcp-project TEXT              GCP project to access GCS and apply quota.
+                                  (to see how to setup auth for GCP and use
+                                  different accounts, visit https://cloud.goog
+                                  le.com/docs/authentication/application-
+                                  default-credentials)
+  --ssl_keyfile TEXT              SSL keyfile for the proxy server, optional.
+                                  Use it if you don't want to use
+                                  localhostcomputing.com
+  --ssl_certfile TEXT             SSL certfile for the proxy server, optional.
+  --max-memory TEXT               DuckDB Max memory to use for the server
+                                  (default: 80% of total memory)
+  --cache-directory TEXT          Data lake cache directory (default:
+                                  /Users/bkabak/.universql/cache)
+  --max-cache-size TEXT           DuckDB maximum cache used in local disk
+                                  (default: 80% of total available disk)
   --help                          Show this message and exit.
-
 ```
 
 ## Access to Data Lake
@@ -94,7 +114,6 @@ Options:
 Polaris Catalog is a managed Iceberg table catalog that is available in Snowflake.
 It manages access credentials to data lake and the metadata of the Iceberg tables.
 If your Snowflake account (`snowflake --account`) is a Polaris Catalog, UniverSQL will use PyIceberg to fetch data from your data lake and map them as Arrow tables in DuckDB.
-
 
 ### Snowflake
 
@@ -119,11 +138,11 @@ By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.c
 
 ## Compute Strategies
 
-`auto` (default): Runs the queries locally if they're `SELECT` queries and can be transpiled into DuckDB query. Otherwise runs queries on Snowflake.
+`auto` (default): Best effort to run the query locally, with the fallback option to run them on Snowflake.
 
 `local`: If the query requires a running warehouse on Snowflake, fails the query. Otherwise runs the query locally.
 
-`snowflake`: Runs the queries directly on Snowflake, use UniverSQL as a passthrough.
+`snowflake`: Runs the queries directly on Snowflake, use UniverSQL as a passthrough. Useful for rewriting queries on the fly, blocking queries based on conditions or re-routing warehouses based on custom logic.
 
 # Limitations
 
