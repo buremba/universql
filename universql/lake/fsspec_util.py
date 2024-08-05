@@ -68,15 +68,14 @@ def pprint_disk_usage(storage: str) -> str:
     usage = psutil.disk_usage(storage)
     if first_free is None:
         first_free = usage.free
-    message = f"(free {sizeof_fmt(usage.free)})"
+    message = f"(free {sizeof_fmt(usage.free)} {int(100 - usage.percent)}%)"
     if last_free is not None:
-        message += f" (remaining disk quota {int(100 - usage.percent)}%)"
         downloaded_recently = last_free - usage.free
         if downloaded_recently > 10_000_000:
             downloaded_since_start = first_free - usage.free
             if downloaded_recently != downloaded_since_start:
-                message += f" (delta since previous log: {sizeof_fmt(downloaded_recently)}))"
-            message += f" (delta since start: {sizeof_fmt(downloaded_since_start)}))"
+                message += f" (delta: {sizeof_fmt(downloaded_recently)})"
+            message += f" (delta since start: {sizeof_fmt(downloaded_since_start)})"
 
     last_free = usage.free
     return message

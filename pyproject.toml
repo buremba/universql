@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "universql"
-version = "0.1.0"
+version = "0.1"
 description = ""
 authors = ["Burak Kabakcı <emrekabakci@gmail.com>"]
 readme = "README.md"
 license = "Apache 2.0"
 keywords = ["dbt", "server", "streamlit", "git", "refine", "data-app", "snowflake"]
-documentation = "https://github.com/jinjat-data/jinjat"
-repository = "https://github.com/jinjat-data/jinjat"
+documentation = "https://github.com/buremba/universql"
+repository = "https://github.com/buremba/universql"
 
 [tool.poetry.dependencies]
 python = "^3.11"
