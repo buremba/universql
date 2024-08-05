@@ -73,7 +73,7 @@ class SnowflakeIcebergCursor(Cursor):
             arrow_all = self.cursor.fetch_arrow_all(force_return_table=True)
             for idx, column in enumerate(self.cursor._description):
                 (field, value) = self.get_field_for_snowflake(column, arrow_all[idx])
-                arrow_all.set_column(idx, field, value)
+                arrow_all = arrow_all.set_column(idx, field, value)
             return arrow_all
         # return from snowflake is not using arrow
         except NotSupportedError:
@@ -121,7 +121,7 @@ class SnowflakeIcebergCursor(Cursor):
             metadata["logicalType"] = "OBJECT"
 
         if arrow_field.name == 'FIXED':
-            pa_type = pa.decimal128(column.precision, column.scale)
+            pa_type = pa.decimal128(38, column.scale)
             if value is not None:
                 value = value.cast(pa_type)
         elif arrow_field.name == 'DATE':

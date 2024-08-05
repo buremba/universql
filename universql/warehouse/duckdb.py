@@ -127,7 +127,7 @@ class UniverSQLSession:
         if compute == Compute.LOCAL.value or catalog == Catalog.POLARIS.value:
             raise SnowflakeError(self.token, f"Can't run the query locally, {local_error_message}")
 
-        if can_run_locally and not run_snowflake_already:
+        if can_run_locally and not run_snowflake_already and should_run_locally:
             formatting = (self.token, datetime.timedelta(seconds=time.perf_counter() - start_time))
             logger.info(f"[{self.token}] Run locally 🚀 ({formatting})")
             return self.get_duckdb_result()
@@ -164,31 +164,71 @@ class UniverSQLSession:
         pa_type = arrow_table.schema[idx].type
 
         metadata = {}
-        transformed_data = None
+        value = arrow_table[idx]
 
         if field_type == 'NUMBER':
+            pa_type = pa.decimal128(getattr(value.type, 'precision', 38) , getattr(value.type, 'scale', 0))
+            value = value.cast(pa_type)
             metadata["logicalType"] = "FIXED"
             metadata["precision"] = "1"
             metadata["scale"] = "0"
             metadata["physicalType"] = "SB1"
+            metadata["final_type"] = "T"
         elif field_type == 'Date':
             pa_type = pa.date32()
+            value = value.cast(pa_type)
             metadata["logicalType"] = "DATE"
         elif field_type == 'Time':
+            pa_type = pa.int64()
+            value = value.cast(pa_type)
             metadata["logicalType"] = "TIME"
         elif field_type == "BINARY":
+            pa_type = pa.binary()
             metadata["logicalType"] = "BINARY"
         elif field_type == "TIMESTAMP" or field_type == "DATETIME" or field_type == "TIMESTAMP_LTZ":
             metadata["logicalType"] = "TIMESTAMP_LTZ"
             metadata["precision"] = "0"
             metadata["scale"] = "9"
             metadata["physicalType"] = "SB16"
+            metadata["final_type"] = "T"
+            timestamp_fields = [
+                pa.field("epoch", nullable=False, type=pa.int64(), metadata=metadata),
+                pa.field("fraction", nullable=False, type=pa.int32(), metadata=metadata),
+            ]
+            pa_type = pa.struct(timestamp_fields)
+            epoch = pa.compute.divide(value.cast(pa.int64()), 1_000_000_000).combine_chunks()
+            value = pa.StructArray.from_arrays(arrays=[epoch, pa.nulls(len(value), type=pa.int32())],
+                                               fields=timestamp_fields)
         elif field_type == "TIMESTAMP_NTZ":
             metadata["logicalType"] = "TIMESTAMP_NTZ"
             metadata["precision"] = "0"
             metadata["scale"] = "9"
             metadata["physicalType"] = "SB16"
+            timestamp_fields = [
+                pa.field("epoch", nullable=False, type=pa.int64(), metadata=metadata),
+                pa.field("fraction", nullable=False, type=pa.int32(), metadata=metadata),
+            ]
+            pa_type = pa.struct(timestamp_fields)
+            epoch = pa.compute.divide(value.cast(pa.int64()), 1_000_000_000).combine_chunks()
+            value = pa.StructArray.from_arrays(arrays=[epoch, pa.nulls(len(value), type=pa.int32())],
+                                               fields=timestamp_fields)
         elif field_type == "TIMESTAMP_TZ":
+            timestamp_fields = [
+                pa.field("epoch", nullable=False, type=pa.int64(), metadata=metadata),
+                pa.field("fraction", nullable=False, type=pa.int32(), metadata=metadata),
+                pa.field("timezone", nullable=False, type=pa.int32(), metadata=metadata),
+            ]
+            pa_type = pa.struct(timestamp_fields)
+            epoch = pa.compute.divide(value.cast(pa.int64()), 1_000_000_000).combine_chunks()
+
+            value = pa.StructArray.from_arrays(
+                arrays=[epoch,
+                        # TODO: modulos 1_000_000_000 to get the fraction of a second, pyarrow doesn't support the operator yet
+                        pa.nulls(len(value), type=pa.int32()),
+                        # TODO: reverse engineer the timezone conversion
+                        pa.nulls(len(value), type=pa.int32()),
+                        ],
+                fields=timestamp_fields)
             metadata["logicalType"] = "TIMESTAMP_TZ"
             metadata["precision"] = "0"
             metadata["scale"] = "9"
@@ -212,7 +252,7 @@ class UniverSQLSession:
             metadata["scale"] = "0"
             metadata["precision"] = "38"
             metadata["finalType"] = "T"
-            transformed_data = (arrow_to_project.project(f"to_json({field_name})").arrow())[0]
+            value = (arrow_to_project.project(f"to_json({field_name})").arrow())[0]
         elif pa_type == pa.string():
             metadata["logicalType"] = "TEXT"
             metadata["charLength"] = "16777216"
@@ -221,10 +261,7 @@ class UniverSQLSession:
             raise Exception()
 
         field = pa.field(field_name, type=pa_type, nullable=True, metadata=metadata)
-        if transformed_data is None:
-            return arrow_table[idx].cast(field.type), field
-        else:
-            return transformed_data, field
+        return value, field
 
     def get_duckdb_result(self):
         arrow_table = self.duckdb_emulator._arrow_table
