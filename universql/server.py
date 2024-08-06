@@ -203,7 +203,7 @@ async def query_monitoring_query(self, request: Request) -> JSONResponse:
 
 
 ENABLE_DEBUG_WATCH_TOWER = False
-WATCH_TOWER_SCHEDULE_SECONDS = 5
+WATCH_TOWER_SCHEDULE_SECONDS = 2
 kill_event = threading.Event()
 
 
