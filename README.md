@@ -149,7 +149,7 @@ By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.c
 
 `auto` (default): Best effort to run the query locally, with the fallback option to run it on Snowflake.
 
-`local`: If the query requires a running warehouse on Snowflake, fails the query. Otherwise, runs the query locally.
+`local`: Runs the queries locally and on Snowflake only if it doesn't require a running warehouse. Useful for spinning up local test environments.
 
 `snowflake`: Runs the queries directly on Snowflake and doesn't change query. Useful for rewriting and blocking queries on the fly based on specific rules or re-routing warehouses based on custom logic.
 
