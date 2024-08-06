@@ -105,3 +105,5 @@ celerybeat.pid
 .DS_STORE
 .certs/*
 .rill/*
+venv/*
+.venv/*

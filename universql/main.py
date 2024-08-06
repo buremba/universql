@@ -83,9 +83,9 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
                 f"it's {adjective} a {context__params['catalog']} server.")
 
     if compute == Compute.AUTO.value:
-        logger.info("The queries will run on DuckDB and fallback to Snowflake if they fail.")
+        logger.info("The queries will run on DuckDB and fallback to Snowflake warehouse if they fail.")
     elif compute == Compute.LOCAL.value:
-        logger.info("The queries will run locally")
+        logger.info("The queries will run on DuckDB and fallback to Snowflake only if a running warehouse is not needed")
     elif compute == Compute.SNOWFLAKE.value:
         logger.info("The queries will run directly on Snowflake")
 

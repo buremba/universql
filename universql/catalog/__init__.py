@@ -1,12 +1,13 @@
 import typing
 from abc import ABC, abstractmethod
 from typing import List
+from uuid import uuid4
+
 import duckdb
 import sqlglot
 from snowflake.connector.options import pyarrow
 
-from universql import util
-from universql.util import Catalog
+from universql.util import Catalog, Compute
 
 
 def get_catalog(context: dict, query_id: str, credentials: dict):
@@ -14,12 +15,15 @@ def get_catalog(context: dict, query_id: str, credentials: dict):
     account = context.get('account')
     if catalog == Catalog.SNOWFLAKE.value:
         from universql.catalog.snow.show_iceberg_tables import SnowflakeShowIcebergTables
+        if context.get('compute') == Compute.LOCAL.value:
+            # make sure snowflake compute is not used
+            credentials["warehouse"] = str(uuid4())
         return SnowflakeShowIcebergTables(account, query_id, credentials)
     elif catalog == Catalog.POLARIS.value:
         from universql.catalog.snow.polaris import PolarisCatalog
         return PolarisCatalog(context.get('cache_directory'), account, query_id, credentials)
 
-    raise ValueError(f"Unsupported catalog: {util.args.catalog}")
+    raise ValueError(f"Unsupported catalog: {catalog}")
 
 
 class Cursor(ABC):

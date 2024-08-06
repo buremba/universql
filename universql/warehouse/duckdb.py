@@ -42,19 +42,22 @@ class UniverSQLSession:
         })
         self.duckdb.install_extension("iceberg")
         self.duckdb.load_extension("iceberg")
+
         fake_snowflake_conn = FakeSnowflakeConnection(self.duckdb, "main", "public", False, False)
         fake_snowflake_conn.database_set = True
         fake_snowflake_conn.schema_set = True
         self.duckdb_emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
+
         self.snowflake = self.catalog.cursor()
         self.register_data_lake(context)
         self.processing = False
+        self.compute = self.context.get('compute')
 
     def register_data_lake(self, args: dict):
         self.duckdb.register_filesystem(s3(args.get('cache_directory'), args.get('aws_profile')))
         self.duckdb.register_filesystem(gcs(args.get('cache_directory'), args.get('gcp_project')))
 
-    def sync_duckdb_catalog(self, locations : typing.Dict[
+    def sync_duckdb_catalog(self, locations: typing.Dict[
         sqlglot.exp.Table, sqlglot.exp.Expression], ast: sqlglot.exp.Expression) -> Optional[
         sqlglot.exp.Expression]:
 
@@ -82,8 +85,6 @@ class UniverSQLSession:
 
     def _do_query(self, raw_query: str) -> (str, List, pyarrow.Table):
         start_time = time.perf_counter()
-        compute = self.context.get('compute')
-        catalog = self.context.get('catalog')
         local_error_message = None
 
         try:
@@ -92,13 +93,14 @@ class UniverSQLSession:
             local_error_message = f"Unable to parse query with SQLGlot: {e.args}"
             queries = None
 
-        should_run_locally = compute != Compute.SNOWFLAKE.value
+        should_run_locally = self.compute != Compute.SNOWFLAKE.value
         can_run_locally = queries is not None
         run_snowflake_already = False
 
         if can_run_locally and should_run_locally:
             for ast in queries:
-                if ast.key in queries_that_doesnt_need_warehouse and catalog == Catalog.SNOWFLAKE.value:
+                if ast.key in queries_that_doesnt_need_warehouse and self.context.get(
+                        'catalog') == Catalog.SNOWFLAKE.value:
                     self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
                     run_snowflake_already = True
                 else:
@@ -109,9 +111,10 @@ class UniverSQLSession:
                         locations = self.catalog.get_table_references(self.duckdb, tables)
                     except DatabaseError as e:
                         local_error_message = (f"Unable to find location of Iceberg tables. "
-                                         f"See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}")
+                                               f"See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}")
 
-                    transformed_ast = self.sync_duckdb_catalog(locations, simplify(ast)) if locations is not None else None
+                    transformed_ast = self.sync_duckdb_catalog(locations,
+                                                               simplify(ast)) if locations is not None else None
                     if transformed_ast is None:
                         can_run_locally = False
                         break
@@ -135,11 +138,6 @@ class UniverSQLSession:
         else:
             if local_error_message is not None:
                 logger.error(f"[{self.token}] {local_error_message}")
-                if not should_run_locally:
-                    raise SnowflakeError(self.token, local_error_message)
-                if compute == Compute.LOCAL.value:
-                    hard_error_message = "The query failed to run locally, and the compute is set to LOCAL. Cause: "
-                    raise SnowflakeError(self.token, hard_error_message + local_error_message)
             self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
             return self.get_snowflake_result()
 
@@ -148,7 +146,10 @@ class UniverSQLSession:
             self.snowflake.execute(queries, raw_query)
             logger.info(f"[{self.token}] Query is done. ({get_friendly_time_since(start_time)})")
         except SnowflakeError as e:
-            final_error = f"{local_error_message}. {e.message}"
+            final_error = f" {'[DuckDB]: '+local_error_message+'. ' if local_error_message else ''}\n [Snowflake]: {e.message}"
+            if self.compute == Compute.LOCAL.value:
+                final_error = "The query without warehouse failed to run remotely, and the compute is set to LOCAL.\n" + final_error
+
             cloud_logger.error(f"[{self.token}] {final_error}")
             raise SnowflakeError(self.token, final_error, e.sql_state)
 
