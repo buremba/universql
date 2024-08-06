@@ -54,15 +54,9 @@ class UniverSQLSession:
         self.duckdb.register_filesystem(s3(args.get('cache_directory'), args.get('aws_profile')))
         self.duckdb.register_filesystem(gcs(args.get('cache_directory'), args.get('gcp_project')))
 
-    def sync_duckdb_catalog(self, tables: List[sqlglot.exp.Expression], ast: sqlglot.exp.Expression) -> Optional[
+    def sync_duckdb_catalog(self, locations : typing.Dict[
+        sqlglot.exp.Table, sqlglot.exp.Expression], ast: sqlglot.exp.Expression) -> Optional[
         sqlglot.exp.Expression]:
-        try:
-            locations = self.catalog.get_table_references(self.duckdb, tables)
-        except DatabaseError as e:
-            error_message = (f"[{self.token}] Unable to find location of Iceberg tables. "
-                             f"See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}")
-            cloud_logger.warning(error_message)
-            return None
 
         views = [f"CREATE OR REPLACE VIEW main.\"{table.sql()}\" AS SELECT * FROM {expression.sql()};" for
                  table, expression in locations.items()]
@@ -90,7 +84,7 @@ class UniverSQLSession:
         start_time = time.perf_counter()
         compute = self.context.get('compute')
         catalog = self.context.get('catalog')
-        local_error_message = ""
+        local_error_message = None
 
         try:
             queries = sqlglot.parse(raw_query, read="snowflake")
@@ -109,12 +103,20 @@ class UniverSQLSession:
                     run_snowflake_already = True
                 else:
                     tables = list(ast.find_all(sqlglot.exp.Table))
-                    transformed_ast = self.sync_duckdb_catalog(tables, simplify(ast))
+
+                    locations = None
+                    try:
+                        locations = self.catalog.get_table_references(self.duckdb, tables)
+                    except DatabaseError as e:
+                        local_error_message = (f"Unable to find location of Iceberg tables. "
+                                         f"See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}")
+
+                    transformed_ast = self.sync_duckdb_catalog(locations, simplify(ast)) if locations is not None else None
                     if transformed_ast is None:
                         can_run_locally = False
                         break
-                    sql = transformed_ast.sql(dialect="duckdb", pretty=True)
 
+                    sql = transformed_ast.sql(dialect="duckdb", pretty=True)
                     try:
                         self.duckdb_emulator.execute(sql)
                         logger.info(f"[{self.token}] executing DuckDB query:\n{prepend_to_lines(sql)}")
@@ -131,10 +133,13 @@ class UniverSQLSession:
             logger.info(f"[{self.token}] Run locally 🚀 ({get_friendly_time_since(start_time)})")
             return self.get_duckdb_result()
         else:
-            if local_error_message:
+            if local_error_message is not None:
                 logger.error(f"[{self.token}] {local_error_message}")
                 if not should_run_locally:
                     raise SnowflakeError(self.token, local_error_message)
+                if compute == Compute.LOCAL.value:
+                    hard_error_message = "The query failed to run locally, and the compute is set to LOCAL. Cause: "
+                    raise SnowflakeError(self.token, hard_error_message + local_error_message)
             self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
             return self.get_snowflake_result()
 
