@@ -58,8 +58,10 @@ async def login_request(request: Request) -> JSONResponse:
         credentials["database"] = params.get('databaseName')
     if "warehouse" not in credentials:
         credentials["warehouse"] = params.get('warehouse')
-    if "warehouse" not in credentials:
+    if "role" not in credentials:
         credentials["role"] = params.get('roleName')
+    if "schema" not in credentials:
+        credentials["schema"] = params.get('schemaName')
 
     token = str(uuid4())
     message = None
