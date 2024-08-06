@@ -247,11 +247,10 @@ def harakiri(sig, frame):
 #         last_intent_to_kill = time.time()
 
 @app.on_event("shutdown")
-async def startup_event():
+async def shutdown_event():
     kill_event.set()
     for token, session in sessions.items():
         session.close()
-    thread.join()
 
 
 @app.on_event("startup")
