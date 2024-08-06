@@ -10,13 +10,6 @@ import sqlglot
 from universql.util import time_me
 from universql.warehouse.duckdb import fix_snowflake_to_duckdb_types
 
-cache = "/Users/bkabak/.universql/cache"
-@time_me
-def test_cache_size():
-    print(sum(f.stat().st_size for f in Path(cache).glob('**/*') if f.is_file()))
-
-test_cache_size()
-test_cache_size()
 # queries = sqlglot.parse("""
 # SET tables = (SHOW TABLES);
 #

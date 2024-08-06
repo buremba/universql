@@ -19,8 +19,9 @@ from universql.util import SnowflakeError
 MAX_LIMIT = 10000
 
 logging.basicConfig(level=logging.INFO)
-cloud_logger = logging.getLogger("❄️(cloud services)")
+logger = logging.getLogger("❄️")
 
+queries_that_doesnt_need_warehouse = ["show"]
 
 class SnowflakeIcebergCursor(Cursor):
     def __init__(self, query_id, cursor: SnowflakeCursor):
@@ -33,17 +34,12 @@ class SnowflakeIcebergCursor(Cursor):
         else:
             compiled_sql = ";".join([ast.sql(dialect="snowflake", pretty=True) for ast in asts])
         try:
-            self.cursor.execute(compiled_sql)
-            emoji = ""
-            if all(ast.key == 'show' for ast in asts):
-                logger = cloud_logger
-            else:
-                emoji = "💰"
-                logger = logging.getLogger(f"❄️{self.cursor.connection.warehouse}")
-
+            run_on_warehouse = not all(ast.name in queries_that_doesnt_need_warehouse for ast in asts)
+            emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
             logger.info(f"[{self.query_id}] Running on Snowflake.. {emoji}")
+            self.cursor.execute(compiled_sql)
         except DatabaseError as e:
-            message = f"Unable to run Snowflake query: \n {compiled_sql} \n {e.msg}"
+            message = f"Unable to run Snowflake query {e.sfqid}: \n {compiled_sql} \n {e.msg}"
             raise SnowflakeError(e.sfqid, message, e.sqlstate)
 
     def close(self):
@@ -202,9 +198,6 @@ class SnowflakeShowIcebergTables(IcebergCatalog):
         cur.execute(final_query, values)
 
         result = cur.fetchall()
-        used_tables = ",".join(set(table.sql() for table in tables))
-        logging.getLogger("❄️cloud").info(
-            f"[{self.query_id}] Executed metadata query to get Iceberg table locations for tables {used_tables}")
         return {table: SnowflakeShowIcebergTables._get_ref(json.loads(result[0][idx])) for idx, table in
                 enumerate(tables)}
 

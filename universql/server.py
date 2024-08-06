@@ -48,14 +48,18 @@ async def login_request(request: Request) -> JSONResponse:
     client_environment = login_data.get('CLIENT_ENVIRONMENT')
     credentials = {key: client_environment[key] for key in ["schema", "warehouse", "role", "user", "database"] if
                    key in client_environment}
-    credentials['password'] = login_data.get('PASSWORD')
-
-    if "user" not in credentials:
+    if login_data.get('PASSWORD') is not None:
+        credentials['password'] = login_data.get('PASSWORD')
+    if "user" not in credentials and login_data.get('LOGIN_NAME') is not None:
         credentials["user"] = login_data.get("LOGIN_NAME")
+
+    params = request.query_params
     if "database" not in credentials:
-        credentials["database"] = request.query_params.get('databaseName')
+        credentials["database"] = params.get('databaseName')
     if "warehouse" not in credentials:
-        credentials["warehouse"] = request.query_params.get('warehouse')
+        credentials["warehouse"] = params.get('warehouse')
+    if "warehouse" not in credentials:
+        credentials["role"] = params.get('roleName')
 
     token = str(uuid4())
     message = None
@@ -81,12 +85,7 @@ async def login_request(request: Request) -> JSONResponse:
                     "token": token,
                     "masterToken": token,
                     "parameters": parameters,
-                    "sessionInfo": {
-                        "databaseName": credentials.get('database'),
-                        "schemaName": credentials.get('schema'),
-                        "warehouseName": credentials.get('warehouse'),
-                        "roleName": credentials.get('role')
-                    },
+                    "sessionInfo": {f'{k}Name': v for k, v in credentials.items()},
                     "idToken": None,
                     "idTokenValidityInSeconds": 0,
                     "responseData": None,
@@ -100,7 +99,7 @@ async def login_request(request: Request) -> JSONResponse:
             "masterValidityInSeconds": 14400,
             "displayUserName": "",
             "serverVersion": "duck",
-            "firstLogin": True,
+            "firstLogin": False,
             "remMeToken": None,
             "remMeValidityInSeconds": 0,
             "healthCheckInterval": 45,

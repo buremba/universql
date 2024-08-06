@@ -16,7 +16,7 @@ from sqlglot import ParseError
 from sqlglot.optimizer.simplify import simplify
 
 from universql.catalog import get_catalog
-from universql.catalog.snow.show_iceberg_tables import cloud_logger
+from universql.catalog.snow.show_iceberg_tables import logger as cloud_logger, queries_that_doesnt_need_warehouse
 from universql.lake.cloud import s3, gcs
 from universql.util import get_columns_for_duckdb, SnowflakeError, Compute, Catalog, get_friendly_time_since, \
     prepend_to_lines
@@ -24,7 +24,6 @@ from universql.util import get_columns_for_duckdb, SnowflakeError, Compute, Cata
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🐥")
 
-queries_that_doesnt_need_warehouse = ["show"]
 
 
 class UniverSQLSession:
@@ -35,7 +34,8 @@ class UniverSQLSession:
         self.token = token
         self.catalog = get_catalog(context, self.token,
                                    self.credentials)
-        self.duckdb = duckdb.connect(read_only=False, config={
+        duckdb_path = context.get('database_path')
+        self.duckdb = duckdb.connect(duckdb_path, config={
             'max_memory': context.get('max_memory'),
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
             'max_temp_directory_size': context.get('max_cache_size'),
@@ -94,15 +94,14 @@ class UniverSQLSession:
             queries = None
 
         should_run_locally = self.compute != Compute.SNOWFLAKE.value
-        can_run_locally = queries is not None
-        run_snowflake_already = False
+        last_compute = Compute.LOCAL if queries is not None else Compute.SNOWFLAKE
 
-        if can_run_locally and should_run_locally:
+        if last_compute == Compute.LOCAL and should_run_locally:
             for ast in queries:
-                if ast.key in queries_that_doesnt_need_warehouse and self.context.get(
+                if ast.name in queries_that_doesnt_need_warehouse and self.context.get(
                         'catalog') == Catalog.SNOWFLAKE.value:
                     self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
-                    run_snowflake_already = True
+                    last_compute = Compute.SNOWFLAKE
                 else:
                     tables = list(ast.find_all(sqlglot.exp.Table))
 
@@ -116,30 +115,35 @@ class UniverSQLSession:
                     transformed_ast = self.sync_duckdb_catalog(locations,
                                                                simplify(ast)) if locations is not None else None
                     if transformed_ast is None:
-                        can_run_locally = False
+                        last_compute = None
                         break
 
                     sql = transformed_ast.sql(dialect="duckdb", pretty=True)
                     try:
-                        self.duckdb_emulator.execute(sql)
                         logger.info(f"[{self.token}] executing DuckDB query:\n{prepend_to_lines(sql)}")
+                        self.duckdb_emulator.execute(sql)
+                        last_compute = Compute.LOCAL
                     except duckdb.Error as e:
                         local_error_message = f"Unable to run the parse locally on DuckDB. {e.args}"
-                        can_run_locally = False
+                        last_compute = None
                         break
                     except DatabaseError as e:
                         local_error_message = f"Unable to run the query locally on DuckDB. {e.msg}"
-                        can_run_locally = False
+                        last_compute = None
                         break
 
-        if can_run_locally and not run_snowflake_already and should_run_locally:
+        if last_compute == Compute.SNOWFLAKE:
+            return self.get_snowflake_result()
+        elif last_compute == Compute.LOCAL:
             logger.info(f"[{self.token}] Run locally 🚀 ({get_friendly_time_since(start_time)})")
             return self.get_duckdb_result()
-        else:
+        elif last_compute is None:
             if local_error_message is not None:
                 logger.error(f"[{self.token}] {local_error_message}")
             self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
             return self.get_snowflake_result()
+        else:
+            raise SnowflakeError(self.token, f"Unsupported compute type. {last_compute}")
 
     def do_snowflake_query(self, queries, raw_query, start_time, local_error_message):
         try:

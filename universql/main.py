@@ -57,6 +57,8 @@ def cli():
               type=str)
 @click.option('--max-cache-size', type=str, default=DEFAULTS["max_cache_size"],
               help='DuckDB maximum cache used in local disk (default: 80% of total available disk)')
+@click.option('--database-path', type=click.Path(exists=False, writable=True), default=":memory:",
+              help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)')
 def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, **kwargs):
     context__params = click.get_current_context().params
     auto_catalog_mode = catalog is None
