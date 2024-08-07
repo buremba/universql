@@ -12,6 +12,7 @@ import psutil
 import requests
 import uvicorn
 import yaml
+from requests import RequestException
 from requests.exceptions import SSLError
 
 from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Compute, Catalog, sizeof_fmt, prepend_to_lines
@@ -31,13 +32,16 @@ def cli():
     pass
 
 
+LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
+
+
 @cli.command(epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
 @click.option('--account',
               help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
               prompt='Account ID')
 @click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, type=int)
 @click.option('--host', help='Host for Snowflake proxy server (default: localhostcomputing.com)',
-              default="localhostcomputing.com",
+              default=LOCALHOSTCOMPUTING_COM,
               type=str)
 @click.option('--compute', type=click.Choice([e.value for e in Compute], case_sensitive=False),
               default=Compute.AUTO.value, help=f'Enforce the query execution layer (default: {Compute.AUTO.value}, try with DuckDB and use Snowflake if it fails)')
@@ -67,9 +71,9 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
             polaris_server_check = requests.get(
                 f"https://{account}.snowflakecomputing.com/polaris/api/catalog/v1/oauth/tokens")
             is_polaris = polaris_server_check.status_code == 405
-        except SSLError as e:
+        except RequestException as e:
             error_message = (f"Unable to find Snowflake account (https://{account}.snowflakecomputing.com), make sure if you have access to the Snowflake account. (maybe need VPN access?) \n"
-                             f"You can set `--catalog` property to avoid this error. \n {str(e.args[0])}")
+                             f"You can set `--catalog` property to avoid this error. \n {str(e.args)}")
             logger.error(error_message)
             sys.exit(1)
 
@@ -91,13 +95,13 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
     elif compute == Compute.SNOWFLAKE.value:
         logger.info("The queries will run directly on Snowflake")
 
-    if not ssl_keyfile or not ssl_certfile:
-        data = socket.gethostbyname_ex("localhostcomputing.com")
+    if host == LOCALHOSTCOMPUTING_COM:
+        data = socket.gethostbyname_ex(LOCALHOSTCOMPUTING_COM)
         logger.info(f"Using the SSL keyfile and certfile for localhostcomputing.com. DNS resolves to {data}")
         if "127.0.0.1" not in data[2]:
             logger.error(
                 "The DNS setting for localhostcomputing.com doesn't point to localhost, refusing to start. Please update UniverSQL.")
-            # sys.exit(1)
+            sys.exit(1)
 
     with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:
         cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
