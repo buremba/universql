@@ -15,13 +15,14 @@ from snowflake.connector.cursor import ResultMetadataV2, SnowflakeCursor
 
 from universql.catalog import IcebergCatalog, Cursor
 from universql.util import SnowflakeError
+from universql.warehouse.duckdb.utils import should_run_on_catalog
 
 MAX_LIMIT = 10000
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("❄️")
 
-queries_that_doesnt_need_warehouse = ["show"]
+
 
 class SnowflakeIcebergCursor(Cursor):
     def __init__(self, query_id, cursor: SnowflakeCursor):
@@ -34,7 +35,7 @@ class SnowflakeIcebergCursor(Cursor):
         else:
             compiled_sql = ";".join([ast.sql(dialect="snowflake", pretty=True) for ast in asts])
         try:
-            run_on_warehouse = not all(ast.name in queries_that_doesnt_need_warehouse for ast in asts)
+            run_on_warehouse = not all(should_run_on_catalog(ast) for ast in asts)
             emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
             logger.info(f"[{self.query_id}] Running on Snowflake.. {emoji}")
             self.cursor.execute(compiled_sql)
@@ -103,8 +104,8 @@ class SnowflakeIcebergCursor(Cursor):
             return result_data
 
     def get_field_for_snowflake(self, column: ResultMetadataV2, value: typing.Optional[pa.Array] = None) -> \
-    typing.Tuple[
-        pa.Field, pa.Array]:
+            typing.Tuple[
+                pa.Field, pa.Array]:
         arrow_field = FIELD_TYPES[column.type_code]
 
         metadata = {
@@ -180,7 +181,7 @@ class SnowflakeShowIcebergTables(IcebergCatalog):
         super().__init__(query_id, credentials)
         self.databases = {}
         try:
-            self.connection = snowflake.connector.connect(**credentials, account=account)
+            self.connection = snowflake.connector.connect(**credentials)
         except DatabaseError as e:
             raise SnowflakeError(self.query_id, e.msg, e.sqlstate)
 

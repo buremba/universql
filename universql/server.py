@@ -25,7 +25,7 @@ from universql.util import unpack_request_body, session_from_request, SnowflakeE
     print_dict_as_markdown_table
 from fastapi.encoders import jsonable_encoder
 
-from universql.warehouse.duckdb import UniverSQLSession
+from universql.warehouse.duckdb.duckdb import UniverSQLSession
 
 app = FastAPI()
 

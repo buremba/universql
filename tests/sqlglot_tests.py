@@ -1,14 +1,11 @@
 import time
-from pathlib import Path
 
-import psutil
 import pyarrow as pa
 
 import duckdb
 import sqlglot
 
-from universql.util import time_me
-from universql.warehouse.duckdb import fix_snowflake_to_duckdb_types
+from universql.warehouse.duckdb.duckdb import fix_snowflake_to_duckdb_types
 
 # queries = sqlglot.parse("""
 # SET tables = (SHOW TABLES);

@@ -1,3 +1,4 @@
+import logging
 import typing
 from typing import List
 
@@ -7,20 +8,21 @@ import sqlglot
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NoSuchTableError, OAuthError
 from pyiceberg.io import PY_IO_IMPL
-from pyiceberg.typedef import Identifier
 from snowflake.connector.options import pyarrow
 
 from universql.catalog import IcebergCatalog, Cursor
-from universql.lake.cloud import CACHE_DIRECTORY_KEY, get_iceberg_table_from_data_lake
+from universql.lake.cloud import CACHE_DIRECTORY_KEY
 from universql.util import SnowflakeError
 
+logger = logging.getLogger("🧊")
 
-class PolarisDuckDBCursor(Cursor):
+
+class IcebergDuckDBCursor(Cursor):
     def __init__(self, query_id: str, catalog: pyiceberg.catalog.Catalog):
         self.query_id = query_id
         self.catalog = catalog
 
-    def execute(self, query: sqlglot.exp.Expression):
+    def execute(self, ast: typing.Optional[sqlglot.exp.Expression], raw_query : str) -> None:
         raise SnowflakeError(self.query_id, "Polaris catalog only supports read-only queries")
 
     def get_as_table(self) -> pyarrow.Table:
@@ -33,8 +35,8 @@ class PolarisDuckDBCursor(Cursor):
         pass
 
 
-class PolarisCatalog(IcebergCatalog):
-    def __init__(self, cache_directory : str, account: str, query_id: str, credentials: dict):
+class PolarisIcebergCatalog(IcebergCatalog):
+    def __init__(self, cache_directory: str, account: str, query_id: str, credentials: dict):
         super().__init__(query_id, credentials)
         current_database = credentials.get('database')
         if current_database is None:
@@ -61,10 +63,12 @@ class PolarisCatalog(IcebergCatalog):
         try:
             iceberg_table = self.rest_catalog.load_table(table_ref)
         except NoSuchTableError:
-            raise SnowflakeError(self.query_id, f"Table {table_ref} doesn't exist in Polaris catalog `{self.credentials.get('database')}` or your role doesn't have access to the table.")
+            error = f"Table {table_ref} doesn't exist in Polaris catalog `{self.credentials.get('database')}` or your role doesn't have access to the table."
+            logger.error(error)
+            raise SnowflakeError(self.query_id, error)
         table_ref_sql = table.sql()
         cursor.register(table_ref_sql, iceberg_table.scan().to_arrow())
         return sqlglot.exp.parse_identifier(table_ref_sql)
 
     def cursor(self) -> Cursor:
-        return PolarisDuckDBCursor(self.query_id, self.rest_catalog)
+        return IcebergDuckDBCursor(self.query_id, self.rest_catalog)

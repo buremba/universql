@@ -11,13 +11,12 @@ import pkg_resources
 import psutil
 import requests
 import uvicorn
-import yaml
 from requests import RequestException
-from requests.exceptions import SSLError
 
-from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Compute, Catalog, sizeof_fmt, prepend_to_lines
+from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Compute, Catalog, sizeof_fmt, SNOWFLAKE_HOST
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(levelname)-6s %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger("🏠")
 
 DEFAULTS = {
@@ -35,16 +34,19 @@ def cli():
 LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
 
 
-@cli.command(epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
+@cli.command(
+    epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
 @click.option('--account',
               help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
-              prompt='Account ID')
+              prompt='Account ID', envvar='SNOWFLAKE_ACCOUNT')
 @click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, type=int)
 @click.option('--host', help='Host for Snowflake proxy server (default: localhostcomputing.com)',
               default=LOCALHOSTCOMPUTING_COM,
+              envvar='SERVER_HOST',
               type=str)
 @click.option('--compute', type=click.Choice([e.value for e in Compute], case_sensitive=False),
-              default=Compute.AUTO.value, help=f'Enforce the query execution layer (default: {Compute.AUTO.value}, try with DuckDB and use Snowflake if it fails)')
+              default=Compute.AUTO.value,
+              help=f'Enforce the query execution layer (default: {Compute.AUTO.value}, try with DuckDB and use Snowflake if it fails)')
 @click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
               help='Type of the Snowflake account. Automatically detected if not provided.')
 @click.option('--aws-profile', help='AWS profile to access S3 (default: `default`)', type=str)
@@ -52,7 +54,9 @@ LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
               help='GCP project to access GCS and apply quota. (to see how to setup auth for GCP and use different accounts, visit https://cloud.google.com/docs/authentication/application-default-credentials)',
               type=str)
 # @click.option('--azure-tenant', help='Azure account to access Blob Storage (ex: default az credentials)', type=str)
-@click.option('--ssl_keyfile', help='SSL keyfile for the proxy server, optional. Use it if you don\'t want to use localhostcomputing.com', type=str)
+@click.option('--ssl_keyfile',
+              help='SSL keyfile for the proxy server, optional. Use it if you don\'t want to use localhostcomputing.com',
+              type=str)
 @click.option('--ssl_certfile', help='SSL certfile for the proxy server, optional. ', type=str)
 @click.option('--max-memory', type=str, default=DEFAULTS["max_memory"],
               help='DuckDB Max memory to use for the server (default: 80% of total memory)')
@@ -72,8 +76,9 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
                 f"https://{account}.snowflakecomputing.com/polaris/api/catalog/v1/oauth/tokens")
             is_polaris = polaris_server_check.status_code == 405
         except RequestException as e:
-            error_message = (f"Unable to find Snowflake account (https://{account}.snowflakecomputing.com), make sure if you have access to the Snowflake account. (maybe need VPN access?) \n"
-                             f"You can set `--catalog` property to avoid this error. \n {str(e.args)}")
+            error_message = (
+                f"Unable to find Snowflake account (https://{account}.snowflakecomputing.com), make sure if you have access to the Snowflake account. (maybe need VPN access?) \n"
+                f"You can set `--catalog` property to avoid this error. \n {str(e.args)}")
             logger.error(error_message)
             sys.exit(1)
 
@@ -91,7 +96,8 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
     if compute == Compute.AUTO.value:
         logger.info("The queries will run on DuckDB and fallback to Snowflake warehouse if they fail.")
     elif compute == Compute.LOCAL.value:
-        logger.info("The queries will run on DuckDB and fallback to Snowflake only if a running warehouse is not needed")
+        logger.info(
+            "The queries will run on DuckDB and fallback to Snowflake only if a running warehouse is not needed")
     elif compute == Compute.SNOWFLAKE.value:
         logger.info("The queries will run directly on Snowflake")
 
@@ -103,19 +109,26 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
                 "The DNS setting for localhostcomputing.com doesn't point to localhost, refusing to start. Please update UniverSQL.")
             sys.exit(1)
 
-    with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:
-        cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
-        cert_file.flush()
-        with tempfile.NamedTemporaryFile(suffix='key.pem', delete=True) as key_file:
-            key_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['key']))
-            key_file.flush()
+    # Don't use SSL inside Snowflake container
+    if SNOWFLAKE_HOST is None or ssl_certfile is not None:
+        with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:
+            cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
+            cert_file.flush()
+            with tempfile.NamedTemporaryFile(suffix='key.pem', delete=True) as key_file:
+                key_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['key']))
+                key_file.flush()
 
-            uvicorn.run("universql.server:app",
-                        host=host, port=port,
-                        ssl_keyfile=ssl_keyfile or key_file.name,
-                        ssl_certfile=ssl_certfile or cert_file.name,
-                        reload=False,
-                        use_colors=True)
+                uvicorn.run("universql.server:app",
+                            host=host, port=port,
+                            ssl_keyfile=ssl_keyfile or key_file.name,
+                            ssl_certfile=ssl_certfile or cert_file.name,
+                            reload=False,
+                            use_colors=True)
+    else:
+        uvicorn.run("universql.server:app",
+                    host=host, port=port,
+                    reload=False,
+                    use_colors=True)
 
 
 class EndpointFilter(logging.Filter):

@@ -7,21 +7,27 @@ import duckdb
 import sqlglot
 from snowflake.connector.options import pyarrow
 
-from universql.util import Catalog, Compute
+from universql.util import Catalog, Compute, SNOWFLAKE_HOST
 
+
+# for service-service communication inside Snowflake Container Service
 
 def get_catalog(context: dict, query_id: str, credentials: dict):
     catalog = context.get('catalog')
     account = context.get('account')
     if catalog == Catalog.SNOWFLAKE.value:
-        from universql.catalog.snow.show_iceberg_tables import SnowflakeShowIcebergTables
         if context.get('compute') == Compute.LOCAL.value:
             # make sure snowflake compute is not used
             credentials["warehouse"] = str(uuid4())
+        if context.get('account') is not None:
+            credentials["account"] = context.get('account')
+        if SNOWFLAKE_HOST is not None:
+            credentials["host"] = SNOWFLAKE_HOST
+        from universql.catalog.snowflake import SnowflakeShowIcebergTables
         return SnowflakeShowIcebergTables(account, query_id, credentials)
     elif catalog == Catalog.POLARIS.value:
-        from universql.catalog.snow.polaris import PolarisCatalog
-        return PolarisCatalog(context.get('cache_directory'), account, query_id, credentials)
+        from universql.catalog.iceberg import PolarisIcebergCatalog
+        return PolarisIcebergCatalog(context.get('cache_directory'), account, query_id, credentials)
 
     raise ValueError(f"Unsupported catalog: {catalog}")
 

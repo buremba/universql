@@ -16,13 +16,16 @@ from sqlglot import ParseError
 from sqlglot.optimizer.simplify import simplify
 
 from universql.catalog import get_catalog
-from universql.catalog.snow.show_iceberg_tables import logger as cloud_logger, queries_that_doesnt_need_warehouse
+from universql.catalog.snowflake import logger as cloud_logger
 from universql.lake.cloud import s3, gcs
-from universql.util import get_columns_for_duckdb, SnowflakeError, Compute, Catalog, get_friendly_time_since, \
+from universql.util import get_columns_for_duckdb, SnowflakeError, Compute, get_friendly_time_since, \
     prepend_to_lines
+from universql.warehouse.duckdb.utils import DuckDBFunctions, should_run_on_catalog
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🐥")
+
+DuckDBFunctions.register(duckdb)
 
 
 class UniverSQLSession:
@@ -47,7 +50,7 @@ class UniverSQLSession:
         fake_snowflake_conn.schema_set = True
         self.duckdb_emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
 
-        self.snowflake = self.catalog.cursor()
+        self.catalog_cursor = self.catalog.cursor()
         self.register_data_lake(context)
         self.processing = False
         self.compute = self.context.get('compute')
@@ -97,8 +100,7 @@ class UniverSQLSession:
 
         if last_compute == Compute.LOCAL and should_run_locally:
             for ast in queries:
-                if ast.name in queries_that_doesnt_need_warehouse and self.context.get(
-                        'catalog') == Catalog.SNOWFLAKE.value:
+                if should_run_on_catalog(ast) and not should_run_locally:
                     self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
                     last_compute = Compute.SNOWFLAKE
                 else:
@@ -113,7 +115,7 @@ class UniverSQLSession:
                             break
 
                     if last_compute is not None:
-                        locations = None
+                        locations = {}
                         try:
                             locations = self.catalog.get_table_references(self.duckdb, tables)
                         except DatabaseError as e:
@@ -155,7 +157,7 @@ class UniverSQLSession:
 
     def do_snowflake_query(self, queries, raw_query, start_time, local_error_message):
         try:
-            self.snowflake.execute(queries, raw_query)
+            self.catalog_cursor.execute(queries, raw_query)
             logger.info(f"[{self.token}] Query is done. ({get_friendly_time_since(start_time)})")
         except SnowflakeError as e:
             final_error = f" {'[DuckDB]: ' + local_error_message + '. ' if local_error_message else ''}\n [Snowflake]: {e.message}"
@@ -175,7 +177,7 @@ class UniverSQLSession:
 
     def close(self):
         self.duckdb_emulator.close()
-        self.snowflake.close()
+        self.catalog_cursor.close()
 
     def get_field_from_duckdb(self, column: list[str], arrow_table: Table, idx: int) -> typing.Tuple[
         Optional[ChunkedArray], pa.Field]:
@@ -298,8 +300,8 @@ class UniverSQLSession:
         return "arrow", get_columns_for_duckdb(arrow_table.schema), arrow_table
 
     def get_snowflake_result(self):
-        arrow = self.snowflake.get_as_table()
-        columns = self.snowflake.get_v1_columns()
+        arrow = self.catalog_cursor.get_as_table()
+        columns = self.catalog_cursor.get_v1_columns()
         return "arrow", columns, arrow
 
 
