@@ -25,7 +25,6 @@ from universql.warehouse.duckdb.utils import DuckDBFunctions, should_run_on_cata
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🐥")
 
-DuckDBFunctions.register(duckdb)
 
 
 class UniverSQLSession:
@@ -42,6 +41,7 @@ class UniverSQLSession:
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
             'max_temp_directory_size': context.get('max_cache_size'),
         })
+        DuckDBFunctions.register(self.duckdb)
         self.duckdb.install_extension("iceberg")
         self.duckdb.load_extension("iceberg")
 
