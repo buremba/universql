@@ -26,7 +26,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🐥")
 
 
-
 class UniverSQLSession:
     def __init__(self, context, token, credentials: dict, session_parameters: dict):
         self.context = context
@@ -63,14 +62,22 @@ class UniverSQLSession:
         sqlglot.exp.Table, sqlglot.exp.Expression], ast: sqlglot.exp.Expression) -> Optional[
         sqlglot.exp.Expression]:
 
+        schemas = set((table.catalog, table.db) for table in locations.keys())
+        databases = set(table[0] for table in schemas)
 
-        views = [f"CREATE OR REPLACE VIEW main.{sqlglot.exp.parse_identifier(table.sql())} AS SELECT * FROM {expression.sql()};" for
-                 table, expression in locations.items()]
-        views_sql = "\n".join(views)
-        if views:
+        databases_sql = [f"ATTACH IF NOT EXISTS ':memory:' AS {sqlglot.exp.parse_identifier(database).sql()}" for database in
+                         databases]
+        schemas_sql = [
+            f"CREATE SCHEMA IF NOT EXISTS {sqlglot.exp.parse_identifier(db).sql()}.{sqlglot.exp.parse_identifier(schema).sql()}" for
+            (db, schema) in schemas]
+        views_sql = [f"CREATE OR REPLACE VIEW {table.sql()} AS SELECT * FROM {expression.sql()};" for table, expression
+                     in locations.items()]
+        views_sql = ";\n".join(databases_sql + schemas_sql + views_sql)
+
+        if views_sql != "":
             self.duckdb.execute(views_sql)
             logger.info(
-                f"[{self.token}] DuckDB environment is setting up, creating views for remote tables: \n{prepend_to_lines(views_sql)}")
+                f"[{self.token}] DuckDB environment is setting up:\n{prepend_to_lines(views_sql)}")
 
         def replace_icebergs_with_duckdb_reference(
                 expression: sqlglot.exp.Expression) -> sqlglot.exp.Expression:
@@ -84,7 +91,9 @@ class UniverSQLSession:
 
             return expression
 
-        return ast.transform(replace_icebergs_with_duckdb_reference).transform(fix_snowflake_to_duckdb_types)
+        return (ast
+                # .transform(replace_icebergs_with_duckdb_reference)
+                .transform(fix_snowflake_to_duckdb_types))
 
     def _do_query(self, raw_query: str) -> (str, List, pyarrow.Table):
         start_time = time.perf_counter()
@@ -119,9 +128,8 @@ class UniverSQLSession:
                         locations = {}
                         try:
                             locations = self.catalog.get_table_references(self.duckdb, tables)
-                        except DatabaseError as e:
-                            local_error_message = (f"Unable to find location of Iceberg tables. "
-                                                   f"See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}")
+                        except SnowflakeError as e:
+                            local_error_message = e.message
 
                         try:
                             transformed_ast = self.sync_duckdb_catalog(locations,
@@ -166,7 +174,9 @@ class UniverSQLSession:
             self.catalog_cursor.execute(queries, raw_query)
             logger.info(f"[{self.token}] Query is done. ({get_friendly_time_since(start_time)})")
         except SnowflakeError as e:
-            final_error = f" {'[DuckDB]: ' + local_error_message + '. ' if local_error_message else ''}\n [Snowflake]: {e.message}"
+            final_error = f"[Snowflake]: {e.message}"
+            if local_error_message:
+                final_error += f"\n[DuckDB]: {local_error_message}"
             if self.compute == Compute.LOCAL.value:
                 final_error = "The query without warehouse failed to run remotely, and the compute is set to LOCAL.\n" + final_error
 

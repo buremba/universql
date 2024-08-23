@@ -16,15 +16,17 @@ def get_catalog(context: dict, query_id: str, credentials: dict):
     catalog = context.get('catalog')
     account = context.get('account')
     if catalog == Catalog.SNOWFLAKE.value:
-        if context.get('compute') == Compute.LOCAL.value:
+        must_run_locally = context.get('compute') == Compute.LOCAL.value
+        if must_run_locally:
             # make sure snowflake compute is not used
             credentials["warehouse"] = str(uuid4())
+
         if context.get('account') is not None:
             credentials["account"] = context.get('account')
         if SNOWFLAKE_HOST is not None:
             credentials["host"] = SNOWFLAKE_HOST
         from universql.catalog.snowflake import SnowflakeShowIcebergTables
-        return SnowflakeShowIcebergTables(account, query_id, credentials)
+        return SnowflakeShowIcebergTables(must_run_locally, query_id, credentials)
     elif catalog == Catalog.POLARIS.value:
         from universql.catalog.iceberg import PolarisIcebergCatalog
         return PolarisIcebergCatalog(context.get('cache_directory'), account, query_id, credentials)

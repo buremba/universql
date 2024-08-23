@@ -23,11 +23,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("❄️")
 
 
-
 class SnowflakeIcebergCursor(Cursor):
-    def __init__(self, query_id, cursor: SnowflakeCursor):
+    def __init__(self, cant_use_warehouse : bool, query_id : str, cursor: SnowflakeCursor):
         self.query_id = query_id
         self.cursor = cursor
+        self.cant_use_warehouse = cant_use_warehouse
 
     def execute(self, asts: typing.Optional[List[sqlglot.exp.Expression]], raw_query: str) -> None:
         if asts is None:
@@ -35,7 +35,7 @@ class SnowflakeIcebergCursor(Cursor):
         else:
             compiled_sql = ";".join([ast.sql(dialect="snowflake", pretty=True) for ast in asts])
         try:
-            run_on_warehouse = not all(should_run_on_catalog(ast) for ast in asts)
+            run_on_warehouse = not self.cant_use_warehouse and not all(should_run_on_catalog(ast) for ast in asts)
             emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
             logger.info(f"[{self.query_id}] Running on Snowflake.. {emoji}")
             self.cursor.execute(compiled_sql)
@@ -177,30 +177,35 @@ class SnowflakeIcebergCursor(Cursor):
 
 
 class SnowflakeShowIcebergTables(IcebergCatalog):
-    def __init__(self, account: str, query_id: str, credentials: dict):
+    def __init__(self, cant_use_warehouse: bool, query_id: str, credentials: dict):
         super().__init__(query_id, credentials)
         self.databases = {}
+        self.cant_use_warehouse = cant_use_warehouse
         try:
             self.connection = snowflake.connector.connect(**credentials)
         except DatabaseError as e:
             raise SnowflakeError(self.query_id, e.msg, e.sqlstate)
 
     def cursor(self) -> Cursor:
-        return SnowflakeIcebergCursor(self.query_id, self.connection.cursor())
+        return SnowflakeIcebergCursor(self.cant_use_warehouse, self.query_id, self.connection.cursor())
 
     def get_table_references(self, cursor: duckdb.DuckDBPyConnection, tables: List[sqlglot.exp.Table]) -> typing.Dict[
         sqlglot.exp.Table, sqlglot.exp.Expression]:
         if len(tables) == 0:
             return {}
         sqls = ["SYSTEM$GET_ICEBERG_TABLE_INFORMATION(%s)" for _ in tables]
-        values = [table.sql(dialect="snowflake") for table in tables]
+        values = [table.sql(comments=False, dialect="snowflake") for table in tables]
         cur = self.connection.cursor()
         final_query = f"SELECT {(', '.join(sqls))}"
-        cur.execute(final_query, values)
-
-        result = cur.fetchall()
-        return {table: SnowflakeShowIcebergTables._get_ref(json.loads(result[0][idx])) for idx, table in
-                enumerate(tables)}
+        try:
+            cur.execute(final_query, values)
+            result = cur.fetchall()
+            return {table: SnowflakeShowIcebergTables._get_ref(json.loads(result[0][idx])) for idx, table in
+                    enumerate(tables)}
+        except DatabaseError as e:
+            raise SnowflakeError(self.query_id,
+                                 f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}",
+                                 e.sqlstate)
 
     @staticmethod
     def _get_ref(table_information):
