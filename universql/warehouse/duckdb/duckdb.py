@@ -63,7 +63,8 @@ class UniverSQLSession:
         sqlglot.exp.Table, sqlglot.exp.Expression], ast: sqlglot.exp.Expression) -> Optional[
         sqlglot.exp.Expression]:
 
-        views = [f"CREATE OR REPLACE VIEW main.\"{table.sql()}\" AS SELECT * FROM {expression.sql()};" for
+
+        views = [f"CREATE OR REPLACE VIEW main.{sqlglot.exp.parse_identifier(table.sql())} AS SELECT * FROM {expression.sql()};" for
                  table, expression in locations.items()]
         views_sql = "\n".join(views)
         if views:
@@ -122,8 +123,13 @@ class UniverSQLSession:
                             local_error_message = (f"Unable to find location of Iceberg tables. "
                                                    f"See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}")
 
-                        transformed_ast = self.sync_duckdb_catalog(locations,
-                                                                   simplify(ast)) if locations is not None else None
+                        try:
+                            transformed_ast = self.sync_duckdb_catalog(locations,
+                                                                       simplify(ast)) if locations is not None else None
+                        except Exception as e:
+                            transformed_ast = e
+                            local_error_message = f"Unable to sync DuckDB catalog. {str(e)}"
+
                         if transformed_ast is None:
                             last_compute = None
                             break
