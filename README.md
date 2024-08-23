@@ -177,8 +177,8 @@ On Macbook Pro M2 2023, the performance is comparable to Snowflake up to 2B rows
 
 ### Latency
 
-The latency relies on your network bandwidth. Your local disk is used for caching the data in data lake and the cache is populated lazily as you query the data and persisted across multiple runs.
-Cold runs will likely to be slower than running the query on Snowflake as the data needs to be downloaded from the data lake with UniverSQL whereas Snowflake runs the compute in the same cloud region.
+The latency relies on your network bandwidth. Your local disk is used for caching the data in a data lake and the cache is populated lazily as you query the data and persists across multiple runs.
+Cold runs will likely be slower than running the query on Snowflake as the data needs to be downloaded from the data lake with UniverSQL whereas Snowflake runs the compute in the same cloud region.
 
 The subsequent queries (hot run) on the same table will be served from the cache. If the Iceberg table is updated, only the new data is downloaded from the data lake. 
 The same data is never downloaded more than once.
@@ -186,9 +186,9 @@ Iceberg supports predicate pushdown, which helps with partitioned tables to redu
 
 ## Signed certificates are required in Snowflake SQL V1 API
 
-Snowflake V1 API requires valid CA certificate, which is [not possible with self-signed certificates](https://letsencrypt.org/docs/certificates-for-localhost/). 
+Snowflake V1 API requires a valid CA certificate, which is [not possible with self-signed certificates](https://letsencrypt.org/docs/certificates-for-localhost/). 
 
-If you don't need to expose UniverSQL to public internet with a public tunnel service, UniverSQL ships SSL certificate of [localhostcomputing.com](https://localhostcomputing.com) domain in the binary, which has [DNS record to 127.0.0.1](https://mxtoolbox.com/SuperTool.aspx?action=a%3alocalhostcomputing.com&run=toolpage). 
+If you don't need to expose UniverSQL to the public internet with a public tunnel service, UniverSQL ships SSL certificate of [localhostcomputing.com](https://localhostcomputing.com) domain in the binary, which has [DNS record to 127.0.0.1](https://mxtoolbox.com/SuperTool.aspx?action=a%3alocalhostcomputing.com&run=toolpage). 
 It gives you free https connection to your local server and it's the default host. 
 
 > [!NOTE] 
@@ -208,7 +208,7 @@ For Data lake, S3 and GCS supported.
 
 You have two alternatives:
 
-1. Create a dynamic iceberg table replicating from your native Snowflake table. This approach requires warehouse but the usage will be minimum as dynamic tables are serverless, with the caveat to have some lag provided in `TARGET_LAG` option. 
+1. Create a dynamic iceberg table replicating your native Snowflake table. This approach requires a warehouse but the usage will be minimal as dynamic tables are serverless, with the caveat of having some lag provided in `TARGET_LAG` option. 
 
  ```sql
  CREATE DYNAMIC ICEBERG TABLE my_iceberg_snowflake_table 
@@ -220,7 +220,7 @@ You have two alternatives:
     INITIALIZE = on_create
  AS SELECT * FROM my_snowflake_table;
 ```
-Dynamic tables is the recommended approach **if your natives tables have more than 2B+ of rows** so that you can filter / aggregate them before pulling them into your local environment. If your native tables are small enough, consider switching them to use Iceberg from Native.
+Dynamic tables are the recommended approach **if your native tables have more than 1B+ of rows** so that you can filter/aggregate them before pulling them into your local environment. If your native tables are small enough, consider switching them to Iceberg from Native.
 
 2. (coming soon) You can use `universql.execute` function to run queries directly in Snowflake and return the result as a table. You can join native Snowflake table with your local files as follows: 
 
@@ -246,5 +246,5 @@ The workaround is to use a public tunnel service to expose your local server to 
 
 ## No support for Snowflake SQL V2 API yet
 
-While SQL V1 API is internal, most Snowflake clients are using SQL V1 API, including JDBC, Python, ODBC etc. Feel free to help supporting [SQL V2 API](https://docs.snowflake.com/en/developer-guide/sql-api/intro) by contributing to the project. It should be easy enough as we already use Arrow interface for the V1 API, which is the interface for V2.
+While SQL V1 API is internal, most Snowflake clients are using SQL V1 API, including JDBC, Python, ODBC etc. Feel free to help support [SQL V2 API](https://docs.snowflake.com/en/developer-guide/sql-api/intro) by contributing to the project. It should be easy enough as we already use Arrow interface for the V1 API, which is the interface for V2.
 

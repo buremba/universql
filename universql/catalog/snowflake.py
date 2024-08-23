@@ -40,7 +40,7 @@ class SnowflakeIcebergCursor(Cursor):
             logger.info(f"[{self.query_id}] Running on Snowflake.. {emoji}")
             self.cursor.execute(compiled_sql)
         except DatabaseError as e:
-            message = f"Unable to run Snowflake query {e.sfqid}: \n {compiled_sql} \n {e.msg}"
+            message = f"Unable to run Snowflake query {e.sfqid}: \n {e.msg}"
             raise SnowflakeError(e.sfqid, message, e.sqlstate)
 
     def close(self):

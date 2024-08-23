@@ -4,7 +4,6 @@ import s3fs
 from fsspec.core import logger
 from fsspec.utils import setup_logging
 from pyiceberg.io import PY_IO_IMPL
-from pyiceberg.io.fsspec import FsspecFileIO
 from pyiceberg.table import StaticTable
 
 from universql.lake.fsspec_util import MonitoredSimpleCacheFileSystem
@@ -34,6 +33,7 @@ CACHE_DIRECTORY_KEY = "universql.cache_directory"
 
 
 def iceberg(data):
+    from pyiceberg.io.fsspec import FsspecFileIO
     io = FsspecFileIO(data)
     get_fs = io.get_fs
     io.get_fs = lambda name: MonitoredSimpleCacheFileSystem(

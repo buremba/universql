@@ -245,7 +245,10 @@ class TextLiteral:
 
 async def unpack_request_body(request: Request) -> dict:
     body = await request.body()
-    uz = gzip.decompress(body)
+    if request.headers.get('content-encoding') == 'gzip':
+        uz = gzip.decompress(body)
+    else:
+        uz = body
     return json.loads(uz)
 
 
@@ -324,6 +327,8 @@ def get_friendly_time_since(start_time):
 
 
 def prepend_to_lines(input_string, prepend_string=" ", vertical_string='------'):
+    if len(input_string) > 300:
+        input_string = input_string[0:300] + '[striped due to max 200 character limit]'
     lines = input_string.split('\n')
     modified_lines = [prepend_string + line for line in lines]
     modified_string = '\n'.join(modified_lines)

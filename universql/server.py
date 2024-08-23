@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import base64
-import gzip
-import json
 import logging
 import os
 import signal
@@ -39,11 +37,8 @@ logger = logging.getLogger("🧵")
 
 @app.post("/session/v1/login-request")
 async def login_request(request: Request) -> JSONResponse:
-    request_body = await request.body()
-    if request.headers.get('content-encoding') == 'gzip':
-        request_body = gzip.decompress(request_body)
+    body = await unpack_request_body(request)
 
-    body = json.loads(request_body)
     login_data = body.get('data')
     client_environment = login_data.get('CLIENT_ENVIRONMENT')
     credentials = {key: client_environment[key] for key in ["schema", "warehouse", "role", "user", "database"] if
@@ -127,7 +122,7 @@ async def delete_session(request: Request):
 
 @app.post("/telemetry/send")
 async def telemetry_request(request: Request) -> JSONResponse:
-    json = await request.json()
+    req = await unpack_request_body(request)
     return Response(status_code=200)
 
 
@@ -193,8 +188,8 @@ async def home(request: Request) -> JSONResponse:
     return JSONResponse({"success": True, "status": "X-Duck is ducking 🐥"})
 
 
-@app.get("/monitoring/queries/{query_id:str}")  # type: ignore[arg-type]
-async def query_monitoring_query(self, request: Request) -> JSONResponse:
+@app.get("/monitoring/queries/{query_id:str}")
+async def query_monitoring_query(request: Request) -> JSONResponse:
     query_id = request.path_params["query_id"]
     if query_id not in query_results:
         return JSONResponse({"success": False, "message": "query not found"})

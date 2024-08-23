@@ -100,7 +100,7 @@ class UniverSQLSession:
 
         if last_compute == Compute.LOCAL and should_run_locally:
             for ast in queries:
-                if should_run_on_catalog(ast) and not should_run_locally:
+                if should_run_on_catalog(ast) or not should_run_locally:
                     self.do_snowflake_query(queries, raw_query, start_time, local_error_message)
                     last_compute = Compute.SNOWFLAKE
                 else:
