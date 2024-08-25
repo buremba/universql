@@ -397,4 +397,4 @@ def calculate_script_cost(duration_second, electricity_rate=0.15, pc_lifetime_ye
     #     f"Hardware Cost: ${hardware_cost:.6f} | "
     #     f"Total Cost: ${total_cost:.6f}"
     # )
-    return f"~${total_cost:.6f}"
+    return f"~ ${total_cost:.6f}"

@@ -11,7 +11,7 @@ from fsspec.implementations.cached import SimpleCacheFileSystem
 from universql.util import get_total_directory_size
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("fsspec")
+logger = logging.getLogger("data_lake")
 
 
 class FileNameCacheMapper(AbstractCacheMapper):
