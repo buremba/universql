@@ -213,9 +213,9 @@ def watch_tower(cache_directory, **kwargs):
             percent = psutil.cpu_percent()
             cpu_percent = "%.1f" % percent
             memory_percent = "%.1f" % process.memory_percent()
-            disk_info = get_friendly_disk_usage(cache_directory)
-            logger.info(f"System: [CPU: {cpu_percent}%] [Memory: {memory_percent}%] [Disk: {disk_info}] "
-                        f"Currently {len(sessions)} sessions running {processing_sessions} queries. ")
+            disk_info = get_friendly_disk_usage(cache_directory, debug=ENABLE_DEBUG_WATCH_TOWER)
+            logger.info(f"Currently {len(sessions)} sessions running {processing_sessions} queries "
+                        f"| System: [CPU: {cpu_percent}%] [Memory: {memory_percent}%] [Disk: {disk_info}] ")
 
 
 thread = Thread(target=watch_tower, kwargs=(current_context))

@@ -24,7 +24,7 @@ logger = logging.getLogger("❄️")
 
 
 class SnowflakeIcebergCursor(Cursor):
-    def __init__(self, cant_use_warehouse : bool, query_id : str, cursor: SnowflakeCursor):
+    def __init__(self, cant_use_warehouse: bool, query_id: str, cursor: SnowflakeCursor):
         self.query_id = query_id
         self.cursor = cursor
         self.cant_use_warehouse = cant_use_warehouse
@@ -203,9 +203,8 @@ class SnowflakeShowIcebergTables(IcebergCatalog):
             return {table: SnowflakeShowIcebergTables._get_ref(json.loads(result[0][idx])) for idx, table in
                     enumerate(tables)}
         except DatabaseError as e:
-            raise SnowflakeError(self.query_id,
-                                 f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}",
-                                 e.sqlstate)
+            err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: {e.msg}"
+            raise SnowflakeError(self.query_id, err_message, e.sqlstate)
 
     @staticmethod
     def _get_ref(table_information):

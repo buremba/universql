@@ -64,7 +64,7 @@ last_free = None
 first_free = None
 
 
-def get_friendly_disk_usage(storage: str) -> str:
+def get_friendly_disk_usage(storage: str, debug=False) -> str:
     global last_free
     global first_free
     usage = psutil.disk_usage(storage)
@@ -74,11 +74,9 @@ def get_friendly_disk_usage(storage: str) -> str:
     message = f"{sizeof_fmt(current_usage)} used {sizeof_fmt(usage.free)} available"
     if last_free is not None:
         downloaded_recently = last_free - usage.free
-        if downloaded_recently > 10_000_000:
+        if downloaded_recently > 1_000_000 or debug:
             downloaded_since_start = first_free - usage.free
-            if downloaded_recently != downloaded_since_start:
-                message += f" delta: {sizeof_fmt(downloaded_recently)}"
-            message += f" delta since start: {sizeof_fmt(downloaded_since_start)}"
+            message += f" downloaded since start: {sizeof_fmt(downloaded_since_start)}"
 
     last_free = usage.free
     return message

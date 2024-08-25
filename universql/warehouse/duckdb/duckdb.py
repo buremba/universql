@@ -19,7 +19,7 @@ from universql.catalog import get_catalog
 from universql.catalog.snowflake import logger as cloud_logger
 from universql.lake.cloud import s3, gcs
 from universql.util import get_columns_for_duckdb, SnowflakeError, Compute, get_friendly_time_since, \
-    prepend_to_lines
+    prepend_to_lines, calculate_script_cost
 from universql.warehouse.duckdb.utils import DuckDBFunctions, should_run_on_catalog
 
 logging.basicConfig(level=logging.INFO)
@@ -159,7 +159,9 @@ class UniverSQLSession:
         if last_compute == Compute.SNOWFLAKE:
             return self.get_snowflake_result()
         elif last_compute == Compute.LOCAL:
-            logger.info(f"[{self.token}] Run locally 🚀 ({get_friendly_time_since(start_time)})")
+            performance_counter = time.perf_counter()
+            cost = calculate_script_cost(performance_counter - start_time)
+            logger.info(f"[{self.token}] Run locally 🚀 ({get_friendly_time_since(start_time, performance_counter)}, {cost})")
             return self.get_duckdb_result()
         elif last_compute is None:
             if local_error_message is not None:

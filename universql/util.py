@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, List, Tuple
 
 import humanize
+import psutil
 from pyarrow import Schema
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
@@ -321,8 +322,8 @@ def sizeof_fmt(num, suffix="B"):
     return f"{num:.1f}Y{suffix}"
 
 
-def get_friendly_time_since(start_time):
-    return humanize.precisedelta(datetime.timedelta(seconds=time.perf_counter() - start_time),
+def get_friendly_time_since(start_time, performance_counter=time.perf_counter()):
+    return humanize.precisedelta(datetime.timedelta(seconds=performance_counter - start_time),
                                  suppress=["days"], format="%0.3f")
 
 
@@ -360,5 +361,40 @@ def time_me(func):
 def get_total_directory_size(directory: str):
     return sum(f.stat().st_size for f in Path(directory).glob('**/*') if f.is_file())
 
+
 def remove_nulls_from_dict(input_dict):
     return {k: v for k, v in input_dict.items() if v is not None}
+
+
+def calculate_script_cost(duration_second, electricity_rate=0.15, pc_lifetime_years=5):
+    execution_time_hours = duration_second / (60 * 60)  # Convert ms to hours
+
+    # Get system information
+    cpu_count = psutil.cpu_count()
+    memory_gb = psutil.virtual_memory().total / (1024 ** 3)  # Convert bytes to GB
+
+    # Estimate hardware costs
+    cpu_cost_per_core = 50
+    memory_cost_per_gb = 5
+    total_hardware_cost = (cpu_count * cpu_cost_per_core) + (memory_gb * memory_cost_per_gb)
+
+    # Calculate hardware depreciation cost for the script duration
+    hardware_cost = (total_hardware_cost / (pc_lifetime_years * 365 * 24)) * execution_time_hours
+
+    # Estimate power consumption (assuming 50% utilization)
+    estimated_power_watts = (cpu_count * 25) + (memory_gb * 0.3)
+    power_consumed = (estimated_power_watts * 0.5 * execution_time_hours) / 1000  # in kWh
+
+    # Calculate electricity cost
+    electricity_cost = power_consumed * electricity_rate
+
+    total_cost = (electricity_cost + hardware_cost)
+
+    # (
+    #     f"Estimated Power: {estimated_power_watts:.2f} watts | "
+    #     f"Power Consumed: {power_consumed:.6f} kWh | "
+    #     f"Electricity Cost: ${electricity_cost:.6f} | "
+    #     f"Hardware Cost: ${hardware_cost:.6f} | "
+    #     f"Total Cost: ${total_cost:.6f}"
+    # )
+    return f"~${total_cost:.6f}"
