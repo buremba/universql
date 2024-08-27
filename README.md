@@ -120,8 +120,6 @@ Options:
   --help                          Show this message and exit.
 ```
 
-[![Interactive CLI](resources/cli_demo.gif)](/)
-
 # Access to Storage
 
 ### Polaris
