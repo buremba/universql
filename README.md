@@ -10,6 +10,9 @@ UniverSQL relies on Snowflake and Polaris for access control and data catalog so
 
 [![Demo](https://s3.ezgif.com/tmp/ezgif-3-7afce8acdb.gif)](https://www.youtube.com/watch?v=s1fpSEE-pAc)
 
+#### [Watch on YouTube](https://www.youtube.com/watch?v=s1fpSEE-pAc)
+
+
 # How it works?
 
 * Snowflake SQL API implementation to handle the Snowflake connections, acting as a proxy between DuckDB and Snowflake.
