@@ -8,7 +8,7 @@ UniverSQL relies on Snowflake and Polaris for access control and data catalog so
 > Any SQL client that supports Snowflake, also supports UniverSQL as we implement Snowflake's API to support compatibility. If you run into any issue using an app or client, feel free to [create a discussion](https://github.com/buremba/universql/discussions/categories/quality-testing). 
 
 
-[![Demo]([https://github.com/user-attachments/assets/03a77b0d-94f7-4c63-bc76-7c876456312d])](https://www.youtube.com/watch?v=s1fpSEE-pAc)
+[![Demo]([https://s3.ezgif.com/tmp/ezgif-3-7afce8acdb.gif])](https://www.youtube.com/watch?v=s1fpSEE-pAc)
 
 # How it works?
 
