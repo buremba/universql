@@ -174,7 +174,7 @@ class UniverSQLSession:
     def do_snowflake_query(self, queries, raw_query, start_time, local_error_message):
         try:
             self.catalog_cursor.execute(queries, raw_query)
-            logger.info(f"[{self.token}] Query is done. ({get_friendly_time_since(start_time)})")
+            logger.info(f"[{self.token}] Query is done. ({get_friendly_time_since(start_time, time.perf_counter())})")
         except SnowflakeError as e:
             final_error = f"[Snowflake]: {e.message}"
             if local_error_message:

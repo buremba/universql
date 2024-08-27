@@ -322,7 +322,7 @@ def sizeof_fmt(num, suffix="B"):
     return f"{num:.1f}Y{suffix}"
 
 
-def get_friendly_time_since(start_time, performance_counter=time.perf_counter()):
+def get_friendly_time_since(start_time, performance_counter):
     return humanize.precisedelta(datetime.timedelta(seconds=performance_counter - start_time),
                                  suppress=["days"], format="%0.3f")
 
