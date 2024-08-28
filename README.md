@@ -2,10 +2,11 @@
 
 UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and Polaris catalog, using DuckDB. 
 You can join Snowflake data with your local datasets, **without any need for a running warehouse**.
-UniverSQL relies on Snowflake and Polaris for access control and data catalog so it's complementary to your Snowflake workloads.  
+UniverSQL relies on Snowflake for access control and data catalog so it's complementary to your Snowflake workloads.  
 
 > [!WARNING]  
 > Any SQL client that supports Snowflake, also supports UniverSQL as we implement Snowflake's API to support compatibility. If you run into any issue using an app or client, feel free to [create a discussion](https://github.com/buremba/universql/discussions/categories/quality-testing). 
+> Universql is not affiliated with Snowflake. 
 
 
 [![Demo](./resources/cli_demo.png)](https://www.youtube.com/watch?v=s1fpSEE-pAc)
@@ -226,14 +227,14 @@ You have two alternatives:
 ```
 Dynamic tables are the recommended approach **if your native tables have more than 1B+ of rows** so that you can filter/aggregate them before pulling them into your local environment. If your native tables are small enough, consider switching them to Iceberg from Native.
 
-2. (coming soon) You can use `universql.execute` function to run queries directly in Snowflake and return the result as a table. You can join native Snowflake table with your local files as follows: 
+2. You can use `to_query` function to run queries directly in Snowflake and return the result as a table. You can join native Snowflake table with your local files as follows: 
 
 ```sql
-SELECT * FROM table(universql.execute('select col1 from my_snowflake_table', {'target_lag': '1h'})) t1 join 'local://./my_local_table.csv' as t2 on t1.col1 = t2.col1;
+SELECT * FROM table(to_query('select col1 from my_snowflake_table')) where col1 = 2
 ```
 
-UniverSQL doesn't actually require you to create the `universql.execute` function in your Snowflake database. When you use the proxy server, it will create a query plan to execute your Snowflake query first and map the result as an Arrow table in DuckDB. 
-This approach is recommended for hybrid execution where you need to query your native Snowflake tables on the fly. UniverSQL has query caching based on the setting `target_lag`, which is saved locally.
+UniverSQL doesn't actually require you to create the `to_query` function in your Snowflake database. When you use the proxy server, it will create a query plan to execute your Snowflake query first and map the result as an Arrow table in DuckDB. 
+This approach is recommended for hybrid execution where you need to query your native Snowflake tables on the fly. 
 
 ## Only read-only `SELECT` queries can use local warehouse.
 

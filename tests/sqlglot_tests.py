@@ -7,11 +7,14 @@ import sqlglot
 
 from universql.warehouse.duckdb.duckdb import fix_snowflake_to_duckdb_types
 
-# queries = sqlglot.parse("""
-# SET tables = (SHOW TABLES);
-#
-# select * from tables
-# """, read="snowflake")
+queries = sqlglot.parse("""
+SELECT * FROM TABLE(
+  TO_QUERY(
+    'SELECT * FROM IDENTIFIER($table_name)
+    WHERE deptno = TO_NUMBER(:dno)', dno => '10'
+    )
+  );
+""", read="snowflake")
 
 
 # query = sqlglot.parse_one("""
