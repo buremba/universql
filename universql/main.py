@@ -7,7 +7,6 @@ import typing
 from pathlib import Path
 
 import click
-import pkg_resources
 import psutil
 import requests
 import uvicorn
@@ -26,13 +25,12 @@ DEFAULTS = {
 
 
 @click.group()
-@click.version_option(version=pkg_resources.get_distribution('universql').version)
+@click.version_option(version="0.1")
 def cli():
     pass
 
 
 LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
-
 
 @cli.command(
     epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
@@ -85,8 +83,8 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
         context__params["catalog"] = Catalog.POLARIS.value if is_polaris else Catalog.SNOWFLAKE.value
 
     if context__params["catalog"] == Catalog.POLARIS.value:
-        if compute == Compute.SNOWFLAKE.value:
-            logger.error("Polaris catalog doesn't support Snowflake compute. Refusing to start.")
+        if compute != Compute.LOCAL.value:
+            logger.error("Polaris catalog only supports local compute. Refusing to start.")
             sys.exit(1)
 
     adjective = "apparently" if auto_catalog_mode else ""
