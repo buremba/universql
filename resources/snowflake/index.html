@@ -1,0 +1,3416 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html lang="en" xml:lang="en" xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
+    <title>Snowflake Cost Calculator</title>
+    <link href="https://unpkg.com/mvp.css" rel="stylesheet" />
+
+    <style>
+      .container {
+          max-width: 1200px;
+          margin: 0 auto;
+          padding: 20px;
+          background-color: #ffffff;
+          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          border-radius: 8px;
+        }
+
+        .container h1 {
+          color: #333333;
+          font-size: 24px;
+          margin-bottom: 20px;
+        }
+
+        .container p {
+          color: #666666;
+          line-height: 1.6;
+        }
+
+        table {
+          margin-top: 15px
+        }
+
+        input.cost-input {
+          width: 42px;
+          display: inline-block;
+          color: gray;
+          padding: 4px 7px;
+          margin-left: 5px;
+          border: 1px solid gray;
+      }
+
+        @media (max-width: 768px) {
+          .container {
+            padding: 15px;
+          }
+        }
+    </style>
+  </head>
+  <body class="container" x-data="costCalculator">
+    <h1>Snowflake Cost Calculator</h1>
+
+    <form>
+      <div style="display:inline-block">
+        <label for="service-edition">Snowflake Service Edition</label>
+        <select id="service-edition" x-model="edition">
+          <option value="2">Standard</option>
+          <option value="6">Enterprise</option>
+          <option value="8">Business Critical</option>
+        </select>
+      </div>
+      <div style="display:inline-block;margin-left:40px">
+      <label for="cloud-provider">Cloud Provider</label>
+      <select id="cloud-provider" x-model="cloud">
+        <option value="AWS">AWS</option>
+        <option value="GCP">GCP</option>
+        <option value="Azure">Azure</option>
+      </select>
+    </div><div style="display:inline-block;margin-left:40px">
+      <label for="region">Region</label>
+      <select id="region" x-model="region"></select>
+      </div>
+      </select>
+
+      <hr style="margin: 10px 0">
+    <div style="display:inline-block">
+      <label for="service-storage">Storage TBs</label>
+      <input type="number" id="service-storage" x-model="storage">
+      <p>Total storage cost is <b x-html="'$'+storage*$store.storage_cost.toFixed(2)"></b></p></span>
+    </div>
+      <p id="credit-cost">Total compute is <b x-html="total_credits"></b> credit / <select id="service-duration" x-model="duration" style="display:inline">
+        <option value="1">Hourly</option>
+        <option value="720">Monthly</option>
+        <option value="8640">Yearly</option>
+      </select>: <b x-html="'$'+(duration*service_cost*total_credits.toFixed(2))"></b>
+   </p>
+
+    </form>
+    <script>
+      document.querySelectorAll("select").forEach(function (select) {
+        select.addEventListener("change", function () {
+          let edition = document.getElementById("service-edition").value;
+          let tables = document.querySelectorAll("table");
+
+          for (let i = 0; i < 3; i++) {
+            // First three tables
+            let rows = tables[i].querySelectorAll("p");
+            rows.forEach(function (cell) {
+              let value = parseFloat(cell.innerText);
+              if (!isNaN(value)) {
+                cell.innerText = "$" + (value * multiplier).toFixed(2);
+              }
+            });
+          }
+        });
+      });
+    </script>
+    <script>
+      // populate regions
+      document.addEventListener('alpine:init', () => {
+        const select = document.querySelector('#region');
+        const cloud = document.querySelector('#cloud-provider');
+        const rows = document.querySelectorAll('#table5 tr');
+        const cloudRegions = {};
+
+        rows.forEach((row, idx) => {
+            if(idx < 3) return
+            const region = row.querySelector('td:nth-child(2)').textContent.trim();
+            const cloud = row.querySelector('td:nth-child(1)').textContent.trim();
+            var cloud_val = cloudRegions[cloud]
+            if(!cloud_val) {
+              cloudRegions[cloud] = cloud_val = new Set()
+            }
+            cloud_val.add(region)
+        });
+
+        cloudRegions[cloud.value].forEach(region => {
+          const option = document.createElement('option');
+          option.value = region;
+          option.textContent = region;
+          select.appendChild(option);
+      });
+      cloud.addEventListener('change', function() {
+        select.innerHTML = '';
+        cloudRegions[this.value].forEach(region => {
+          const option = document.createElement('option');
+          option.value = region;
+          option.textContent = region;
+          select.appendChild(option);
+      });
+      })
+    })
+    </script>
+    <script>
+      document.addEventListener('alpine:init', () => {
+          const tables = [ 'table10', 'table5', 'table7', 'table12', 'table14', 'table15', 'table17'];
+          const cloudProviderSelect = document.querySelector('#cloud-provider');
+          const regionSelect = document.querySelector('#region');
+          const edition = document.querySelector('#service-edition');
+
+          // Function to remove non-alphanumeric characters from a string
+          function sanitizeText(text) {
+              return text.replace(/[^a-z0-9]/gi, '').toLowerCase();
+          }
+
+          function filterTableRows(tableId) {
+              const rows = document.querySelectorAll(`#${tableId} tr`);
+              const selectedCloudProvider = sanitizeText(cloudProviderSelect.value);
+              const selectedRegion = sanitizeText(regionSelect.value);
+
+
+              rows.forEach((row, idx) => {
+                  const cloudProviderCell = row.querySelector('td:first-child');
+                  const regionCell = row.querySelector('td:nth-child(2)');
+
+                  // Check if the row has any cells
+                  if (!cloudProviderCell || !regionCell) return;
+
+                  const cloudProvider = sanitizeText(cloudProviderCell.innerText.trim());
+                  const region = sanitizeText(regionCell.innerText.trim());
+
+                  // Always show the header row or rows with "Cloud Provider" or empty values
+                  if (cloudProvider === "cloudprovider" || cloudProvider === "" || region === "") {
+                      row.style.display = '';
+                  } else {
+                      // Only display rows that match the sanitized selected cloud provider and region
+                      if (cloudProvider === selectedCloudProvider && region === selectedRegion) {
+                          if(tableId == 'table5') {
+                            Alpine.store('service_cost', parseFloat(row.children[parseInt(edition.value)].innerText.replace("$", "")))
+                          } else
+                          if(tableId == 'table7') {
+                            Alpine.store('storage_cost', parseFloat(row.children[2].innerText.replace("$", "")))
+                          }
+                          row.style.display = '';
+                      } else {
+                          row.style.display = 'none';
+                      }
+                  }
+              });
+          }
+
+          function filterAllTables() {
+              tables.forEach(tableId => filterTableRows(tableId));
+          }
+
+          // Filter rows on initial load
+          filterAllTables();
+
+          // Add event listeners to filter rows when selections change
+          cloudProviderSelect.addEventListener('change', filterAllTables);
+          regionSelect.addEventListener('change', filterAllTables);
+      });
+      </script>
+      <script>
+        document.addEventListener('alpine:init', () => {
+          Alpine.data('costCalculator', () => ({
+            total_credits: 0,
+            edition: 'Standard',
+            cloud: 'AWS',
+            region: 'US West (Oregon)',
+            storage: 1,
+            transfer: 1,
+            duration: '1',
+            service_cost: 2,
+            storage_cost:20,
+
+            init() {
+              this.updateTable();
+
+            },
+            updateTable() {
+              let self = this;
+              let cells = document.querySelectorAll('td p');
+              let processedFirst = false;
+
+              cells.forEach(function (cell) {
+                let value = cell.innerText;
+
+                // Use a regex to match only fully numeric values
+                if (/^\d+(\.\d+)?$/.test(value)) {
+                  let numericValue = parseFloat(value);
+
+                  // Multiply value by 2 and prefix with '$'
+                  let newValue = "$" + (numericValue * 2).toFixed(2);
+                  cell.innerHTML = newValue;
+
+                  // Create input field for each numeric value
+                  let input = document.createElement('input');
+                  input.type = 'number';
+                  input.classList.add('cost-input');
+                  input.value = !processedFirst ? 1 : '';
+                  input.placeholder = '0'
+                  input.setAttribute('credit', numericValue);
+
+                  input.addEventListener('input', function () {
+                    self.updateTotalCost();
+                  });
+
+                  cell.appendChild(input);
+                  processedFirst =  true;
+                }
+              });
+
+              this.updateTotalCost();
+            },
+            updateTotalCost() {
+              let inputs = document.querySelectorAll('.cost-input');
+              this.total_credits = 0;
+
+              inputs.forEach(input => {
+                this.total_credits += (parseFloat(input.value) || 0) * parseFloat(input.getAttribute('credit'));
+              });
+            }
+          }));
+        });
+      </script>
+      <script src="https://unpkg.com/alpinejs" defer></script>
+
+    <h1>
+          Generated from
+      <a href="https://www.snowflake.com/legal-files/CreditConsumptionTable.pdf"
+        >this pdf</a
+      > <a href="https://www.snowflake.com/en/data-cloud/pricing-options/"
+      >(Check pricing)</a
+    >  on October 1, 2024
+    </h1>
+    <table cellspacing="0" id="table1">
+      <tr>
+        <td colspan="10">
+          <a href="#table1"
+            >Table 1: Table 1(a): Snowflake Credit Table for Virtual Warehouse
+            Services, Standard Warehouse</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" colspan="10">
+          <p class="s10">Credits Per Hour</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s11">XS</p></td>
+        <td><p class="s11">S</p></td>
+        <td><p class="s11">M</p></td>
+        <td><p class="s11">L</p></td>
+        <td><p class="s11">XL</p></td>
+        <td><p class="s11">2XL</p></td>
+        <td><p class="s11">3XL</p></td>
+        <td><p class="s11">4XL</p></td>
+        <td>
+          <p class="s11">5XL</p>
+        </td>
+        <td>
+          <p>
+            <ab href="#bookmark0">6XL</ab>
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s11">1</p></td>
+        <td><p class="s11">2</p></td>
+        <td><p class="s11">4</p></td>
+        <td><p class="s11">8</p></td>
+        <td><p class="s11">16</p></td>
+        <td><p class="s11">32</p></td>
+        <td><p class="s11">64</p></td>
+        <td><p class="s11">128</p></td>
+        <td><p class="s11">256</p></td>
+        <td><p class="s11">512</p></td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table2">
+      <tr>
+        <td colspan="11">
+          <a href="#table2"
+            >Table 2: Table 1(b): Snowflake Credit Table for Virtual Warehouse
+            Services, Snowpark Optimized Warehouses</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" colspan="11">
+          <p class="s10">Credits Per Hour</p>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <p class="s10">
+            Resource Constraints
+          </p>
+        </td>
+        <td><p class="s11">XS</p></td>
+        <td><p class="s11">S</p></td>
+        <td><p class="s11">M</p></td>
+        <td><p class="s11">L</p></td>
+        <td><p class="s11">XL</p></td>
+        <td><p class="s11">2XL</p></td>
+        <td><p class="s11">3XL</p></td>
+        <td><p class="s11">4XL</p></td>
+        <td><p class="s11">5XL</p></td>
+        <td><p class="s11">6XL</p></td>
+      </tr>
+      <tr>
+        <td><p class="s11">MEMORY_1X</p></td>
+        <td><p class="s11">1</p></td>
+        <td><p class="s11">2</p></td>
+        <td><p class="s11">4</p></td>
+        <td><p class="s11">8</p></td>
+        <td><p class="s11">16</p></td>
+        <td><p class="s11">32</p></td>
+        <td><p class="s11">64</p></td>
+        <td><p class="s11">128</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+      </tr>
+      <tr>
+        <td><p class="s11">MEMORY_1X_x86</p></td>
+        <td><p class="s11">1.10</p></td>
+        <td><p class="s11">2.20</p></td>
+        <td><p class="s11">4.40</p></td>
+        <td><p class="s11">8.80</p></td>
+        <td><p class="s11">17.60</p></td>
+        <td><p class="s11">35.20</p></td>
+        <td><p class="s11">70.40</p></td>
+        <td><p class="s11">140.80</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+      </tr>
+      <tr>
+        <td>
+          <p class="s11">MEMORY_16X<span class="s12">6</span></p>
+        </td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">6</p></td>
+        <td><p class="s11">12</p></td>
+        <td><p class="s11">24</p></td>
+        <td><p class="s11">48</p></td>
+        <td><p class="s11">96</p></td>
+        <td><p class="s11">192</p></td>
+        <td><p class="s11">384</p></td>
+        <td><p class="s11">768</p></td>
+      </tr>
+      <tr>
+        <td><p class="s11">MEMORY_16X_x86</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">6.24</p></td>
+        <td><p class="s11">12.50</p></td>
+        <td><p class="s11">25</p></td>
+        <td><p class="s11">50</p></td>
+        <td><p class="s11">100</p></td>
+        <td><p class="s11">200</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+      </tr>
+      <tr>
+        <td><p class="s11">MEMORY_64X</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">15</p></td>
+        <td><p class="s11">30</p></td>
+        <td><p class="s11">60</p></td>
+        <td><p class="s11">120</p></td>
+        <td><p class="s11">240</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+      </tr>
+      <tr>
+        <td><p class="s11">MEMORY_64X_x86</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">16</p></td>
+        <td><p class="s11">32</p></td>
+        <td><p class="s11">64</p></td>
+        <td><p class="s11">128</p></td>
+        <td><p class="s11">256</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table3">
+      <tr>
+        <td colspan="9">
+          <a href="#table3"
+            >Table 3: ‌Table 1(c): Snowflake Credit Table for SPCS Compute</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" colspan="9">
+          <p class="s10">Credits Per Hour</p>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <p class="s10">Compute Node Types</p>
+        </td>
+        <td><p class="s11">XS</p></td>
+        <td><p class="s11">S</p></td>
+        <td><p class="s11">SM</p></td>
+        <td><p class="s11">M</p></td>
+        <td><p class="s11">2M</p></td>
+        <td><p class="s11">3M</p></td>
+        <td><p class="s11">SL</p></td>
+        <td><p class="s11">L</p></td>
+      </tr>
+      <tr>
+        <td><p class="s11">CPU</p></td>
+        <td><p class="s11">0.06</p></td>
+        <td><p class="s11">0.12</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">0.22</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">0.82</p></td>
+      </tr>
+      <tr>
+        <td><p class="s11">High-Memory CPU</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">0.28</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">1.12</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">4.44</p></td>
+      </tr>
+      <tr>
+        <td><p class="s11">GPU</p></td>
+        <td><p class="s11">0.24</p></td>
+        <td><p class="s11">0.56</p></td>
+        <td><p class="s11">1.70</p></td>
+        <td><p class="s11">2.68</p></td>
+        <td><p class="s11">3.50</p></td>
+        <td><p class="s11">3.54</p></td>
+        <td><p class="s11">13.50</p></td>
+        <td><p class="s11">14.12</p></td>
+      </tr>
+    </table>
+    <table cellspacing="0" id="table5" x-show="false">
+      <tr>
+        <td colspan="10">
+          <a href="#table5">Table 5: Table 2: On Demand Credit Pricing</a>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1"><p class="s10">Cloud Provider</p></td>
+        <td bgcolor="#C6D9F1"><p class="s10">Region</p></td>
+        <td bgcolor="#C6D9F1" colspan="8">
+          <p class="s10">Snowflake Service Edition</p>
+        </td>
+      </tr>
+      <tr>
+        <td>
+
+        </td>
+        <td>
+
+        </td>
+        <td><p class="s10">Standard</p></td>
+        <td>
+          <p class="s10">Premier<span class="s14">9</span></p>
+        </td>
+        <td>
+          <p class="s10">Premier</p>
+          <p>
+            <ab class="s18" href="#bookmark3"
+              >+1<ab class="s16" href="#bookmark3">9</ab>
+            </ab>
+          </p>
+        </td>
+        <td>
+          <p class="s10">Premier</p>
+          <p>
+            <ab class="s18" href="#bookmark3"
+              >+2<ab class="s16" href="#bookmark3">9</ab>
+            </ab>
+          </p>
+        </td>
+        <td><p class="s10">Enterprise</p></td>
+        <td>
+          <p>
+            <ab class="s18" href="#bookmark3"
+              >Enterprise + Private Link<ab class="s16" href="#bookmark3">9</ab>
+            </ab>
+          </p>
+        </td>
+        <td><p class="s10">Business Critical</p></td>
+        <td>
+          <p class="s10">VPS<span class="s14">10</span></p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US West (Oregon)</p></td>
+        <td><p class="s11">$2</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Dublin</p></td>
+        <td><p class="s11">$2.60</p></td>
+        <td><p class="s11">$2.95</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$5.20</p></td>
+        <td><p class="s11">$7.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Frankfurt</p></td>
+        <td><p class="s11">$2.60</p></td>
+        <td><p class="s11">$2.95</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$5.20</p></td>
+        <td><p class="s11">$7.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Sydney</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3.05</p></td>
+        <td><p class="s11">$3.45</p></td>
+        <td><p class="s11">$3.75</p></td>
+        <td><p class="s11">$4.05</p></td>
+        <td><p class="s11">$4.50</p></td>
+        <td><p class="s11">$5.50</p></td>
+        <td><p class="s11">$8.25</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Singapore</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.80</p></td>
+        <td><p class="s11">$3.10</p></td>
+        <td><p class="s11">$3.40</p></td>
+        <td><p class="s11">$3.70</p></td>
+        <td><p class="s11">$4.05</p></td>
+        <td><p class="s11">$5</p></td>
+        <td><p class="s11">$7.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Canada Central</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.50</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.50</p></td>
+        <td><p class="s11">$6.75</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East 2 (Ohio)</p></td>
+        <td><p class="s11">$2</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Northeast 1 (Tokyo)</p></td>
+        <td><p class="s11">$2.85</p></td>
+        <td><p class="s11">$3.20</p></td>
+        <td><p class="s11">$3.45</p></td>
+        <td><p class="s11">$3.75</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$4.70</p></td>
+        <td><p class="s11">$5.70</p></td>
+        <td><p class="s11">$8.55</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Mumbai</p></td>
+        <td><p class="s11">$2.20</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.70</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$4.40</p></td>
+        <td><p class="s11">$6.60</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">US East 1 Commercial Gov</p></td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">$4.80</p>
+        </td>
+        <td>
+
+          <p class="s11">$7.20</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Europe (London)</p></td>
+        <td><p class="s11">$2.70</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.40</p></td>
+        <td><p class="s11">$3.70</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$4.40</p></td>
+        <td><p class="s11">$5.40</p></td>
+        <td><p class="s11">$8.10</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Seoul)</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3.05</p></td>
+        <td><p class="s11">$3.45</p></td>
+        <td><p class="s11">$3.75</p></td>
+        <td><p class="s11">$4.05</p></td>
+        <td><p class="s11">$4.50</p></td>
+        <td><p class="s11">$5.50</p></td>
+        <td><p class="s11">$8.25</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">$5.60</p></td>
+        <td><p class="s11">$8.40</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">US Gov West 1 (Fedramp High Plus)</p></td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">$5.60</p>
+        </td>
+        <td>
+
+          <p class="s11">$8.40</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Europe (Stockholm)</p></td>
+        <td><p class="s11">$2.60</p></td>
+        <td><p class="s11">$2.95</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$5.20</p></td>
+        <td><p class="s11">$7.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Osaka)</p></td>
+        <td><p class="s11">$2.85</p></td>
+        <td><p class="s11">$3.20</p></td>
+        <td><p class="s11">$3.45</p></td>
+        <td><p class="s11">$3.75</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$4.70</p></td>
+        <td><p class="s11">$5.70</p></td>
+        <td><p class="s11">$8.55</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">South America East 1 (São Paulo)</p></td>
+        <td>
+
+          <p class="s11">$3.10</p>
+        </td>
+        <td>
+
+          <p class="s11">$3.50</p>
+        </td>
+        <td>
+
+          <p class="s11">$3.85</p>
+        </td>
+        <td>
+
+          <p class="s11">$4.20</p>
+        </td>
+        <td>
+
+          <p class="s11">$4.65</p>
+        </td>
+        <td>
+
+          <p class="s11">$5.10</p>
+        </td>
+        <td>
+
+          <p class="s11">$6.20</p>
+        </td>
+        <td>
+
+          <p class="s11">$9.30</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Paris)</p></td>
+        <td><p class="s11">$2.60</p></td>
+        <td><p class="s11">$2.95</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$5.20</p></td>
+        <td><p class="s11">$7.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Jakarta)</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.80</p></td>
+        <td><p class="s11">$3.10</p></td>
+        <td><p class="s11">$3.40</p></td>
+        <td><p class="s11">$3.70</p></td>
+        <td><p class="s11">$4.05</p></td>
+        <td><p class="s11">$5</p></td>
+        <td><p class="s11">$7.50</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">US Gov East 1 (Fedramp High Plus)</p></td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">-</p>
+        </td>
+        <td>
+
+          <p class="s11">$5.60</p>
+        </td>
+        <td>
+
+          <p class="s11">$8.40</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Zurich)</p></td>
+        <td><p class="s11">$3.10</p></td>
+        <td><p class="s11">$3.50</p></td>
+        <td><p class="s11">$3.85</p></td>
+        <td><p class="s11">$4.20</p></td>
+        <td><p class="s11">$4.65</p></td>
+        <td><p class="s11">$5.10</p></td>
+        <td><p class="s11">$6.20</p></td>
+        <td><p class="s11">$9.30</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1 (DoD)</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">$5.60</p></td>
+        <td><p class="s11">$8.40</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">East US 2 (Virginia)</p></td>
+        <td><p class="s11">$2</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">West US 2 (Washington)</p></td>
+        <td><p class="s11">$2</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">West Europe (Netherlands)</p></td>
+        <td><p class="s11">$2.60</p></td>
+        <td><p class="s11">$2.95</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$5.20</p></td>
+        <td><p class="s11">$7.80</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">Azure</p>
+        </td>
+        <td><p class="s10">Australia East (New South Wales)</p></td>
+        <td>
+
+          <p class="s11">$2.75</p>
+        </td>
+        <td>
+
+          <p class="s11">$3.05</p>
+        </td>
+        <td>
+
+          <p class="s11">$3.45</p>
+        </td>
+        <td>
+
+          <p class="s11">$3.75</p>
+        </td>
+        <td>
+
+          <p class="s11">$4.05</p>
+        </td>
+        <td>
+
+          <p class="s11">$4.50</p>
+        </td>
+        <td>
+
+          <p class="s11">$5.50</p>
+        </td>
+        <td>
+
+          <p class="s11">$8.25</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Canada Central (Toronto)</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.50</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.50</p></td>
+        <td><p class="s11">$6.75</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Southeast Asia (Singapore)</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.80</p></td>
+        <td><p class="s11">$3.10</p></td>
+        <td><p class="s11">$3.40</p></td>
+        <td><p class="s11">$3.70</p></td>
+        <td><p class="s11">$4.05</p></td>
+        <td><p class="s11">$5</p></td>
+        <td><p class="s11">$7.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Switzerland North</p></td>
+        <td><p class="s11">$3.10</p></td>
+        <td><p class="s11">$3.50</p></td>
+        <td><p class="s11">$3.85</p></td>
+        <td><p class="s11">$4.20</p></td>
+        <td><p class="s11">$4.65</p></td>
+        <td><p class="s11">$5.10</p></td>
+        <td><p class="s11">$6.20</p></td>
+        <td><p class="s11">$9.30</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">US Gov Virginia</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">-</p></td>
+        <td><p class="s11">$5.60</p></td>
+        <td><p class="s11">$8.40</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Central US (Iowa)</p></td>
+        <td><p class="s11">$2</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">North Europe (Ireland)</p></td>
+        <td><p class="s11">$2.60</p></td>
+        <td><p class="s11">$2.95</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$5.20</p></td>
+        <td><p class="s11">$7.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Japan East (Tokyo)</p></td>
+        <td><p class="s11">$2.85</p></td>
+        <td><p class="s11">$3.20</p></td>
+        <td><p class="s11">$3.45</p></td>
+        <td><p class="s11">$3.75</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$4.70</p></td>
+        <td><p class="s11">$5.70</p></td>
+        <td><p class="s11">$8.55</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">UAE North (Dubai)</p></td>
+        <td><p class="s11">$2.70</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.40</p></td>
+        <td><p class="s11">$3.70</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$4.40</p></td>
+        <td><p class="s11">$5.40</p></td>
+        <td><p class="s11">$8.10</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">South Central US (Texas)</p></td>
+        <td><p class="s11">$2</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Central India (Pune)</p></td>
+        <td><p class="s11">$2.20</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.70</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$4.40</p></td>
+        <td><p class="s11">$6.60</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">UK South (London)</p></td>
+        <td><p class="s11">$2.70</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.40</p></td>
+        <td><p class="s11">$3.70</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$4.40</p></td>
+        <td><p class="s11">$5.40</p></td>
+        <td><p class="s11">$8.10</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">US Central 1 (Iowa)</p></td>
+        <td><p class="s11">$2</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">US East 4 (N. Virginia)</p></td>
+        <td><p class="s11">$2</p></td>
+        <td><p class="s11">$2.25</p></td>
+        <td><p class="s11">$2.50</p></td>
+        <td><p class="s11">$2.75</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.30</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">Europe West 4 (Netherlands)</p></td>
+        <td><p class="s11">$2.60</p></td>
+        <td><p class="s11">$2.95</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$5.20</p></td>
+        <td><p class="s11">$7.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">Europe West 2 (London)</p></td>
+        <td><p class="s11">$2.70</p></td>
+        <td><p class="s11">$3</p></td>
+        <td><p class="s11">$3.40</p></td>
+        <td><p class="s11">$3.70</p></td>
+        <td><p class="s11">$4</p></td>
+        <td><p class="s11">$4.40</p></td>
+        <td><p class="s11">$5.40</p></td>
+        <td><p class="s11">$8.10</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">Europe West 3 (Frankfurt)</p></td>
+        <td><p class="s11">$2.60</p></td>
+        <td><p class="s11">$2.95</p></td>
+        <td><p class="s11">$3.25</p></td>
+        <td><p class="s11">$3.60</p></td>
+        <td><p class="s11">$3.90</p></td>
+        <td><p class="s11">$4.30</p></td>
+        <td><p class="s11">$5.20</p></td>
+        <td><p class="s11">$7.80</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">US East (Northern Virginia)</p></td>
+        <td>
+
+          <p class="s11">$2</p>
+        </td>
+        <td>
+
+          <p class="s11">$2.25</p>
+        </td>
+        <td>
+
+          <p class="s11">$2.50</p>
+        </td>
+        <td>
+
+          <p class="s11">$2.75</p>
+        </td>
+        <td>
+
+          <p class="s11">$3</p>
+        </td>
+        <td>
+
+          <p class="s11">$3.30</p>
+        </td>
+        <td>
+
+          <p class="s11">$4</p>
+        </td>
+        <td>
+
+          <p class="s11">$6</p>
+        </td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table7" x-show="false">
+      <tr>
+        <td colspan="10">
+          <a href="#table7">Table 7: Table 3(a): Standard Storage Pricing</a>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" rowspan="3">
+
+          <p class="s10">Cloud Provider</p>
+        </td>
+        <td bgcolor="#C6D9F1" rowspan="3">
+
+          <p class="s10">Region</p>
+        </td>
+        <td bgcolor="#C6D9F1" rowspan="3">
+          <p class="s10">On Demand Storage Pricing (TB/mo)</p>
+        </td>
+        <td bgcolor="#C6D9F1" colspan="7">
+          <p class="s10">Capacity Storage Pricing by ACV Range (TB/mo)</p>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s17">USD</p>
+          <p class="s17">$0 -</p>
+          <p class="s17">$1,199,999</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s17">USD</p>
+          <p class="s17">$1,200,000 -</p>
+          <p class="s17">$2,999,999</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s17">USD</p>
+          <p class="s17">$3,000,000 -</p>
+          <p class="s17">$4,999,999</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s17">USD</p>
+          <p class="s17">$5,000,000 -</p>
+          <p class="s17">$9,999,999</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s17">USD</p>
+          <p class="s17">$10,000,000 -</p>
+          <p class="s17">$19,999,999</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s17">USD</p>
+          <p class="s17">$20,000,000 -</p>
+          <p class="s17">$39,999,999</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s17">USD</p>
+          <p class="s17">$40,000,000+</p>
+        </td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">US East (Northern Virginia)</p></td>
+        <td>
+
+          <p class="s11">$23</p>
+        </td>
+        <td>
+
+          <p class="s11">$23</p>
+        </td>
+        <td>
+
+          <p class="s11">$21.47</p>
+        </td>
+        <td>
+
+          <p class="s11">$19.94</p>
+        </td>
+        <td>
+
+          <p class="s11">$18.40</p>
+        </td>
+        <td>
+
+          <p class="s11">$16.86</p>
+        </td>
+        <td>
+
+          <p class="s11">$15.34</p>
+        </td>
+        <td>
+
+          <p class="s11">$13.80</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">US West</p>
+          <p class="s10">(Oregon)</p>
+        </td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Dublin</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Frankfurt</p></td>
+        <td><p class="s11">$24.50</p></td>
+        <td><p class="s11">$24.50</p></td>
+        <td><p class="s11">$22.87</p></td>
+        <td><p class="s11">$21.24</p></td>
+        <td><p class="s11">$19.60</p></td>
+        <td><p class="s11">$17.96</p></td>
+        <td><p class="s11">$16.34</p></td>
+        <td><p class="s11">$14.70</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Sydney</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">AP</p>
+          <p class="s10">Singapore</p>
+        </td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">Canada</p>
+          <p class="s10">Central</p>
+        </td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">US East 2</p>
+          <p class="s10">(Ohio)</p>
+        </td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">AP Northeast</p>
+          <p class="s10">1 (Tokyo)</p>
+        </td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Mumbai</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">US East 1 Commercial Gov</p></td>
+        <td>
+
+          <p class="s11">$23</p>
+        </td>
+        <td>
+
+          <p class="s11">$23</p>
+        </td>
+        <td>
+
+          <p class="s11">$21.47</p>
+        </td>
+        <td>
+
+          <p class="s11">$19.94</p>
+        </td>
+        <td>
+
+          <p class="s11">$18.40</p>
+        </td>
+        <td>
+
+          <p class="s11">$16.86</p>
+        </td>
+        <td>
+
+          <p class="s11">$15.34</p>
+        </td>
+        <td>
+
+          <p class="s11">$13.80</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">Europe</p>
+          <p class="s10">(London)</p>
+        </td>
+        <td><p class="s11">$24</p></td>
+        <td><p class="s11">$24</p></td>
+        <td><p class="s11">$22.40</p></td>
+        <td><p class="s11">$20.81</p></td>
+        <td><p class="s11">$19.20</p></td>
+        <td><p class="s11">$17.59</p></td>
+        <td><p class="s11">$16.01</p></td>
+        <td><p class="s11">$14.40</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">Asia Pacific</p>
+          <p class="s10">(Seoul)</p>
+        </td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">US Gov West</p>
+          <p class="s10">1</p>
+        </td>
+        <td><p class="s11">$39</p></td>
+        <td><p class="s11">$39</p></td>
+        <td><p class="s11">$36.40</p></td>
+        <td><p class="s11">$33.81</p></td>
+        <td><p class="s11">$31.20</p></td>
+        <td><p class="s11">$28.59</p></td>
+        <td><p class="s11">$26.01</p></td>
+        <td><p class="s11">$23.40</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">US Gov West 1 (Fedramp High Plus)</p></td>
+        <td>
+
+          <p class="s11">$39</p>
+        </td>
+        <td>
+
+          <p class="s11">$39</p>
+        </td>
+        <td>
+
+          <p class="s11">$36.40</p>
+        </td>
+        <td>
+
+          <p class="s11">$33.81</p>
+        </td>
+        <td>
+
+          <p class="s11">$31.20</p>
+        </td>
+        <td>
+
+          <p class="s11">$28.59</p>
+        </td>
+        <td>
+
+          <p class="s11">$26.01</p>
+        </td>
+        <td>
+
+          <p class="s11">$23.40</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">Europe</p>
+          <p class="s10">(Stockholm)</p>
+        </td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">Asia Pacific</p>
+          <p class="s10">(Osaka)</p>
+        </td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td>
+          <p class="s10">South America East</p>
+          <p class="s10">1 (São Paulo)</p>
+        </td>
+        <td>
+
+          <p class="s11">$40.50</p>
+        </td>
+        <td>
+
+          <p class="s11">$40.50</p>
+        </td>
+        <td>
+
+          <p class="s11">$37.80</p>
+        </td>
+        <td>
+
+          <p class="s11">$35.11</p>
+        </td>
+        <td>
+
+          <p class="s11">$32.40</p>
+        </td>
+        <td>
+
+          <p class="s11">$29.69</p>
+        </td>
+        <td>
+
+          <p class="s11">$27.01</p>
+        </td>
+        <td>
+
+          <p class="s11">$24.30</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Paris)</p></td>
+        <td><p class="s11">$24</p></td>
+        <td><p class="s11">$24</p></td>
+        <td><p class="s11">$22.40</p></td>
+        <td><p class="s11">$20.81</p></td>
+        <td><p class="s11">$19.20</p></td>
+        <td><p class="s11">$17.59</p></td>
+        <td><p class="s11">$16.01</p></td>
+        <td><p class="s11">$14.40</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">Asia Pacific</p>
+          <p class="s10">(Jakarta)</p>
+        </td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">AWS</p>
+        </td>
+        <td><p class="s10">US Gov East 1 (Fedramp High Plus)</p></td>
+        <td>
+
+          <p class="s11">$39</p>
+        </td>
+        <td>
+
+          <p class="s11">$39</p>
+        </td>
+        <td>
+
+          <p class="s11">$36.40</p>
+        </td>
+        <td>
+
+          <p class="s11">$33.81</p>
+        </td>
+        <td>
+
+          <p class="s11">$31.20</p>
+        </td>
+        <td>
+
+          <p class="s11">$28.59</p>
+        </td>
+        <td>
+
+          <p class="s11">$26.01</p>
+        </td>
+        <td>
+
+          <p class="s11">$23.40</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Zurich)</p></td>
+        <td><p class="s11">$26.95</p></td>
+        <td><p class="s11">$26.95</p></td>
+        <td><p class="s11">$25.15</p></td>
+        <td><p class="s11">$23.37</p></td>
+        <td><p class="s11">$21.56</p></td>
+        <td><p class="s11">$19.75</p></td>
+        <td><p class="s11">$17.98</p></td>
+        <td><p class="s11">$16.17</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td>
+          <p class="s10">US Gov West</p>
+          <p class="s10">1 (DoD)</p>
+        </td>
+        <td><p class="s11">$39</p></td>
+        <td><p class="s11">$39</p></td>
+        <td><p class="s11">$36.40</p></td>
+        <td><p class="s11">$33.81</p></td>
+        <td><p class="s11">$31.20</p></td>
+        <td><p class="s11">$28.59</p></td>
+        <td><p class="s11">$26.01</p></td>
+        <td><p class="s11">$23.40</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td>
+          <p class="s10">East US 2</p>
+          <p class="s10">(Virginia)</p>
+        </td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">West US 2 (Washington)</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td>
+          <p class="s10">West Europe</p>
+          <p class="s10">(Netherlands)</p>
+        </td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">Azure</p>
+        </td>
+        <td>
+          <p class="s10">Australia East (New</p>
+          <p class="s10">South Wales)</p>
+        </td>
+        <td>
+
+          <p class="s11">$25</p>
+        </td>
+        <td>
+
+          <p class="s11">$25</p>
+        </td>
+        <td>
+
+          <p class="s11">$23.33</p>
+        </td>
+        <td>
+
+          <p class="s11">$21.68</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$18.33</p>
+        </td>
+        <td>
+
+          <p class="s11">$16.68</p>
+        </td>
+        <td>
+
+          <p class="s11">$15</p>
+        </td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">Azure</p>
+        </td>
+        <td>
+          <p class="s10">Canada Central</p>
+          <p class="s10">(Toronto)</p>
+        </td>
+        <td>
+
+          <p class="s11">$25</p>
+        </td>
+        <td>
+
+          <p class="s11">$25</p>
+        </td>
+        <td>
+
+          <p class="s11">$23.33</p>
+        </td>
+        <td>
+
+          <p class="s11">$21.68</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$18.33</p>
+        </td>
+        <td>
+
+          <p class="s11">$16.68</p>
+        </td>
+        <td>
+
+          <p class="s11">$15</p>
+        </td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">Azure</p>
+        </td>
+        <td><p class="s10">Southeast Asia (Singapore)</p></td>
+        <td>
+
+          <p class="s11">$25</p>
+        </td>
+        <td>
+
+          <p class="s11">$25</p>
+        </td>
+        <td>
+
+          <p class="s11">$23.33</p>
+        </td>
+        <td>
+
+          <p class="s11">$21.68</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$18.33</p>
+        </td>
+        <td>
+
+          <p class="s11">$16.68</p>
+        </td>
+        <td>
+
+          <p class="s11">$15</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td>
+          <p class="s10">Switzerland</p>
+          <p class="s10">North</p>
+        </td>
+        <td><p class="s11">$28.80</p></td>
+        <td><p class="s11">$28.80</p></td>
+        <td><p class="s11">$26.88</p></td>
+        <td><p class="s11">$24.97</p></td>
+        <td><p class="s11">$23.04</p></td>
+        <td><p class="s11">$21.11</p></td>
+        <td><p class="s11">$19.21</p></td>
+        <td><p class="s11">$17.28</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">US Gov Virginia</p></td>
+        <td><p class="s11">$39</p></td>
+        <td><p class="s11">$39</p></td>
+        <td><p class="s11">$36.40</p></td>
+        <td><p class="s11">$33.81</p></td>
+        <td><p class="s11">$31.20</p></td>
+        <td><p class="s11">$28.59</p></td>
+        <td><p class="s11">$26.01</p></td>
+        <td><p class="s11">$23.40</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td>
+          <p class="s10">US Central</p>
+          <p class="s10">(Iowa)</p>
+        </td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">North Europe (Ireland)</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$21.47</p></td>
+        <td><p class="s11">$19.94</p></td>
+        <td><p class="s11">$18.40</p></td>
+        <td><p class="s11">$16.86</p></td>
+        <td><p class="s11">$15.34</p></td>
+        <td><p class="s11">$13.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Japan East (Tokyo)</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td>
+          <p class="s10">UAE North</p>
+          <p class="s10">(Dubai)</p>
+        </td>
+        <td><p class="s11">$25.40</p></td>
+        <td><p class="s11">$25.40</p></td>
+        <td><p class="s11">$23.71</p></td>
+        <td><p class="s11">$22.02</p></td>
+        <td><p class="s11">$20.32</p></td>
+        <td><p class="s11">$18.62</p></td>
+        <td><p class="s11">$16.94</p></td>
+        <td><p class="s11">$15.24</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">Azure</p>
+        </td>
+        <td><p class="s10">South Central US (Texas)</p></td>
+        <td>
+
+          <p class="s11">$23</p>
+        </td>
+        <td>
+
+          <p class="s11">$23</p>
+        </td>
+        <td>
+
+          <p class="s11">$21.47</p>
+        </td>
+        <td>
+
+          <p class="s11">$19.94</p>
+        </td>
+        <td>
+
+          <p class="s11">$18.40</p>
+        </td>
+        <td>
+
+          <p class="s11">$16.86</p>
+        </td>
+        <td>
+
+          <p class="s11">$15.34</p>
+        </td>
+        <td>
+
+          <p class="s11">$13.80</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td>
+          <p class="s10">Central India</p>
+          <p class="s10">(Pune)</p>
+        </td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$25</p></td>
+        <td><p class="s11">$23.33</p></td>
+        <td><p class="s11">$21.68</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$18.33</p></td>
+        <td><p class="s11">$16.68</p></td>
+        <td><p class="s11">$15</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">UK South (London)</p></td>
+        <td><p class="s11">$24</p></td>
+        <td><p class="s11">$24</p></td>
+        <td><p class="s11">$22.40</p></td>
+        <td><p class="s11">$20.81</p></td>
+        <td><p class="s11">$19.20</p></td>
+        <td><p class="s11">$17.59</p></td>
+        <td><p class="s11">$16.01</p></td>
+        <td><p class="s11">$14.40</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td>
+          <p class="s10">US Central 1</p>
+          <p class="s10">(Iowa)</p>
+        </td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$20</p></td>
+      </tr>
+
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td>
+          <p class="s10">US East 4 (N.</p>
+          <p class="s10">Virginia)</p>
+        </td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+      </tr>
+      <tr>
+        <td>
+
+          <p class="s10">GCP</p>
+        </td>
+        <td>
+          <p class="s10">Europe West 4</p>
+          <p class="s10">(Netherlands)</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+        <td>
+
+          <p class="s11">$20</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">Europe West 2 (London)</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td>
+          <p class="s10">Europe West</p>
+          <p class="s10">3 (Frankfurt)</p>
+        </td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+        <td><p class="s11">$23</p></td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table10">
+      <tr>
+        <td colspan="3">
+          <a href="#table10"
+            >Table 10: Table 3(b): Hybrid Tables Storage Pricing</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1"><p class="s10">Cloud Provider</p></td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">Region</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">
+            On Demand &amp; Capacity Hybrid Tables Storage Pricing (GB/mo)
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East (Northern Virginia)</p></td>
+        <td><p class="s11">$0.34</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US West (Oregon)</p></td>
+        <td><p class="s11">$0.34</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Dublin</p></td>
+        <td><p class="s11">$0.34</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Frankfurt</p></td>
+        <td><p class="s11">$0.36</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Sydney</p></td>
+        <td><p class="s11">$0.37</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Singapore</p></td>
+        <td><p class="s11">$0.37</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Canada Central</p></td>
+        <td><p class="s11">$0.37</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East 2 (Ohio)</p></td>
+        <td><p class="s11">$0.34</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Northeast 1 (Tokyo)</p></td>
+        <td><p class="s11">$0.37</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Mumbai</p></td>
+        <td><p class="s11">$0.37</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East 1 Commercial Gov</p></td>
+        <td><p class="s11">$0.34</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Europe (London)</p></td>
+        <td><p class="s11">$0.35</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Seoul)</p></td>
+        <td><p class="s11">$0.37</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1</p></td>
+        <td><p class="s11">$0.58</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1 (Fedramp High Plus)</p></td>
+        <td><p class="s11">$0.58</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Europe (Stockholm)</p></td>
+        <td><p class="s11">$0.34</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Osaka)</p></td>
+        <td><p class="s11">$0.37</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">South America East 1 (São Paulo)</p></td>
+        <td><p class="s11">$0.60</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Paris)</p></td>
+        <td><p class="s11">$0.35</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Jakarta)</p></td>
+        <td><p class="s11">$0.37</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov East 1 (Fedramp High Plus)</p></td>
+        <td><p class="s11">$0.58</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Zurich)</p></td>
+        <td><p class="s11">$0.40</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1 (DoD)</p></td>
+        <td><p class="s11">$0.58</p></td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table12" x-show="cloud == 'AWS'">
+      <tr>
+        <td colspan="6">
+          <a href="#table12">Table 12: Table 4(a): AWS Data Transfer Pricing</a>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">Cloud Provider</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">Data Transfer Source Region</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">
+            Data Transfer To Same Cloud Provider, Same Region (per TB)
+          </p>
+        </td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">
+            SPCS Data Transfer To Same Cloud Provider, Same Region (per TB)
+          </p>
+        </td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">
+            Data Transfer To Same Cloud Provider, Different Region (per TB)
+          </p>
+        </td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">
+            Data Transfer To Different Cloud Provider or Internet (per TB)
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East (Northern Virginia)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Dublin</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Frankfurt</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Sydney</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$140</p></td>
+        <td><p class="s11">$140</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Singapore</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$90</p></td>
+        <td><p class="s11">$120</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Canada Central</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East 2 (Ohio)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Northeast 1 (Tokyo)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$90</p></td>
+        <td><p class="s11">$114</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Mumbai</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$86</p></td>
+        <td><p class="s11">$109.30</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US West (Oregon)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East 1 Commercial Gov</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Europe (London)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Seoul)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$126</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$7.17</p></td>
+        <td><p class="s11">$30</p></td>
+        <td><p class="s11">$155</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1 (Fedramp High Plus)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$7.17</p></td>
+        <td><p class="s11">$30</p></td>
+        <td><p class="s11">$155</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Europe (Stockholm)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Osaka)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$90</p></td>
+        <td><p class="s11">$114</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">South America East 1 (São Paulo)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$138</p></td>
+        <td><p class="s11">$150</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Paris)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Jakarta)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$100</p></td>
+        <td><p class="s11">$132</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov East 1 (Fedramp High Plus)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$7.17</p></td>
+        <td><p class="s11">$30</p></td>
+        <td><p class="s11">$155</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Zurich)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$90</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1 (DoD)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$7.17</p></td>
+        <td><p class="s11">$30</p></td>
+        <td><p class="s11">$155</p></td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table14" x-show="cloud == 'Azure'">
+      <tr>
+        <td colspan="7">
+          <a href="#table14"
+            >Table 14: Table 4(b): Azure Data Transfer Pricing</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" rowspan="3">
+
+          <p class="s10">Cloud Provider</p>
+        </td>
+        <td bgcolor="#C6D9F1" rowspan="3">
+
+          <p class="s10">Data Transfer Source Region</p>
+        </td>
+        <td bgcolor="#C6D9F1" colspan="5">
+          <p class="s10">Destination Region (per TB)</p>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" colspan="4">
+          <p class="s10">Same Cloud Provider</p>
+        </td>
+        <td bgcolor="#C6D9F1" rowspan="2">
+          <p class="s10">Different Cloud Provider or Internet</p>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">Same Region</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">SPCS Data Transfer, Same Region</p>
+        </td>
+        <td bgcolor="#C6D9F1"><p class="s10">Same Continent</p></td>
+        <td bgcolor="#C6D9F1"><p class="s10">Different Continent</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">East US 2 (Virginia)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">West US 2 (Washington)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">West Europe (Netherlands)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Australia East (New South Wales)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$120</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Canada Central (Toronto)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Southeast Asia (Singapore)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$120</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Switzerland North</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">US Gov Virginia</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20,00</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">US Central (Iowa)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">North Europe (Ireland)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Japan East (Tokyo)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$120</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">UAE North (Dubai)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$120</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">South Central US (Texas)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Central India (Pune)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$120</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">UK South (London)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$3.07</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$50</p></td>
+        <td><p class="s11">$87.50</p></td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table15" x-show="cloud == 'GCP'">
+      <tr>
+        <td colspan="9">
+          <a href="#table15">Table 15: Table 4(c): GCP Data Transfer Pricing</a>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" rowspan="2">
+
+          <p class="s10">Cloud Provider</p>
+        </td>
+        <td bgcolor="#C6D9F1" rowspan="2">
+
+          <p class="s10">Data Transfer Source Region</p>
+        </td>
+        <td bgcolor="#C6D9F1" colspan="4">
+          <p class="s10">Data Transfer To Same Cloud Provider (TB)</p>
+        </td>
+        <td bgcolor="#C6D9F1" colspan="3">
+          <p class="s10">
+            Data Transfer To Different Cloud Provider or Internet (TB)
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">Same Region</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">Different Region, Same Continent</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">Different Continent (excludes Oceania)</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">Oceania</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">Same Continent</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">Different Continent (excludes Oceania)</p>
+        </td>
+        <td bgcolor="#C6D9F1">
+
+          <p class="s10">Oceania</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">US Central 1 (Iowa)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$150</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$190</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">US East 4 (N. Virginia)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$150</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$190</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">Europe West 4 (Netherlands)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$150</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$190</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">Europe West 2 (London)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$150</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$190</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">GCP</p></td>
+        <td><p class="s10">Europe West 3 (Frankfurt)</p></td>
+        <td><p class="s11">$0</p></td>
+        <td><p class="s11">$20</p></td>
+        <td><p class="s11">$80</p></td>
+        <td><p class="s11">$150</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$120</p></td>
+        <td><p class="s11">$190</p></td>
+      </tr>
+    </table>
+    <table cellspacing="0" id="table16" x-show="cloud == 'AWS'">
+      <tr>
+        <td colspan="2">
+          <a href="#table16"
+            >Table 16: Table 4(d): Pricing for Specific Endpoint Types</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1"><p class="s10">Endpoint Type</p></td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">
+            Pricing per TB of data processed through the endpoint you configure
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS API Gateway, Private Endpoints</p></td>
+        <td><p class="s11">$10</p></td>
+      </tr>
+    </table>
+    <table cellspacing="0" id="table17">
+      <tr>
+        <td colspan="4">
+          <a href="#table17"
+            >Table 17: Table 4(e): Outbound Privatelink Pricing</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1"><p class="s10">Cloud Provider</p></td>
+        <td bgcolor="#C6D9F1"><p class="s10">Region</p></td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">Private Endpoint (per endpoint per 1,000 hours)</p>
+        </td>
+        <td bgcolor="#C6D9F1"><p class="s10">Data Processed (per TB)</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East (Northern Virginia)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US West (Oregon)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Dublin</p></td>
+        <td><p class="s11">$11</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU Frankfurt</p></td>
+        <td><p class="s11">$12</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Sydney</p></td>
+        <td><p class="s11">$13</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Singapore</p></td>
+        <td><p class="s11">$13</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Canada Central</p></td>
+        <td><p class="s11">$11</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East 2 (Ohio)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Northeast 1 (Tokyo)</p></td>
+        <td><p class="s11">$14</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">AP Mumbai</p></td>
+        <td><p class="s11">$13</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US East 1 Commercial Gov</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Europe (London)</p></td>
+        <td><p class="s11">$11</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Seoul)</p></td>
+        <td><p class="s11">$13</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1</p></td>
+        <td><p class="s11">$12.50</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1 (Fedramp High Plus)</p></td>
+        <td><p class="s11">$12.50</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Europe (Stockholm)</p></td>
+        <td><p class="s11">$10.50</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Osaka)</p></td>
+        <td><p class="s11">$14</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">South America East 1 (São Paulo)</p></td>
+        <td><p class="s11">$21</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Paris)</p></td>
+        <td><p class="s11">$11</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">Asia Pacific (Jakarta)</p></td>
+        <td><p class="s11">$13</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov East 1 (Fedramp High Plus)</p></td>
+        <td><p class="s11">$12.50</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">EU (Zurich)</p></td>
+        <td><p class="s11">$13.20</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">AWS</p></td>
+        <td><p class="s10">US Gov West 1 (DoD)</p></td>
+        <td><p class="s11">$12.50</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">East US 2 (Virginia)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">West US 2 (Washington)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">West Europe (Netherlands)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Australia East (New South Wales)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Canada Central (Toronto)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Southeast Asia (Singapore)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Switzerland North</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">US Gov Virginia</p></td>
+        <td><p class="s11">$13</p></td>
+        <td><p class="s11">$12.80</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">US Central (Iowa)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">North Europe (Ireland)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Japan East (Tokyo)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">UAE North (Dubai)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">South Central US (Texas)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">Central India (Pune)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Azure</p></td>
+        <td><p class="s10">UK South (London)</p></td>
+        <td><p class="s11">$10</p></td>
+        <td><p class="s11">$10.24</p></td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table19">
+      <tr>
+        <td colspan="3">
+          <a href="#table19">Table 19: Table 5: Serverless Feature Table</a>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" rowspan="2"><p class="s10">Feature</p></td>
+        <td bgcolor="#C6D9F1" colspan="2">
+          <p class="s10">Feature Multipliers</p>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1"><p class="s10">Snowflake-managed compute</p></td>
+        <td bgcolor="#C6D9F1"><p class="s10">Cloud Services</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Clustered Tables</p></td>
+        <td><p class="s11">2</p></td>
+        <td><p class="s11">1</p></td>
+      </tr>
+      <tr>
+        <td>
+          <p>
+            <ab class="s18" href="#bookmark1"
+              >Copy Files
+            </ab>
+          </p>
+        </td>
+        <td><p class="s11">2</p></td>
+        <td><p class="s11">N/A</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Data Quality Monitoring</p></td>
+        <td><p class="s11">2</p></td>
+        <td><p class="s11">1</p></td>
+      </tr>
+      <tr>
+        <td>
+          <p>
+            <ab class="s18" href="#bookmark1"
+              >Hybrid Tables Requests
+            </ab>
+          </p>
+        </td>
+        <td>
+          <p class="s11">1</p>
+        </td>
+        <td>
+          <p class="s11">1</p>
+          <p class="s11">In addition:</p>
+          <p class="s11">1 Credit per 30GB read 1 Credit per 7.5GB write</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Logging</p></td>
+        <td><p class="s11">1.25</p></td>
+        <td>
+          <p class="s11">
+            N/A; instead charged 0.28 Credits per 1000 file batches
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Materialized Views maintenance</p></td>
+        <td><p class="s11">2</p></td>
+        <td><p class="s11">1</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Organization Usage</p></td>
+        <td><p class="s11">1</p></td>
+        <td><p class="s11">1</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Query Acceleration</p></td>
+        <td><p class="s11">1</p></td>
+        <td><p class="s11">N/A</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Replication</p></td>
+        <td><p class="s11">2</p></td>
+        <td><p class="s11">0.35</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Search Optimization Service</p></td>
+        <td><p class="s11">2</p></td>
+        <td><p class="s11">1</p></td>
+      </tr>
+      <tr>
+        <td>
+          <p>
+            <ab class="s18" href="#bookmark1"
+              >Serverless Alerts
+            </ab>
+          </p>
+        </td>
+        <td><p class="s11">1.2</p></td>
+        <td><p class="s11">1</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Serverless Tasks</p></td>
+        <td><p class="s11">0.9</p></td>
+        <td><p class="s11">1</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Snowpipe</p></td>
+        <td><p class="s11">1.25</p></td>
+        <td>
+          <p class="s11">N/A; instead charged 0.06 Credits per 1000 files</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Snowpipe Streaming</p></td>
+        <td><p class="s11">1</p></td>
+        <td>
+          <p class="s11">
+            N/A; instead charged at an hourly rate of 0.01 Credits per client
+            instance
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table20">
+      <tr>
+        <td colspan="2">
+          <a href="#table20"
+            >Table 20: Table 6(a): Snowflake AI Features Credit Table, Cortex
+            LLM Functions</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1"><p class="s10">Feature</p></td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">
+            Snowflake-managed compute (Credits per one million Tokens)
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – gemma-7b</p></td>
+        <td><p class="s11">0.12</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – jamba-instruct</p></td>
+        <td><p class="s11">0.83</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – llama3.1-405b</p></td>
+        <td><p class="s11">3</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – llama3.1-70b</p></td>
+        <td><p class="s11">1.21</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – llama3.1-8b</p></td>
+        <td><p class="s11">0.19</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – mistral-large2</p></td>
+        <td><p class="s11">1.95</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – mistral-7b</p></td>
+        <td><p class="s11">0.12</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – mixtral-8x7b</p></td>
+        <td><p class="s11">0.22</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – reka-core</p></td>
+        <td><p class="s11">5.50</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – reka-flash</p></td>
+        <td><p class="s11">0.45</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – snowflake-arctic</p></td>
+        <td><p class="s11">0.84</p></td>
+      </tr>
+      <tr>
+        <td>
+          <p class="s10">Cortex Embed Text 1024 – multilingual-e5-large</p>
+        </td>
+        <td><p class="s11">0.05</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Embed Text 1024 – nv-embed-qa-4</p></td>
+        <td><p class="s11">0.05</p></td>
+      </tr>
+      <tr>
+        <td>
+          <p class="s10">Cortex Embed Text 1024 – voyage-multilingual-2</p>
+        </td>
+        <td><p class="s11">0.07</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Embed Text 768 – e5-base-v2</p></td>
+        <td><p class="s11">0.03</p></td>
+      </tr>
+      <tr>
+        <td>
+          <p class="s10">Cortex Embed Text 768 – snowflake-arctic-embed-m</p>
+        </td>
+        <td><p class="s11">0.03</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Classify Text</p></td>
+        <td><p class="s11">1.39</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Extract Answer</p></td>
+        <td><p class="s11">0.08</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Guard</p></td>
+        <td><p class="s11">0.25</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Sentiment</p></td>
+        <td><p class="s11">0.08</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Summarize</p></td>
+        <td><p class="s11">0.10</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Translate</p></td>
+        <td><p class="s11">0.33</p></td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" colspan="2">
+          <p class="s10">Legacy Features</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – llama2-chat-70b</p></td>
+        <td><p class="s11">0.45</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – llama3-70b</p></td>
+        <td><p class="s11">1.21</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – llama3-8b</p></td>
+        <td><p class="s11">0.19</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Complete – mistral-large</p></td>
+        <td><p class="s11">5.10</p></td>
+      </tr>
+    </table>
+
+    <table cellspacing="0" id="table21">
+      <tr>
+        <td colspan="3">
+          <a href="#table21"
+            >Table 21: Table 6(b): Snowflake AI Features Credit Table,
+            Fine-Tuning 5</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" rowspan="2">
+
+          <p class="s10">Feature</p>
+        </td>
+        <td bgcolor="#C6D9F1" colspan="2">
+          <p class="s10">
+            Snowflake-managed compute (Credits per one million Tokens)
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1"><p class="s10">Training</p></td>
+        <td bgcolor="#C6D9F1">
+          <p class="s10">Cortex Complete</p>
+          <p class="s10">(Inference)</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Fine-Tuning – llama3.1-405B</p></td>
+        <td><p class="s11">15</p></td>
+        <td><p class="s11">6</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Fine-Tuning – llama3.1-70b</p></td>
+        <td><p class="s11">3.40</p></td>
+        <td><p class="s11">2.42</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Fine-Tuning – llama3.1-8b</p></td>
+        <td><p class="s11">0.64</p></td>
+        <td><p class="s11">0.38</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Fine-Tuning – mistral-7b</p></td>
+        <td><p class="s11">0.64</p></td>
+        <td><p class="s11">0.24</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Fine-Tuning – mixtral-8x7b</p></td>
+        <td><p class="s11">3.40</p></td>
+        <td><p class="s11">0.44</p></td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1" colspan="3">
+          <p class="s10">Legacy Features</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Fine-Tuning – llama3-70b</p></td>
+        <td><p class="s11">3.40</p></td>
+        <td><p class="s11">2.42</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Fine-Tuning – llama3-8b</p></td>
+        <td><p class="s11">0.64</p></td>
+        <td><p class="s11">0.38</p></td>
+      </tr>
+      </table>
+    <table cellspacing="0" id="table22">
+      <tr>
+        <td colspan="2">
+          <a href="#table22"
+            >Table 22: Table 6(c): Snowflake AI Features Credit Table, Other</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="#C6D9F1"><p class="s10">Feature</p></td>
+        <td bgcolor="#C6D9F1"><p class="s10">Snowflake-managed compute</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Cortex Search</p></td>
+        <td><p class="s11">9 Credits per GB/mo of indexed data</p></td>
+      </tr>
+      <tr>
+        <td><p class="s10">Document AI</p></td>
+        <td><p class="s11">8 Credits per hour of compute</p></td>
+      </tr>
+    </table>
+  </body>
+</html>
