@@ -5,7 +5,14 @@
     <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
     <title>Snowflake Cost Calculator</title>
     <link href="https://unpkg.com/mvp.css" rel="stylesheet" />
-
+    <meta property="og:title" content="Snowflake Cost Calculator" />
+    <link rel="icon" href="/favicon.ico" type="image/png">
+    <meta property="og:description" content="Calculate your Snowflake costs easily with our playful and intuitive app!" />
+    <meta property="og:image" content="yellow_snowflake_icon.png" />
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Snowflake Cost Calculator App">
+    <meta name="twitter:description" content="Fun and simple tool to calculate your Snowflake costs!">
+    <meta name="twitter:image" content="/logo.png">
     <style>
       .container {
           max-width: 1200px;
@@ -82,31 +89,11 @@
         <option value="1">Hourly</option>
         <option value="720">Monthly</option>
         <option value="8640">Yearly</option>
-      </select>: <b x-html="'$'+(duration*service_cost*total_credits.toFixed(2))"></b>
+      </select>: <b x-html="'$'+(duration*$store.service_cost*total_credits.toFixed(2))"></b>
    </p>
 
     </form>
     <script>
-      document.querySelectorAll("select").forEach(function (select) {
-        select.addEventListener("change", function () {
-          let edition = document.getElementById("service-edition").value;
-          let tables = document.querySelectorAll("table");
-
-          for (let i = 0; i < 3; i++) {
-            // First three tables
-            let rows = tables[i].querySelectorAll("p");
-            rows.forEach(function (cell) {
-              let value = parseFloat(cell.innerText);
-              if (!isNaN(value)) {
-                cell.innerText = "$" + (value * multiplier).toFixed(2);
-              }
-            });
-          }
-        });
-      });
-    </script>
-    <script>
-      // populate regions
       document.addEventListener('alpine:init', () => {
         const select = document.querySelector('#region');
         const cloud = document.querySelector('#cloud-provider');
@@ -158,7 +145,6 @@
               const selectedCloudProvider = sanitizeText(cloudProviderSelect.value);
               const selectedRegion = sanitizeText(regionSelect.value);
 
-
               rows.forEach((row, idx) => {
                   const cloudProviderCell = row.querySelector('td:first-child');
                   const regionCell = row.querySelector('td:nth-child(2)');
@@ -176,7 +162,8 @@
                       // Only display rows that match the sanitized selected cloud provider and region
                       if (cloudProvider === selectedCloudProvider && region === selectedRegion) {
                           if(tableId == 'table5') {
-                            Alpine.store('service_cost', parseFloat(row.children[parseInt(edition.value)].innerText.replace("$", "")))
+                            const cost = parseFloat(row.children[parseInt(edition.value)].innerText.replace("$", ""))
+                            Alpine.store('service_cost', cost)
                           } else
                           if(tableId == 'table7') {
                             Alpine.store('storage_cost', parseFloat(row.children[2].innerText.replace("$", "")))
@@ -199,6 +186,7 @@
           // Add event listeners to filter rows when selections change
           cloudProviderSelect.addEventListener('change', filterAllTables);
           regionSelect.addEventListener('change', filterAllTables);
+          edition.addEventListener('change', filterAllTables);
       });
       </script>
       <script>
@@ -226,13 +214,16 @@
               cells.forEach(function (cell) {
                 let value = cell.innerText;
 
-                // Use a regex to match only fully numeric values
-                if (/^\d+(\.\d+)?$/.test(value)) {
-                  let numericValue = parseFloat(value);
+                const credit_value = cell.getAttribute('credit')
 
-                  // Multiply value by 2 and prefix with '$'
-                  let newValue = "$" + (numericValue * 2).toFixed(2);
+                // Use a regex to match only fully numeric values
+                if (credit_value || /^\d+(\.\d+)?$/.test(value)) {
+                  let numericValue = credit_value ? parseFloat(credit_value) : parseFloat(value);
+                  debugger
+
+                  let newValue = "$" + (numericValue * self.$store.service_cost).toFixed(2);
                   cell.innerHTML = newValue;
+                  cell.setAttribute('credit', numericValue)
 
                   // Create input field for each numeric value
                   let input = document.createElement('input');
@@ -252,6 +243,15 @@
               });
 
               this.updateTotalCost();
+              this.listenSelect();
+            },
+            listenSelect() {
+              const self = this;
+              document.querySelectorAll("select").forEach(function (select) {
+                select.addEventListener("change", function () {
+                  self.updateTable()
+                });
+              });
             },
             updateTotalCost() {
               let inputs = document.querySelectorAll('.cost-input');
@@ -379,7 +379,7 @@
       </tr>
       <tr>
         <td>
-          <p class="s11">MEMORY_16X<span class="s12">6</span></p>
+          <p class="s11">MEMORY_16X</p>
         </td>
         <td><p class="s11">-</p></td>
         <td><p class="s11">-</p></td>
