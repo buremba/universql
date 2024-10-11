@@ -13,7 +13,7 @@ COPY pyproject.toml poetry.lock ./
 # Needed to save time and avoid build issues in Lambda
 RUN poetry config virtualenvs.create false
 # Install the dependencies first, so that we can cache them.
-RUN poetry install
+RUN poetry install --no-dev
 
 # Copy everything. (Note: If needed, we can use .dockerignore to limit what's copied.)
 COPY . .
