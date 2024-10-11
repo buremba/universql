@@ -1,8 +1,6 @@
 FROM public.ecr.aws/lambda/python:3.11
 
-RUN apt-get update && apt-get -y upgrade \
-    && apt-get install gcc -y  \
-    && pip install --upgrade pip
+RUN yum install gcc -y
 
 RUN pip install 'poetry==1.8.3'
 COPY pyproject.toml poetry.lock ${LAMBDA_TASK_ROOT}
