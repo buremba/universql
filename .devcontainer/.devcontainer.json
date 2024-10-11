@@ -1,0 +1,19 @@
+{
+  "name": "universql",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "forwardPorts": [
+    8084
+  ],
+  "postCreateCommand": "poetry install && echo 'poetry run universql snowflake'",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "njpwerner.autodocstring",
+        "ms-toolsai.jupyter"
+      ]
+    }
+  }
+}

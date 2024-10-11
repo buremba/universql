@@ -4,8 +4,24 @@ import pyarrow as pa
 
 import duckdb
 import sqlglot
+from google.cloud import bigquery
+from google.cloud.bigquery import QueryJobConfig
 
-from universql.warehouse.duckdb.duckdb import fix_snowflake_to_duckdb_types
+one = sqlglot.parse_one("select to_variant(test) as test from (select 1)", read="snowflake")
+# one = sqlglot.parse_one("create table test as select to_variant(test) as test from (select 1)", read="snowflake")
+
+queries = one.sql(dialect="snowflake")
+
+client = bigquery.Client()
+QUERY = (
+    'SELECT name FROM `bigquery-public-data.usa_names.usa_1910_2013` '
+    'WHERE state = "TX" '
+    'LIMIT 100')
+query_job = client.query(QUERY, job_config=QueryJobConfig())  # API request
+rows = query_job.result()  # Waits for query to finish
+
+for row in rows:
+    print(row.name)
 
 queries = sqlglot.parse("""
 SELECT * FROM TABLE(

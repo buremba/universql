@@ -18,20 +18,34 @@ snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], versi
 eval-type-backport = "^0.2.0"
 pip-system-certs = "^4.0"
 # same with fakesnow
-sqlglot = "~25.5.1"
+sqlglot = "~25.9.0"
 fsspec = "^2024.6.1"
 gcsfs = "^2024.6.1"
 click = ">7"
 s3fs = "^2024.6.1"
-pyiceberg = "^0.7.0"
+pyiceberg = "^0.7.1"
+#pyiceberg = { git = "https://github.com/apache/iceberg-python", branch = "main" }
 sqlalchemy = "^2.0.31"
 fastapi-utils = "^0.7.0"
-fakesnow = "^0.9.20"
+fakesnow = "^0.9.25"
 humanize = "^4.10.0"
+google-cloud-bigquery = "^3.25.0"
+duckdb-engine = "^0.13.2"
 
 [tool.poetry.dev-dependencies]
-jupyter = "^1.0.0"
 pylint = ">=2.11.1"
+yappi = "^1.5.1"
+dbt-snowflake = "^1.8.3"
+tqdm = "^4.66.5"
+pystray = "^0.19.5"
+pywebview = "^5.2"
+jupyter = "^1.1.1"
+networkx = "^3.3"
+streamlit = "^1.38.0"
+st-link-analysis = "^0.3.0"
+shandy-sqlfmt = "^0.17.0"
+streamlit-ace = "^0.1.1"
+
 
 [build-system]
 requires = ["poetry-core"]

@@ -1,0 +1,29 @@
+
+catalogs:
+  - name: cloud
+    type: snowflake
+    account: lt51601.europe-west2.gcp
+  - type: iceberg
+    name: local
+    url: http://localhost:8080
+  - type: bigquery
+    name: bq
+
+target: cloud
+
+strategy:
+  - execute_mode: "fail_over"
+    warehouse: local
+    timeout: 60
+    pre_hook:
+       - sample_size: 1000
+
+warehouses:
+    - name: local
+      type: duckdb
+      threads: 1
+      cache_dir: ./cache
+    - name: cloud
+      type: snowflake
+      warehouse: COMPUTE_WH
+

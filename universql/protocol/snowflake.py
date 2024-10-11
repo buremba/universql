@@ -5,7 +5,9 @@ import logging
 import os
 import signal
 import threading
+import time
 from threading import Thread
+from typing import Any
 from uuid import uuid4
 
 import click
@@ -14,16 +16,18 @@ import pyarrow as pa
 import yaml
 
 from fastapi import FastAPI
+from mangum import Mangum
+from pyarrow import Schema
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, HTMLResponse
 
 from universql.lake.fsspec_util import get_friendly_disk_usage
-from universql.util import unpack_request_body, session_from_request, SnowflakeError, parameters, \
-    print_dict_as_markdown_table
+from universql.util import unpack_request_body, session_from_request, parameters, \
+    print_dict_as_markdown_table, QueryError
 from fastapi.encoders import jsonable_encoder
-
-from universql.warehouse.duckdb.duckdb import UniverSQLSession
+from starlette.concurrency import run_in_threadpool
+from universql.protocol.session import UniverSQLSession
 
 app = FastAPI()
 
@@ -33,6 +37,15 @@ current_context = click.get_current_context().params
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🧵")
+
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    # if request.url.path in ["/queries/v1/query-request"]:
+    print(f"Time took to process {request.url.path} is {time.perf_counter() - start_time} sec")
+    return response
 
 
 @app.post("/session/v1/login-request")
@@ -63,7 +76,7 @@ async def login_request(request: Request) -> JSONResponse:
     try:
         session = UniverSQLSession(current_context, token, credentials, login_data.get("SESSION_PARAMETERS"))
         sessions[session.token] = session
-    except SnowflakeError as e:
+    except QueryError as e:
         message = e.message
 
     client = f"{request.client.host}:{request.client.port}"
@@ -122,8 +135,9 @@ async def delete_session(request: Request):
 
 @app.post("/telemetry/send")
 async def telemetry_request(request: Request) -> JSONResponse:
-    req = await unpack_request_body(request)
-    return Response(status_code=200)
+    request = await unpack_request_body(request)
+    logs = request.get('logs')
+    return JSONResponse(content={"success": True}, status_code=200)
 
 
 @app.post("/session/heartbeat")
@@ -139,16 +153,42 @@ async def session_heartbeat(request: Request) -> JSONResponse:
         {"data": {}, "success": True})
 
 
+def get_columns_for_sf_compat(schema: Schema) -> list[dict[str, Any]]:
+    columns = []
+    for idx, col in enumerate(schema):
+        # args = sqlglot.expressions.DataType.build(col[1], dialect=dialect).args
+        # precision = args.get('expressions')[0].this
+        # scale = args.get('expressions')[1].this
+        columns.append({
+            "name": col.name,
+            "database": "",
+            "schema": "",
+            "table": "",
+            "nullable": True,
+            "type": col.metadata.get(b'logicalType').decode(),
+            "length": None,
+            "scale": None,
+            "precision": None,
+            # "scale": int(scale.name),
+            # "precision": int(precision.name),
+            "byteLength": None,
+            "collation": None
+        })
+    return columns
+
+
 @app.post("/queries/v1/query-request")
 async def query_request(request: Request) -> JSONResponse:
+    query_id = str(uuid4())
     try:
         session = session_from_request(sessions, request)
         body = await unpack_request_body(request)
         query = body["sqlText"]
-        queryResultFormat, columns, result = session.do_query(query)
+        queryResultFormat = "arrow"
+        result = await run_in_threadpool(session.do_query, query)
+        columns = get_columns_for_sf_compat(result.schema)
         if result is None:
             return JSONResponse({"success": False, "message": "no query provided"})
-        query_id = str(uuid4())
         data: dict = {
             "finalDatabaseName": session.credentials.get("database"),
             "finalSchemaName": session.credentials.get("schema"),
@@ -178,14 +218,64 @@ async def query_request(request: Request) -> JSONResponse:
             encode = b_encode.decode('utf-8')
             data["rowsetBase64"] = encode
         return JSONResponse({"data": data, "success": True})
-    except SnowflakeError as e:
+    except QueryError as e:
         # print_exc( limit=1)  # we print exec here because the connector + webservice combo doesn't always do a good job of
-        return JSONResponse(e.to_dict())
+        return JSONResponse({"id": query_id, "success": False, "message": e.message, "data": {"sqlState": e.sql_state}})
+
+
+@app.get("/jupyterlite/new")
+async def jupyter(request: Request) -> JSONResponse:
+    return HTMLResponse(" <style>body {margin: 0}</style>" + f"""
+    <iframe
+    frameborder="0"
+  src="https://jupyterlite.github.io/{'demo/repl' if request.query_params.get('repl') is not None else 'demo/lab'}/index.html?code=import numpy as np&theme=JupyterLab Dark"
+  width="100%"
+  height="100%"
+></iframe>
+    """)
 
 
 @app.get("/")
 async def home(request: Request) -> JSONResponse:
-    return JSONResponse({"success": True, "status": "X-Duck is ducking 🐥"})
+    return JSONResponse(
+        {"status": "X-Duck is ducking 🐥", "new": {"jupyter": "/jupyterlite/new", "streamlit": "/streamlit/new"}})
+
+
+@app.get("/streamlit/new")
+async def streamlit_new(request: Request) -> JSONResponse:
+    return HTMLResponse("""
+    <!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+    />
+    <title>Stlite App</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.1/build/stlite.css"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.1/build/stlite.js"></script>
+    <script>
+      stlite.mount(
+        `
+import streamlit as st
+
+name = st.text_input('Your name')
+st.write("Hello,", name or "world")
+`,
+        document.getElementById("root"),
+      );
+    </script>
+  </body>
+</html>
+    """)
 
 
 @app.get("/monitoring/queries/{query_id:str}")
@@ -268,3 +358,5 @@ async def startup_event():
                                              footer_message=(
                                                  "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
                                                  "For application support, see https://github.com/buremba/universql",)))
+
+handler = Mangum(app, lifespan="off")

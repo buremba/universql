@@ -2,23 +2,24 @@ import datetime
 import gzip
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 import humanize
 import psutil
-from pyarrow import Schema
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 
 
 class Compute(Enum):
     LOCAL = "local"
-    AUTO = "auto"
+    CLOUD = "cloud"
     SNOWFLAKE = "snowflake"
+    BIGQUERY = "bigquery"
 
 
 SNOWFLAKE_HOST = os.getenv('SNOWFLAKE_HOST')
@@ -53,11 +54,11 @@ parameters = [
     },
     {
         "name": "CLIENT_RESULT_CHUNK_SIZE",
-        "value": 160
+        "value": 640
     },
     {
         "name": "CLIENT_SESSION_KEEP_ALIVE",
-        "value": True
+        "value": False
     },
     {
         "name": "QUERY_CONTEXT_CACHE_SIZE",
@@ -89,7 +90,7 @@ parameters = [
     },
     {
         "name": "CLIENT_MEMORY_LIMIT",
-        "value": 1536
+        "value": 15360
     },
     {
         "name": "CLIENT_TIMESTAMP_TYPE_MAPPING",
@@ -117,15 +118,15 @@ parameters = [
     },
     {
         "name": "CLIENT_TELEMETRY_ENABLED",
-        "value": True
+        "value": False
     },
     {
         "name": "CLIENT_DISABLE_INCIDENTS",
-        "value": True
+        "value": False
     },
     {
         "name": "CLIENT_USE_V1_QUERY_API",
-        "value": True
+        "value": False
     },
     {
         "name": "CLIENT_RESULT_COLUMN_CASE_INSENSITIVE",
@@ -165,7 +166,7 @@ parameters = [
     },
     {
         "name": "CLIENT_SESSION_KEEP_ALIVE_HEARTBEAT_FREQUENCY",
-        "value": 3600
+        "value": 36000
     },
     {
         "name": "CLIENT_SESSION_CLONE",
@@ -253,31 +254,13 @@ async def unpack_request_body(request: Request) -> dict:
     return json.loads(uz)
 
 
-def get_columns_for_duckdb(schema: Schema) -> list[dict[str, Any]]:
-    columns = []
-    for idx, col in enumerate(schema):
-        # args = sqlglot.expressions.DataType.build(col[1], dialect=dialect).args
-        # precision = args.get('expressions')[0].this
-        # scale = args.get('expressions')[1].this
-        columns.append({
-            "name": col.name,
-            "database": "",
-            "schema": "",
-            "table": "",
-            "nullable": True,
-            "type": col.metadata.get(b'logicalType').decode(),
-            "length": None,
-            "scale": None,
-            "precision": None,
-            # "scale": int(scale.name),
-            # "precision": int(precision.name),
-            "byteLength": None,
-            "collation": None
-        })
-    return columns
+class QueryError(Exception):
+    def __init__(self, message: str, sql_state: str = "02000"):
+        self.message = message
+        self.sql_state = sql_state
 
 
-class SnowflakeError(Exception):
+class SnowflakeError(QueryError):
     def __init__(self, id: str, message: str, sql_state: str = "02000"):
         self.id = id
         self.message = message
@@ -297,12 +280,13 @@ def session_from_request(sessions: List[str], request: Request):
     """
     auth = request.headers.get("Authorization")
     if not auth:
-        raise HTTPException(status_code=401, detail="No Authorization header")
+        raise HTTPException(status_code=401, detail="Session token not found in the request data.")
     if not auth.startswith('Snowflake Token="'):
         raise HTTPException(status_code=401, detail="Invalid Authorization header")
     token = auth[17:-1]
     if token not in sessions:
-        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+        raise HTTPException(status_code=401,
+                            detail="User must login again to access the service. Maybe server restarted?")
     return sessions[token]
 
 
@@ -328,8 +312,8 @@ def get_friendly_time_since(start_time, performance_counter):
 
 
 def prepend_to_lines(input_string, prepend_string=" ", vertical_string='------'):
-    if len(input_string) > 250:
-        input_string = input_string[0:250] + '[striped due to max 250 character limit]'
+    if len(input_string) > 2500:
+        input_string = input_string[0:2500] + '[striped due to max 2500 character limit]'
     lines = input_string.split('\n')
     modified_lines = [prepend_string + line for line in lines]
     modified_string = '\n'.join(modified_lines)
@@ -398,3 +382,28 @@ def calculate_script_cost(duration_second, electricity_rate=0.15, pc_lifetime_ye
     #     f"Total Cost: ${total_cost:.6f}"
     # )
     return f"~ ${total_cost:.6f}"
+
+
+pattern = r'(\w+)(?:\(([^)]*)\))'
+
+
+def parse_compute(value):
+    if value is not None:
+        matches = re.findall(pattern, value)
+        if len(matches) == 0:
+            matches = (('local', ''), ('snowflake', f'warehouse={value}'))
+    else:
+        matches = (('local', ''), ('snowflake', ''))
+
+    result = []
+    for func_name, args_str in matches:
+        args = {}
+        if args_str:
+            for arg in args_str.split(','):
+                if '=' in arg:
+                    key, value = arg.split('=', 1)
+                    args[key.strip()] = value.strip()
+                else:
+                    args[arg.strip()] = None  # Handle arguments without '='
+        result.append({'name': func_name, 'args': args})
+    return result

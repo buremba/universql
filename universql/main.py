@@ -12,7 +12,7 @@ import requests
 import uvicorn
 from requests import RequestException
 
-from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Compute, Catalog, sizeof_fmt, SNOWFLAKE_HOST
+from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, sizeof_fmt, SNOWFLAKE_HOST
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(levelname)-6s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
@@ -32,6 +32,7 @@ def cli():
 
 LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
 
+
 @cli.command(
     epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
 @click.option('--account',
@@ -42,9 +43,6 @@ LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
               default=LOCALHOSTCOMPUTING_COM,
               envvar='SERVER_HOST',
               type=str)
-@click.option('--compute', type=click.Choice([e.value for e in Compute], case_sensitive=False),
-              default=Compute.AUTO.value,
-              help=f'Enforce the query execution layer (default: {Compute.AUTO.value}, try with DuckDB and use Snowflake if it fails)')
 @click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
               help='Type of the Snowflake account. Automatically detected if not provided.')
 @click.option('--aws-profile', help='AWS profile to access S3 (default: `default`)', type=str)
@@ -57,15 +55,19 @@ LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
               type=str)
 @click.option('--ssl_certfile', help='SSL certfile for the proxy server, optional. ', type=str)
 @click.option('--max-memory', type=str, default=DEFAULTS["max_memory"],
-              help='DuckDB Max memory to use for the server (default: 80% of total memory)')
+              help='DuckDB Max memory to use for the server (default: 80% of total memory)',
+              envvar='MAX_MEMORY', )
 @click.option('--cache-directory', help=f'Data lake cache directory (default: {Path.home() / ".universql" / "cache"})',
               default=Path.home() / ".universql" / "cache",
+              envvar='CACHE_DIRECTORY',
               type=str)
 @click.option('--max-cache-size', type=str, default=DEFAULTS["max_cache_size"],
-              help='DuckDB maximum cache used in local disk (default: 80% of total available disk)')
+              help='DuckDB maximum cache used in local disk (default: 80% of total available disk)',
+              envvar='CACHE_PERCENTAGE', )
 @click.option('--database-path', type=click.Path(exists=False, writable=True), default=":memory:",
-              help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)')
-def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, **kwargs):
+              help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)',
+              envvar='DATABASE_PATH', )
+def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, **kwargs):
     context__params = click.get_current_context().params
     auto_catalog_mode = catalog is None
     if auto_catalog_mode:
@@ -82,22 +84,9 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
 
         context__params["catalog"] = Catalog.POLARIS.value if is_polaris else Catalog.SNOWFLAKE.value
 
-    if context__params["catalog"] == Catalog.POLARIS.value:
-        if compute != Compute.LOCAL.value:
-            logger.error("Polaris catalog only supports local compute. Refusing to start.")
-            sys.exit(1)
-
     adjective = "apparently" if auto_catalog_mode else ""
     logger.info(f"UniverSQL is starting reverse proxy for {account}.snowflakecomputing.com, "
                 f"it's {adjective} a {context__params['catalog']} server.")
-
-    if compute == Compute.AUTO.value:
-        logger.info("The queries will run on DuckDB and fallback to Snowflake warehouse if they fail.")
-    elif compute == Compute.LOCAL.value:
-        logger.info(
-            "The queries will run on DuckDB and fallback to Snowflake only if a running warehouse is not needed")
-    elif compute == Compute.SNOWFLAKE.value:
-        logger.info("The queries will run directly on Snowflake")
 
     if host == LOCALHOSTCOMPUTING_COM:
         data = socket.gethostbyname_ex(LOCALHOSTCOMPUTING_COM)
@@ -116,14 +105,14 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, compute, 
                 key_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['key']))
                 key_file.flush()
 
-                uvicorn.run("universql.server:app",
+                uvicorn.run("universql.protocol.snowflake:app",
                             host=host, port=port,
                             ssl_keyfile=ssl_keyfile or key_file.name,
                             ssl_certfile=ssl_certfile or cert_file.name,
                             reload=False,
                             use_colors=True)
     else:
-        uvicorn.run("universql.server:app",
+        uvicorn.run("universql.protocol.snowflake:app",
                     host=host, port=port,
                     reload=False,
                     use_colors=True)
