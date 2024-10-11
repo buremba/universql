@@ -9,6 +9,9 @@ WORKDIR /app
 
 RUN pip install 'poetry==1.8.3'
 COPY pyproject.toml poetry.lock ./
+
+# Needed to save time and avoid build issues in Lambda
+RUN poetry config virtualenvs.create false
 # Install the dependencies first, so that we can cache them.
 RUN poetry install
 
@@ -21,5 +24,5 @@ RUN poetry install
 
 EXPOSE 8084
 ENV UNIVERSQL_HOST=0.0.0.0
-
 ENTRYPOINT ["poetry", "run", "universql"]
+
