@@ -32,6 +32,7 @@ humanize = "^4.10.0"
 google-cloud-bigquery = "^3.25.0"
 duckdb-engine = "^0.13.2"
 
+mangum = "^0.19.0"
 [tool.poetry.dev-dependencies]
 pylint = ">=2.11.1"
 yappi = "^1.5.1"
