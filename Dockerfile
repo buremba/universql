@@ -15,9 +15,8 @@ COPY . ${LAMBDA_TASK_ROOT}
 
 # Install again, now that we've copied the jinjat package files. Otherwise,
 # Jinjat itself won't be installed.
-RUN poetry install
+RUN poetry install --no-interaction --no-ansi --no-root --only main
 
-EXPOSE 8084
-ENV UNIVERSQL_HOST=0.0.0.0
-ENTRYPOINT ["poetry", "run", "universql"]
+CMD [ "universql.protocol.snowflake" ]
+
 
