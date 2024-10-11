@@ -1,11 +1,7 @@
-FROM python:3.11-slim-bullseye
-
-RUN apt-get update && apt-get -y upgrade \
-    && apt-get install gcc -y  \
-    && pip install --upgrade pip
+FROM public.ecr.aws/lambda/python:3.11
 
 RUN pip install 'poetry==1.8.3'
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml poetry.lock ${LAMBDA_TASK_ROOT}
 
 # Needed to save time and avoid build issues in Lambda
 RUN poetry config virtualenvs.create false --local
@@ -13,7 +9,7 @@ RUN poetry config virtualenvs.create false --local
 RUN poetry install --no-dev
 
 # Copy everything. (Note: If needed, we can use .dockerignore to limit what's copied.)
-COPY . .
+COPY . ${LAMBDA_TASK_ROOT}
 
 # Install again, now that we've copied the jinjat package files. Otherwise,
 # Jinjat itself won't be installed.
