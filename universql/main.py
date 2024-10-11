@@ -1,5 +1,7 @@
 import base64
+import functools
 import logging
+import os
 import socket
 import sys
 import tempfile
@@ -12,16 +14,12 @@ import requests
 import uvicorn
 from requests import RequestException
 
-from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, sizeof_fmt, SNOWFLAKE_HOST
+from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, sizeof_fmt, SNOWFLAKE_HOST, LOCALHOSTCOMPUTING_COM, \
+    DEFAULTS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(levelname)-6s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger("🏠")
-
-DEFAULTS = {
-    "max_memory": sizeof_fmt(psutil.virtual_memory().total * 0.8),
-    "max_cache_size": sizeof_fmt(psutil.disk_usage("./").free * 0.8)
-}
 
 
 @click.group()
@@ -29,44 +27,47 @@ DEFAULTS = {
 def cli():
     pass
 
+def snowflake_server_opts(func: typing.Callable) -> typing.Callable:
+    @cli.command(
+        epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
+    @click.option('--account',
+                  help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
+                  prompt='Account ID', envvar='SNOWFLAKE_ACCOUNT')
+    @click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, type=int)
+    @click.option('--host', help='Host for Snowflake proxy server (default: localhostcomputing.com)',
+                  default=LOCALHOSTCOMPUTING_COM,
+                  envvar='SERVER_HOST',
+                  type=str)
+    @click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
+                  help='Type of the Snowflake account. Automatically detected if not provided.', envvar='UNIVERSQL_CATALOG')
+    @click.option('--aws-profile', help='AWS profile to access S3 (default: `default`)', type=str)
+    @click.option('--gcp-project',
+                  help='GCP project to access GCS and apply quota. (to see how to setup auth for GCP and use different accounts, visit https://cloud.google.com/docs/authentication/application-default-credentials)',
+                  type=str)
+    # @click.option('--azure-tenant', help='Azure account to access Blob Storage (ex: default az credentials)', type=str)
+    @click.option('--ssl_keyfile',
+                  help='SSL keyfile for the proxy server, optional. Use it if you don\'t want to use localhostcomputing.com',
+                  type=str)
+    @click.option('--ssl_certfile', help='SSL certfile for the proxy server, optional. ', type=str)
+    @click.option('--max-memory', type=str, default=DEFAULTS["max_memory"],
+                  help='DuckDB Max memory to use for the server (default: 80% of total memory)',
+                  envvar='MAX_MEMORY', )
+    @click.option('--cache-directory', help=f'Data lake cache directory (default: {Path.home() / ".universql" / "cache"})',
+                  default=Path.home() / ".universql" / "cache",
+                  envvar='CACHE_DIRECTORY',
+                  type=str)
+    @click.option('--max-cache-size', type=str, default=DEFAULTS["max_cache_size"],
+                  help='DuckDB maximum cache used in local disk (default: 80% of total available disk)',
+                  envvar='CACHE_PERCENTAGE', )
+    @click.option('--database-path', type=click.Path(exists=False, writable=True), default=":memory:",
+                  help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)',
+                  envvar='DATABASE_PATH', )
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
 
-LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
-
-
-@cli.command(
-    epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
-@click.option('--account',
-              help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
-              prompt='Account ID', envvar='SNOWFLAKE_ACCOUNT')
-@click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, type=int)
-@click.option('--host', help='Host for Snowflake proxy server (default: localhostcomputing.com)',
-              default=LOCALHOSTCOMPUTING_COM,
-              envvar='SERVER_HOST',
-              type=str)
-@click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
-              help='Type of the Snowflake account. Automatically detected if not provided.')
-@click.option('--aws-profile', help='AWS profile to access S3 (default: `default`)', type=str)
-@click.option('--gcp-project',
-              help='GCP project to access GCS and apply quota. (to see how to setup auth for GCP and use different accounts, visit https://cloud.google.com/docs/authentication/application-default-credentials)',
-              type=str)
-# @click.option('--azure-tenant', help='Azure account to access Blob Storage (ex: default az credentials)', type=str)
-@click.option('--ssl_keyfile',
-              help='SSL keyfile for the proxy server, optional. Use it if you don\'t want to use localhostcomputing.com',
-              type=str)
-@click.option('--ssl_certfile', help='SSL certfile for the proxy server, optional. ', type=str)
-@click.option('--max-memory', type=str, default=DEFAULTS["max_memory"],
-              help='DuckDB Max memory to use for the server (default: 80% of total memory)',
-              envvar='MAX_MEMORY', )
-@click.option('--cache-directory', help=f'Data lake cache directory (default: {Path.home() / ".universql" / "cache"})',
-              default=Path.home() / ".universql" / "cache",
-              envvar='CACHE_DIRECTORY',
-              type=str)
-@click.option('--max-cache-size', type=str, default=DEFAULTS["max_cache_size"],
-              help='DuckDB maximum cache used in local disk (default: 80% of total available disk)',
-              envvar='CACHE_PERCENTAGE', )
-@click.option('--database-path', type=click.Path(exists=False, writable=True), default=":memory:",
-              help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)',
-              envvar='DATABASE_PATH', )
+    return wrapper
+@snowflake_server_opts
 def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, **kwargs):
     context__params = click.get_current_context().params
     auto_catalog_mode = catalog is None
@@ -136,6 +137,7 @@ uvicorn_logger = logging.getLogger("uvicorn.access")
 uvicorn_logger.addFilter(EndpointFilter(path="/telemetry/send"))
 uvicorn_logger.addFilter(EndpointFilter(path="/queries/v1/query-request"))
 uvicorn_logger.addFilter(EndpointFilter(path="/session"))
+
 
 if __name__ == '__main__':
     cli(prog_name="universql")

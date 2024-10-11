@@ -30,6 +30,8 @@ LOCALHOST_UNIVERSQL_COM_BYTES = {
 }
 
 
+
+
 class Catalog(Enum):
     SNOWFLAKE = "snowflake"
     POLARIS = "polaris"
@@ -407,3 +409,10 @@ def parse_compute(value):
                     args[arg.strip()] = None  # Handle arguments without '='
         result.append({'name': func_name, 'args': args})
     return result
+
+DEFAULTS = {
+    "max_memory": sizeof_fmt(psutil.virtual_memory().total * 0.8),
+    "max_cache_size": sizeof_fmt(psutil.disk_usage("./").free * 0.8)
+}
+
+LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"

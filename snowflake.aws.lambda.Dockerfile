@@ -17,6 +17,6 @@ COPY . ${LAMBDA_TASK_ROOT}
 # Jinjat itself won't be installed.
 RUN poetry install --no-interaction --no-ansi --no-root --only main
 
-CMD [ "universql.protocol.snowflake.handler" ]
+CMD [ "universql.protocol.lambda.snowflake" ]
 
 

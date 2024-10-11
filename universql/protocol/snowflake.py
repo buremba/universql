@@ -11,12 +11,10 @@ from typing import Any
 from uuid import uuid4
 
 import click
-import psutil
 import pyarrow as pa
 import yaml
 
 from fastapi import FastAPI
-from mangum import Mangum
 from pyarrow import Schema
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
@@ -33,7 +31,22 @@ app = FastAPI()
 
 sessions = {}
 query_results = {}
-current_context = click.get_current_context().params
+
+context = click.get_current_context(silent=True)
+if context is None:
+    value = [None]
+    from universql.main import snowflake_server_opts, snowflake
+    # pass_context = click.make_pass_decorator(dict, ensure=True)
+    @snowflake_server_opts
+    def test(**kwargs):
+        value[0] = kwargs
+    with click.Context(snowflake) as ctx:
+        ctx.params = os.environ
+        ctx.invoke(test)
+
+    current_context = value[0]
+else:
+    current_context = context.params
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🧵")
@@ -299,13 +312,18 @@ def watch_tower(cache_directory, **kwargs):
             break
         processing_sessions = sum(session.processing for token, session in sessions.items())
         if ENABLE_DEBUG_WATCH_TOWER or processing_sessions > 0:
-            process = psutil.Process()
-            percent = psutil.cpu_percent()
-            cpu_percent = "%.1f" % percent
-            memory_percent = "%.1f" % process.memory_percent()
+            try:
+                import psutil
+                process = psutil.Process()
+                cpu_percent = f"[CPU: {'%.1f' % psutil.cpu_percent()}%]"
+                memory_percent = f"[Memory: {'%.1f' % process.memory_percent()}%]"
+            except:
+                memory_percent = ""
+                cpu_percent = ""
+
             disk_info = get_friendly_disk_usage(cache_directory, debug=ENABLE_DEBUG_WATCH_TOWER)
             logger.info(f"Currently {len(sessions)} sessions running {processing_sessions} queries "
-                        f"| System: [CPU: {cpu_percent}%] [Memory: {memory_percent}%] [Disk: {disk_info}] ")
+                        f"| System: {cpu_percent} {memory_percent} [Disk: {disk_info}] ")
 
 
 thread = Thread(target=watch_tower, kwargs=(current_context))
@@ -358,5 +376,3 @@ async def startup_event():
                                              footer_message=(
                                                  "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
                                                  "For application support, see https://github.com/buremba/universql",)))
-
-handler = Mangum(app, lifespan="off")
