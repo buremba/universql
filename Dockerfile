@@ -3,7 +3,7 @@ FROM public.ecr.aws/lambda/python:3.11
 RUN yum install gcc -y
 
 RUN pip install 'poetry==1.8.3'
-COPY pyproject.toml poetry.lock ${LAMBDA_TASK_ROOT}
+COPY pyproject.toml ${LAMBDA_TASK_ROOT}
 
 # Needed to save time and avoid build issues in Lambda
 RUN poetry config virtualenvs.create false --local
