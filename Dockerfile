@@ -4,9 +4,6 @@ RUN apt-get update && apt-get -y upgrade \
     && apt-get install gcc -y  \
     && pip install --upgrade pip
 
-# Set separate working directory for easier debugging.
-WORKDIR /app
-
 RUN pip install 'poetry==1.8.3'
 COPY pyproject.toml poetry.lock ./
 
