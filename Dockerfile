@@ -11,7 +11,7 @@ RUN pip install 'poetry==1.8.3'
 COPY pyproject.toml poetry.lock ./
 
 # Needed to save time and avoid build issues in Lambda
-RUN poetry config virtualenvs.create false
+RUN poetry config virtualenvs.create false --local
 # Install the dependencies first, so that we can cache them.
 RUN poetry install --no-dev
 
