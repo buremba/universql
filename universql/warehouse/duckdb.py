@@ -39,8 +39,8 @@ class DuckDBCatalog(ICatalog):
         }
         if os.access(context.get('home_directory'), os.W_OK | os.X_OK):
             duck_config["home_directory"] = context.get('home_directory')
-        elif duckdb_path != ':memory:':
-            duck_config["access_mode"] = 'READ_ONLY'
+        else:
+            duck_config["home_directory"] = os.path.join(context.get('cache_directory'), "home")
 
         try:
             self.duckdb = duckdb.connect(duckdb_path,
