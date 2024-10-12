@@ -31,12 +31,15 @@ class DuckDBCatalog(ICatalog):
     def __init__(self, context: dict, query_id: str, credentials: dict, compute: dict):
         super().__init__(context, query_id, credentials, compute)
         duckdb_path = context.get('database_path')
-        self.duckdb = duckdb.connect(duckdb_path, config={
-            'max_memory': context.get('max_memory'),
-            'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
-            'max_temp_directory_size': context.get('max_cache_size'),
-            'home_directory': context.get('home_directory')
-        })
+        try:
+            self.duckdb = duckdb.connect(duckdb_path, config={
+                'max_memory': context.get('max_memory'),
+                'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
+                'max_temp_directory_size': context.get('max_cache_size'),
+                'home_directory': context.get('home_directory')
+            })
+        except duckdb.InvalidInputException as e:
+            raise QueryError(f"Unable to spin up DuckDB: {e}")
         DuckDBFunctions.register(self.duckdb)
         self.duckdb.install_extension("iceberg")
         self.duckdb.load_extension("iceberg")
