@@ -1,4 +1,4 @@
-name: Deploy to ECR
+name: Deploy to AWS Lambda
 
 on:
   push:
@@ -8,7 +8,7 @@ jobs:
 
   build:
 
-    name: Build Image
+    name: Build Image and Deploy
     runs-on: ubuntu-latest
     environment: deploy
     steps:

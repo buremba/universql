@@ -38,7 +38,7 @@ context = click.get_current_context(silent=True)
 if context is None:
     from universql.main import snowflake, get_context_params
     current_context = get_context_params(snowflake)
-    logger.info(f"Context is {current_context}")
+    print(f"Context is {current_context}")
 else:
     current_context = context.params
 
