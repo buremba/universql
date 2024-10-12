@@ -37,13 +37,13 @@ class DuckDBCatalog(ICatalog):
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
             'max_temp_directory_size': context.get('max_cache_size'),
         }
-        if os.access(context.get('home_directory'), os.W_OK):
+        if os.access(context.get('home_directory'), os.W_OK | os.X_OK):
             duck_config["home_directory"] = context.get('home_directory')
         else:
             duck_config["access_mode"] = 'READ_ONLY'
 
         try:
-            self.duckdb = duckdb.connect(duckdb_path, read_only=duck_config["access_mode"] == 'READ_ONLY',
+            self.duckdb = duckdb.connect(duckdb_path, read_only=duck_config.get("access_mode") == 'READ_ONLY' and duckdb_path != ':memory:',
                                          config=duck_config)
         except duckdb.InvalidInputException as e:
             raise QueryError(f"Unable to spin up DuckDB ({duckdb_path}) with config {duck_config}: {e}")
