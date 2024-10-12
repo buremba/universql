@@ -36,9 +36,10 @@ logger = logging.getLogger("🧵")
 
 context = click.get_current_context(silent=True)
 if context is None:
+    logging.getLogger().setLevel(logging.INFO)
     from universql.main import snowflake, get_context_params
     current_context = get_context_params(snowflake)
-    print(f"Context is {current_context}")
+    logger.info(f"Context is {current_context}")
 else:
     current_context = context.params
 
