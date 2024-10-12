@@ -132,6 +132,13 @@ class EndpointFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return record.getMessage().find(self._path) == -1
 
+def get_context_params(endpoint):
+    env_vars = {}
+    for param in endpoint.params:
+        env_vars[param.name] = param.default
+        if param.envvar is not None:
+            env_vars[param.name] = os.getenv(param.envvar, None)
+    return env_vars
 
 uvicorn_logger = logging.getLogger("uvicorn.access")
 uvicorn_logger.addFilter(EndpointFilter(path="/telemetry/send"))

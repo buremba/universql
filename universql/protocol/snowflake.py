@@ -34,19 +34,8 @@ query_results = {}
 
 context = click.get_current_context(silent=True)
 if context is None:
-    value = [None]
-    from universql.main import snowflake_server_opts, snowflake
-    # pass_context = click.make_pass_decorator(dict, ensure=True)
-    @snowflake_server_opts
-    def test(**kwargs):
-        value[0] = kwargs
-
-
-    with click.Context(snowflake) as ctx:
-        ctx.params = os.environ
-        ctx.invoke(test)
-
-    current_context = value[0]
+    from universql.main import snowflake, get_context_params
+    current_context = get_context_params(snowflake)
 else:
     current_context = context.params
 
