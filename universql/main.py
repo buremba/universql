@@ -59,7 +59,7 @@ def cli():
 @click.option('--home-directory',
               help=f'Home directory for local operations (default: {Path.home()})',
               default=Path.home(),
-              envvar='HOME_DIRECTORY',
+              envvar='HOME',
               type=str)
 @click.option('--max-cache-size', type=str, default=DEFAULTS["max_cache_size"],
               help='DuckDB maximum cache used in local disk (default: 80% of total available disk)',
