@@ -39,7 +39,7 @@ class DuckDBCatalog(ICatalog):
             'access_mode': 'READ_ONLY'
         }
         try:
-            self.duckdb = duckdb.connect(duckdb_path, config=duck_config)
+            self.duckdb = duckdb.connect(duckdb_path, read_only=True, config=duck_config)
         except duckdb.InvalidInputException as e:
             raise QueryError(f"Unable to spin up DuckDB ({duckdb_path}) with config {duck_config}: {e}")
         DuckDBFunctions.register(self.duckdb)
