@@ -40,6 +40,8 @@ if context is None:
     @snowflake_server_opts
     def test(**kwargs):
         value[0] = kwargs
+
+
     with click.Context(snowflake) as ctx:
         ctx.params = os.environ
         ctx.invoke(test)
@@ -57,7 +59,7 @@ async def add_process_time_header(request: Request, call_next):
     start_time = time.perf_counter()
     response = await call_next(request)
     # if request.url.path in ["/queries/v1/query-request"]:
-    print(f"Time took to process {request.url.path} is {time.perf_counter() - start_time} sec")
+    # print(f"Time took to process {request.url.path} is {time.perf_counter() - start_time} sec")
     return response
 
 
