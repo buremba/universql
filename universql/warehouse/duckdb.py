@@ -23,6 +23,7 @@ from sqlglot.optimizer.simplify import simplify
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🐥")
 
+
 class DuckDBCatalog(ICatalog):
 
     def register_locations(self, tables: Locations):
@@ -35,11 +36,15 @@ class DuckDBCatalog(ICatalog):
             'max_memory': context.get('max_memory'),
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
             'max_temp_directory_size': context.get('max_cache_size'),
-            'home_directory': context.get('home_directory'),
-            'access_mode': 'READ_ONLY'
         }
+        if os.access(context.get('home_directory'), os.W_OK):
+            duck_config["home_directory"] = context.get('home_directory')
+        else:
+            duck_config["access_mode"] = 'READ_ONLY'
+
         try:
-            self.duckdb = duckdb.connect(duckdb_path, read_only=True, config=duck_config)
+            self.duckdb = duckdb.connect(duckdb_path, read_only=duck_config["access_mode"] == 'READ_ONLY',
+                                         config=duck_config)
         except duckdb.InvalidInputException as e:
             raise QueryError(f"Unable to spin up DuckDB ({duckdb_path}) with config {duck_config}: {e}")
         DuckDBFunctions.register(self.duckdb)
@@ -112,10 +117,10 @@ class DuckDBExecutor(Executor):
 
     def _sync_catalog(self, ast: sqlglot.exp.Expression,
                       tables_getter: typing.Callable[[], Locations]) -> sqlglot.exp.Expression:
-            locations = tables_getter()
-            return self._sync_duckdb_catalog(locations,
-                                             simplify(
-                                                 ast)) if locations is not None else None
+        locations = tables_getter()
+        return self._sync_duckdb_catalog(locations,
+                                         simplify(
+                                             ast)) if locations is not None else None
 
     def execute(self, ast: sqlglot.exp.Expression, tables_getter: typing.Callable[[], Locations]) -> \
             typing.Optional[Locations]:
