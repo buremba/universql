@@ -135,7 +135,8 @@ class EndpointFilter(logging.Filter):
 def get_context_params(endpoint):
     env_vars = {}
     for param in endpoint.params:
-        env_vars[param.name] = param.default
+        if param.default is not None:
+            env_vars[param.name] = str(param.default)
         if param.envvar is not None and param.default is None:
             env_vars[param.name] = os.getenv(param.envvar, None)
     return env_vars

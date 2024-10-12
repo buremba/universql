@@ -31,15 +31,18 @@ app = FastAPI()
 sessions = {}
 query_results = {}
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("🧵")
+
 context = click.get_current_context(silent=True)
 if context is None:
     from universql.main import snowflake, get_context_params
     current_context = get_context_params(snowflake)
+    logger.info(f"Context is {current_context}")
 else:
     current_context = context.params
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("🧵")
+
 
 
 @app.middleware("http")
