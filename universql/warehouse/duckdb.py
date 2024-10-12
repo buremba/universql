@@ -36,15 +36,11 @@ class DuckDBCatalog(ICatalog):
             'max_memory': context.get('max_memory'),
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
             'max_temp_directory_size': context.get('max_cache_size'),
+            'home_directory': context.get('home_directory'),
         }
-        if os.access(context.get('home_directory'), os.W_OK | os.X_OK):
-            duck_config["home_directory"] = context.get('home_directory')
-        else:
-            duck_config["home_directory"] = os.path.join(context.get('cache_directory'), "home")
 
         try:
-            self.duckdb = duckdb.connect(duckdb_path,
-                                         config=duck_config)
+            self.duckdb = duckdb.connect(duckdb_path, config=duck_config)
         except duckdb.InvalidInputException as e:
             raise QueryError(f"Unable to spin up DuckDB ({duckdb_path}) with config {duck_config}: {e}")
         DuckDBFunctions.register(self.duckdb)
