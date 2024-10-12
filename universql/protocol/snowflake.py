@@ -1,11 +1,17 @@
-from __future__ import annotations
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("🧵")
+
+logger.info("Starting")
 
 import base64
-import logging
 import os
 import signal
 import threading
+import time
 from threading import Thread
+
 from typing import Any
 from uuid import uuid4
 
@@ -26,16 +32,16 @@ from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
 from universql.protocol.session import UniverSQLSession
 
+start_time = time.perf_counter()
+
 app = FastAPI()
 
 sessions = {}
 query_results = {}
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("🧵")
-
 context = click.get_current_context(silent=True)
 if context is None:
+    # not running through CLI
     logging.getLogger().setLevel(logging.INFO)
     from universql.main import snowflake, get_context_params
     current_context = get_context_params(snowflake)
@@ -370,3 +376,4 @@ async def startup_event():
                                              footer_message=(
                                                  "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
                                                  "For application support, see https://github.com/buremba/universql",)))
+logger.info("Started")

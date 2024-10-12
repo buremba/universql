@@ -9,6 +9,7 @@ import sqlglot
 from fakesnow.conn import FakeSnowflakeConnection
 from fakesnow.cursor import FakeSnowflakeCursor
 from pyiceberg.catalog import load_catalog, PY_CATALOG_IMPL
+from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import PY_IO_IMPL, WAREHOUSE
 from snowflake.connector.options import pyarrow
@@ -23,7 +24,9 @@ from sqlglot.optimizer.simplify import simplify
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🐥")
 
-
+class DuckDBIcebergCatalog(SqlCatalog):
+    def _ensure_tables_exist(self) -> None:
+        pass
 class DuckDBCatalog(ICatalog):
 
     def register_locations(self, tables: Locations):
@@ -54,10 +57,10 @@ class DuckDBCatalog(ICatalog):
             catalog_props = {
                 PY_IO_IMPL: "universql.lake.cloud.iceberg",
                 WAREHOUSE: "gs://my-iceberg-data/custom-events/customer_iceberg_pyiceberg",
-                PY_CATALOG_IMPL: "pyiceberg.catalog.sql.SqlCatalog",
+                PY_CATALOG_IMPL: "universql.warehouse.duckdb.DuckDBIcebergCatalog",
                 CACHE_DIRECTORY_KEY: context.get('cache_directory'),
-                "uri": "sqlite:////Users/bkabak/Code/universql/tests/test.db",
-                # "echo": "true"
+                # pass duck conn
+                "uri": "duckdb:///:memory:",
             }
         self.iceberg_catalog = load_catalog(catalog_name, **catalog_props)
 
