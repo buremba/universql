@@ -138,7 +138,9 @@ def get_context_params(endpoint):
         if param.default is not None:
             env_vars[param.name] = str(param.default)
         if param.envvar is not None:
-            env_vars[param.name] = os.getenv(param.envvar, None)
+            env_value = os.getenv(param.envvar, None)
+            if env_value is not None:
+                env_vars[param.name] = env_value
     return env_vars
 
 
