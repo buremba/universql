@@ -9,12 +9,11 @@ import typing
 from pathlib import Path
 
 import click
-import psutil
 import requests
 import uvicorn
 from requests import RequestException
 
-from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, sizeof_fmt, SNOWFLAKE_HOST, LOCALHOSTCOMPUTING_COM, \
+from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, SNOWFLAKE_HOST, LOCALHOSTCOMPUTING_COM, \
     DEFAULTS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(levelname)-6s %(message)s',
@@ -26,6 +25,7 @@ logger = logging.getLogger("🏠")
 @click.version_option(version="0.1")
 def cli():
     pass
+
 
 def snowflake_server_opts(func: typing.Callable) -> typing.Callable:
     @cli.command(
@@ -39,7 +39,8 @@ def snowflake_server_opts(func: typing.Callable) -> typing.Callable:
                   envvar='SERVER_HOST',
                   type=str)
     @click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
-                  help='Type of the Snowflake account. Automatically detected if not provided.', envvar='UNIVERSQL_CATALOG')
+                  help='Type of the Snowflake account. Automatically detected if not provided.',
+                  envvar='UNIVERSQL_CATALOG')
     @click.option('--aws-profile', help='AWS profile to access S3 (default: `default`)', type=str)
     @click.option('--gcp-project',
                   help='GCP project to access GCS and apply quota. (to see how to setup auth for GCP and use different accounts, visit https://cloud.google.com/docs/authentication/application-default-credentials)',
@@ -52,7 +53,8 @@ def snowflake_server_opts(func: typing.Callable) -> typing.Callable:
     @click.option('--max-memory', type=str, default=DEFAULTS["max_memory"],
                   help='DuckDB Max memory to use for the server (default: 80% of total memory)',
                   envvar='MAX_MEMORY', )
-    @click.option('--cache-directory', help=f'Data lake cache directory (default: {Path.home() / ".universql" / "cache"})',
+    @click.option('--cache-directory',
+                  help=f'Data lake cache directory (default: {Path.home() / ".universql" / "cache"})',
                   default=Path.home() / ".universql" / "cache",
                   envvar='CACHE_DIRECTORY',
                   type=str)
@@ -67,6 +69,8 @@ def snowflake_server_opts(func: typing.Callable) -> typing.Callable:
         return func(*args, **kwargs)
 
     return wrapper
+
+
 @snowflake_server_opts
 def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, **kwargs):
     context__params = click.get_current_context().params
@@ -132,19 +136,20 @@ class EndpointFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return record.getMessage().find(self._path) == -1
 
+
 def get_context_params(endpoint):
     env_vars = {}
     for param in endpoint.params:
         env_vars[param.name] = param.default
-        if param.envvar is not None:
+        if param.envvar is not None and param.default is None:
             env_vars[param.name] = os.getenv(param.envvar, None)
     return env_vars
+
 
 uvicorn_logger = logging.getLogger("uvicorn.access")
 uvicorn_logger.addFilter(EndpointFilter(path="/telemetry/send"))
 uvicorn_logger.addFilter(EndpointFilter(path="/queries/v1/query-request"))
 uvicorn_logger.addFilter(EndpointFilter(path="/session"))
-
 
 if __name__ == '__main__':
     cli(prog_name="universql")

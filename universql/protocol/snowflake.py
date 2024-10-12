@@ -5,7 +5,6 @@ import logging
 import os
 import signal
 import threading
-import time
 from threading import Thread
 from typing import Any
 from uuid import uuid4
@@ -45,7 +44,7 @@ logger = logging.getLogger("🧵")
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    start_time = time.perf_counter()
+    # start_time = time.perf_counter()
     response = await call_next(request)
     # if request.url.path in ["/queries/v1/query-request"]:
     # print(f"Time took to process {request.url.path} is {time.perf_counter() - start_time} sec")
