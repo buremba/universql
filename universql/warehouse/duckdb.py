@@ -35,6 +35,7 @@ class DuckDBCatalog(ICatalog):
             'max_memory': context.get('max_memory'),
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
             'max_temp_directory_size': context.get('max_cache_size'),
+            'home_directory': context.get('home_directory')
         })
         DuckDBFunctions.register(self.duckdb)
         self.duckdb.install_extension("iceberg")
