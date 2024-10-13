@@ -1,5 +1,6 @@
 import logging
 
+logging.getLogger().setLevel(logging.INFO)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🧵")
 
@@ -42,7 +43,6 @@ query_results = {}
 context = click.get_current_context(silent=True)
 if context is None:
     # not running through CLI
-    logging.getLogger().setLevel(logging.INFO)
     from universql.main import snowflake, get_context_params
     current_context = get_context_params(snowflake)
     logger.info(f"Context is {current_context}")
