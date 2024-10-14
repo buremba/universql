@@ -35,11 +35,7 @@ aws-cdk-lib = "^2.162.1"
 
 [tool.poetry.dev-dependencies]
 pylint = ">=2.11.1"
-yappi = "^1.5.1"
-tqdm = "^4.66.5"
 pystray = "^0.19.5"
-pywebview = "^5.2"
-jupyter = "^1.1.1"
 networkx = "^3.3"
 streamlit = "^1.38.0"
 st-link-analysis = "^0.3.0"
