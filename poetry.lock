@@ -834,6 +834,22 @@ files = [
 ]
 
 [[package]]
+name = "duckdb-engine"
+version = "0.13.2"
+description = "SQLAlchemy driver for duckdb"
+optional = false
+python-versions = "<4,>=3.8"
+files = [
+    {file = "duckdb_engine-0.13.2-py3-none-any.whl", hash = "sha256:a1a0ad9d16cdcbbe0f9a0844745b1e971f789b60cb46da990bb19a946c251128"},
+    {file = "duckdb_engine-0.13.2.tar.gz", hash = "sha256:84cc4ad424345d9e6cf2df58f979caff66d755b0bc5b03043b918de5c2b05925"},
+]
+
+[package.dependencies]
+duckdb = ">=0.5.0"
+packaging = ">=21"
+sqlalchemy = ">=1.3.22"
+
+[[package]]
 name = "email-validator"
 version = "2.2.0"
 description = "A robust email address syntax and deliverability validation library."
@@ -4548,4 +4564,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "608854d242df88db2a718b1bb7f73682354ec014044b4b5daddbb78636ed3d98"
+content-hash = "632dc5b171e10af162458ba82013d3a6cd30621b4a5931d9bd7c61747bb48f60"
