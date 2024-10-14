@@ -33,8 +33,7 @@ jobs:
           ECR_REPOSITORY: universql
           IMAGE_TAG: latest
         run: |
-          docker buildx build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f snowflake.aws.lambda.Dockerfile --platform linux/amd64,linux/arm64 .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f snowflake.aws.lambda.Dockerfile --push .
 
       - uses: int128/deploy-lambda-action@v1
         with:
