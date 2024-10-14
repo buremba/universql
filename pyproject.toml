@@ -29,6 +29,8 @@ pyarrow = "^17.0.0"
 psutil = "^6.0.0"
 # once we get rid of from pyiceberg.catalog.sql import SqlCatalog, remove it
 sqlalchemy = "^2.0.35"
+duckdb-engine = "^0.13.2"
+
 # GCS
 gcsfs = "^2024.6.1"
 google-cloud-bigquery = "^3.25.0"
