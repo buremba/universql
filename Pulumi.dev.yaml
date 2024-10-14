@@ -1,3 +1,0 @@
-config:
-  gcp:project: jinjat-demo
-  gcp:region: us-central1

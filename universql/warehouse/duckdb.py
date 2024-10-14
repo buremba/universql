@@ -17,7 +17,7 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
 
 from universql.warehouse import ICatalog, Executor, IcebergTable, Locations, CreateRelation, Location
 from universql.lake.cloud import s3, gcs, CACHE_DIRECTORY_KEY
-from universql.util import prepend_to_lines, QueryError, calculate_script_cost
+from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from sqlglot.optimizer.simplify import simplify
 
@@ -40,6 +40,7 @@ class DuckDBCatalog(ICatalog):
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
             'max_temp_directory_size': context.get('max_cache_size'),
         }
+        self.account = parse_snowflake_account(context.get('account'))
 
         try:
             self.duckdb = duckdb.connect(duckdb_path, config=duck_config)
@@ -71,8 +72,10 @@ class DuckDBCatalog(ICatalog):
         self._register_data_lake(context)
 
     def _register_data_lake(self, args: dict):
-        self.duckdb.register_filesystem(s3(args.get('cache_directory'), args.get('aws_profile')))
-        self.duckdb.register_filesystem(gcs(args.get('cache_directory'), args.get('gcp_project')))
+        if 'aws_profile' in args or self.account.cloud == 'aws':
+            self.duckdb.register_filesystem(s3(args.get('cache_directory'), args.get('aws_profile')))
+        if 'gcp_project' in args or self.account.cloud == 'gcp':
+            self.duckdb.register_filesystem(gcs(args.get('cache_directory'), args.get('gcp_project')))
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]):
         pass

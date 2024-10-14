@@ -1,16 +1,8 @@
 import logging
-
-logging.getLogger().setLevel(logging.INFO)
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("🧵")
-
-logger.info("Starting")
-
 import base64
 import os
 import signal
 import threading
-import time
 from threading import Thread
 
 from typing import Any
@@ -33,7 +25,9 @@ from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
 from universql.protocol.session import UniverSQLSession
 
-start_time = time.perf_counter()
+logging.getLogger().setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("🧵")
 
 app = FastAPI()
 
@@ -42,23 +36,16 @@ query_results = {}
 
 context = click.get_current_context(silent=True)
 if context is None:
+    # set log level
+    logging.getLogger().setLevel(logging.INFO)
+
     # not running through CLI
     from universql.main import snowflake, get_context_params
+
     current_context = get_context_params(snowflake)
     logger.info(f"Context is {current_context}")
 else:
     current_context = context.params
-
-
-
-
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    # start_time = time.perf_counter()
-    response = await call_next(request)
-    # if request.url.path in ["/queries/v1/query-request"]:
-    # print(f"Time took to process {request.url.path} is {time.perf_counter() - start_time} sec")
-    return response
 
 
 @app.post("/session/v1/login-request")
@@ -372,8 +359,6 @@ async def startup_event():
     params = {k: v for k, v in current_context.items() if
               v is not None and k not in ["host", "port"]}
     click.secho(yaml.dump(params).strip())
-    click.secho(print_dict_as_markdown_table(connections,
-                                             footer_message=(
-                                                 "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
-                                                 "For application support, see https://github.com/buremba/universql",)))
-logger.info("Started")
+    click.secho(print_dict_as_markdown_table(connections, footer_message=(
+        "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
+        "For application support, see https://github.com/buremba/universql",)))

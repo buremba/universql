@@ -416,3 +416,38 @@ DEFAULTS = {
 }
 
 LOCALHOSTCOMPUTING_COM = "localhostcomputing.com"
+
+
+@dataclass
+class SnowflakeAccount:
+    account: str
+    region: str
+    cloud: str
+
+# account_info = parse_snowflake_account('lt51601.europe-west2.gcp')
+# print(account_info)  # Output: ('lt51601', 'europe-west2', 'gcp')
+#
+# account_info = parse_snowflake_account('xy12345.fhplus.us-gov-west-1.aws')
+# print(account_info)  # Output: ('xy12345', 'fhplus.us-gov-west-1', 'aws')
+def parse_snowflake_account(account_identifier: str) -> SnowflakeAccount:
+    # Split the account identifier into parts
+    parts = account_identifier.split('.')
+
+    # Extract the account, region, and cloud (if present)
+    account = parts[0]
+
+    if len(parts) == 2:
+        region = parts[1]
+        cloud = 'aws'
+    elif len(parts) >= 3:
+        region = '.'.join(parts[1:-1])
+        cloud = parts[-1]
+    else:
+        region = None
+        cloud = 'aws'
+
+    # Assume aws if cloud is not one of aws, gcp, or azure
+    if cloud not in ('aws', 'gcp', 'azure'):
+        cloud = 'aws'
+
+    return SnowflakeAccount(account, region, cloud)
