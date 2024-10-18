@@ -1,21 +1,27 @@
 import json
 import logging
+import time
 import typing
 from typing import List
 from uuid import uuid4
 
 import pyarrow as pa
+import pyiceberg.table
+import sentry_sdk
 import snowflake.connector
 import sqlglot
 from pyarrow import ArrowInvalid
+from pyiceberg.catalog import Catalog
+from pyiceberg.table import StaticTable
+from pyiceberg.table.snapshots import Summary, Operation
+from pyiceberg.typedef import IcebergBaseModel
 from snowflake.connector import NotSupportedError, DatabaseError
 from snowflake.connector.constants import FIELD_TYPES, FieldType
-from snowflake.connector.cursor import SnowflakeCursor
 from sqlglot.expressions import Literal, Var, Property, IcebergProperty, Properties, ColumnDef, DataType, \
     Schema, TransientProperty, TemporaryProperty, Select, Column, Alias, Anonymous, parse_identifier, Subquery
 
-from universql.warehouse import ICatalog, Executor, Locations, IcebergTable, CreateRelation
-from universql.util import SNOWFLAKE_HOST, QueryError
+from universql.warehouse import ICatalog, Executor, Locations
+from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
 from universql.protocol.utils import get_field_for_snowflake
 
 MAX_LIMIT = 10000
@@ -23,161 +29,24 @@ MAX_LIMIT = 10000
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("❄️")
 
+logging.getLogger('snowflake.connector').setLevel(logging.WARNING)
 
-class SnowflakeExecutor(Executor):
 
-    def __init__(self, query_id: str, cursor: SnowflakeCursor, cant_use_warehouse: False):
-        self.query_id = query_id
-        self.cursor = cursor
-        self.cant_use_warehouse = cant_use_warehouse
+def summary_init(summary, **kwargs):
+    operation = kwargs.get('operation', Operation.APPEND)
+    if "operation" in kwargs:
+        del kwargs["operation"]
+    super(IcebergBaseModel, summary).__init__(operation=operation, **kwargs)
+    summary._additional_properties = kwargs
 
-    def supports(self, ast: sqlglot.exp.Expression) -> bool:
-        return True
 
-    def default_create_table_as_iceberg(self, expression: sqlglot.exp.Expression):
-        if isinstance(expression, sqlglot.exp.Create):
-            if expression.kind == 'TABLE':
-                properties = expression.args.get('properties') or Properties()
-                is_transient = TransientProperty() in properties.expressions
-                is_temp = TemporaryProperty() in properties.expressions
-                is_iceberg = IcebergProperty() in properties.expressions
-                if is_transient or len(properties.expressions) == 0:
-                    properties__set = Properties()
-                    properties__set.set('expressions', [IcebergProperty(),
-                                                        Property(this=Var(this='EXTERNAL_VOLUME'),
-                                                                 value=Literal.string("iceberg_jinjat")),
-                                                        Property(this=Var(this='CATALOG'),
-                                                                 value=Literal.string("snowflake")),
-                                                        Property(this=Var(this='BASE_LOCATION'),
-                                                                 value=Literal.string(
-                                                                     "iceberg_table_test")), ])
-
-                    metadata_query = expression.expression.sql(dialect="snowflake")
-                    try:
-                        self.cursor.describe(metadata_query)
-                    except Exception as e:
-                        logger.error(f"Unable fetching schema for metadata query {e.args} \n" + metadata_query)
-                        return expression
-                    columns = [(column.name, FIELD_TYPES[column.type_code]) for column in
-                               self.cursor.description]
-                    unsupported_columns = [(column[0], column[1].name) for column in columns if column[1].name not in (
-                        'BOOLEAN', 'TIME', 'BINARY', 'TIMESTAMP_TZ', 'TIMESTAMP_NTZ', 'TIMESTAMP_LTZ', 'TIMESTAMP',
-                        'DATE', 'FIXED',
-                        'TEXT', 'REAL')]
-                    if len(unsupported_columns) > 0:
-                        logger.error(
-                            f"Unsupported columns {unsupported_columns} in {expression.expression.sql(dialect='snowflake')}")
-                        return expression
-
-                    column_definitions = [ColumnDef(
-                        this=sqlglot.exp.parse_identifier(column[0]),
-                        kind=DataType.build(self._convert_snowflake_to_iceberg_type(column[1]), dialect="snowflake"))
-                        for
-                        column in
-                        columns]
-                    schema = Schema()
-                    schema.set('this', expression.this)
-                    schema.set('expressions', column_definitions)
-                    expression.set('this', schema)
-                    select = Select().from_(Subquery(this=expression.expression))
-                    for column in columns:
-                        col_ast = Column(this=parse_identifier(column[0]))
-                        if column[1].name in ('ARRAY', 'OBJECT'):
-                            alias = Alias(this=Anonymous(this="to_variant", expressions=[col_ast]),
-                                          alias=parse_identifier(column[0]))
-                            select = select.select(alias)
-                        else:
-                            select = select.select(col_ast)
-
-                    expression.set('expression', select)
-                    expression.set('properties', properties__set)
-        return expression
-
-    def _convert_snowflake_to_iceberg_type(self, snowflake_type: FieldType) -> str:
-        if snowflake_type.name == 'TIMESTAMP_LTZ':
-            return 'TIMESTAMP'
-        if snowflake_type.name == 'VARIANT':
-            # No support for semi-structured data. Maybe we should try OBJECT([SCHEMA])?
-            return 'TEXT'
-        if snowflake_type.name == 'ARRAY':
-            # Relies on TO_VARIANT transformation
-            return 'TEXT'
-        if snowflake_type.name == 'OBJECT':
-            # The schema is not available
-            return 'TEXT'
-        return snowflake_type.name
-
-    def execute_raw(self, compiled_sql: str) -> None:
-        run_on_warehouse = not self.cant_use_warehouse
-        try:
-            emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
-            logger.info(f"[{self.query_id}] Running on Snowflake.. {emoji} \n {compiled_sql}")
-            self.cursor.execute(compiled_sql)
-        except DatabaseError as e:
-            message = f"{e.sfqid}: {e.msg} \n{compiled_sql}"
-            raise QueryError(message, e.sqlstate)
-
-    def execute(self, ast: sqlglot.exp.Expression,
-                locations: typing.Dict[sqlglot.exp.Table, str]) \
-            -> typing.Optional[typing.Dict[sqlglot.exp.Table, str]]:
-        compiled_sql = ast.transform(self.default_create_table_as_iceberg).sql(dialect="snowflake", pretty=True)
-        self.execute_raw(compiled_sql)
-        return None
-
-    def get_query_log(self, total_duration) -> str:
-        return "Run on Snowflake"
-
-    def close(self):
-        self.cursor.close()
-
-    @staticmethod
-    def _get_ref(table_information) -> IcebergTable:
-        location = table_information.get('metadataLocation')
-        return IcebergTable(location)
-
-    def get_as_table(self) -> pa.Table:
-        try:
-            arrow_all = self.cursor.fetch_arrow_all(force_return_table=True)
-            for idx, column in enumerate(self.cursor._description):
-                (field, value) = get_field_for_snowflake(column, arrow_all[idx])
-                arrow_all = arrow_all.set_column(idx, field, value)
-            return arrow_all
-        # return from snowflake is not using arrow
-        except NotSupportedError:
-            row = self.cursor.fetchone()
-            values = [[] for _ in range(len(self.cursor._description))]
-
-            while row is not None:
-                for idx, column in enumerate(row):
-                    values[idx].append(column)
-                row = self.cursor.fetchone()
-
-            fields = []
-            for idx, column in enumerate(self.cursor._description):
-                (field, _) = get_field_for_snowflake(column)
-                fields.append(field)
-            schema = pa.schema(fields)
-
-            result_data = pa.Table.from_arrays([pa.array(value) for value in values], names=schema.names)
-
-            for idx, column in enumerate(self.cursor._description):
-                (field, value) = get_field_for_snowflake(column, result_data[idx])
-                try:
-                    result_data = result_data.set_column(idx, field, value)
-                except ArrowInvalid as e:
-                    # TODO: find a better approach (maybe casting?)
-                    if any(value is not None for value in values):
-                        result_data = result_data.set_column(idx, field, pa.nulls(len(result_data), field.type))
-                    else:
-                        raise QueryError(f"Unable to transform response: {e}")
-
-            return result_data
+Summary.__init__ = summary_init
 
 
 class SnowflakeCatalog(ICatalog):
 
-    def __init__(self, context: dict, query_id: str, credentials: dict, compute):
-        super().__init__(context, query_id, credentials, compute)
+    def __init__(self, context: dict, query_id: str, credentials: dict, compute, iceberg_catalog: Catalog):
+        super().__init__(context, query_id, credentials, compute, iceberg_catalog)
         if context.get('account') is not None:
             credentials["account"] = context.get('account')
         if SNOWFLAKE_HOST is not None:
@@ -191,29 +60,25 @@ class SnowflakeCatalog(ICatalog):
             raise QueryError(e.msg, e.sqlstate)
 
     def register_locations(self, tables: Locations):
-        prefix = "gs://my-iceberg-data/custom-events/"
-
+        start_time = time.perf_counter()
         queries = []
         for location, table in tables.items():
-            if isinstance(location, IcebergTable):
-                queries.append(f"""CREATE OR REPLACE ICEBERG TABLE {table.sql(dialect="snowflake")}
-                         EXTERNAL_VOLUME='iceberg_jinjat'
-                         CATALOG='icebergCatalogInt'
-                         METADATA_FILE_PATH='{location.location[len(prefix):]}';""")
-            elif isinstance(location, CreateRelation):
-                prop_sf = [property.sql(dialect="snowflake") for property in location.properties]
-                queries.append(
-                    f"""CREATE OR REPLACE {' '.join(prop_sf)} {location.kind} {table.sql(dialect="snowflake")}
-                                         AS {location.query.sql(dialect="snowflake")};""")
-            else:
-                raise QueryError("Unable to register Iceberg tables in Snowflake", "500")
-        self.cursor.execute('\n'.join(queries))
+            queries.append(table.sql(dialect='snowflake'))
+        final_query = '\n'.join(queries)
+        logger.info(f"[{self.query_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
+        try:
+            self.cursor.execute(final_query)
+            performance_counter = time.perf_counter()
+            logger.info(
+                f"[{self.query_id}] Synced catalog with Snowflake ❄️ "
+                f"({get_friendly_time_since(start_time, performance_counter)})")
+        except snowflake.connector.Error as e:
+            raise QueryError(e.msg, e.sqlstate)
 
     def executor(self) -> Executor:
-        return SnowflakeExecutor(self.query_id, self.cursor,
-                                 cant_use_warehouse=self.compute.get('warehouse') is not None)
+        return SnowflakeExecutor(self)
 
-    def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Locations:
+    def get_table_paths(self, tables: List[sqlglot.exp.Table]):
         if len(tables) == 0:
             return {}
         sqls = ["SYSTEM$GET_ICEBERG_TABLE_INFORMATION(%s)" for _ in tables]
@@ -228,6 +93,18 @@ class SnowflakeCatalog(ICatalog):
             err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: \n {e.msg}"
             raise QueryError(err_message, e.sqlstate)
 
+    # def get_volume_lake_path(self, volume : str) -> str:
+    #     volume_location = pd.read_sql("DESC EXTERNAL VOLUME identifier(%s)", self.connection, params=[volume])
+    #     active_storage = duckdb.sql("""select property_value from volume_location
+    #                 where parent_property = 'STORAGE_LOCATIONS' and property = 'ACTIVE'
+    #                """).fetchall()[0][0]
+    #     all_properties = duckdb.execute("""select property_value from volume_location
+    #             where parent_property = 'STORAGE_LOCATIONS' and property like 'STORAGE_LOCATION_%'""").fetchall()
+    #     for properties in all_properties:
+    #         loads = json.loads(properties[0])
+    #         if loads.get('NAME') == active_storage:
+    #             volume_mapping[volume] = loads
+    #             break
     # def find_table_location(self, database: str, schema: str, table_name: str, lazy_check: bool = True) -> str:
     #     table_location = self.databases.get(database, {}).get(schema, {}).get(table_name)
     #     if table_location is None:
@@ -278,3 +155,157 @@ class SnowflakeCatalog(ICatalog):
     #         return tables + self.load_iceberg_tables(database, schema, after=after)
     #     else:
     #         return tables
+
+
+class SnowflakeExecutor(Executor):
+
+    def __init__(self, catalog: SnowflakeCatalog):
+        self.catalog = catalog
+
+    def supports(self, ast: sqlglot.exp.Expression) -> bool:
+        return True
+
+    def default_create_table_as_iceberg(self, expression: sqlglot.exp.Expression):
+        prefix = self.catalog.iceberg_catalog.properties.get("location")
+
+        if isinstance(expression, sqlglot.exp.Create):
+            if expression.kind == 'TABLE':
+                properties = expression.args.get('properties') or Properties()
+                is_transient = TransientProperty() in properties.expressions
+                is_temp = TemporaryProperty() in properties.expressions
+                is_iceberg = IcebergProperty() in properties.expressions
+                if is_transient or len(properties.expressions) == 0:
+                    properties__set = Properties()
+                    external_volume = Property(this=Var(this='EXTERNAL_VOLUME'),
+                                               value=Literal.string(
+                                                   self.catalog.context.get('snowflake_iceberg_volume')))
+                    snowflake_catalog = self.catalog.iceberg_catalog or "snowflake"
+                    catalog = Property(this=Var(this='CATALOG'), value=Literal.string(snowflake_catalog))
+                    if snowflake_catalog == 'snowflake':
+                        base_location = Property(this=Var(this='BASE_LOCATION'),
+                                                 value=Literal.string(location.metadata_location[len(prefix):]))
+                    elif snowflake_catalog == 'glue':
+                        base_location = Property(this=Var(this='CATALOG_TABLE_NAME'),
+                                                 value=Literal.string(expression.this.sql()))
+                    create_table_props = [IcebergProperty(), external_volume, catalog, base_location]
+                    properties__set.set('expressions', create_table_props)
+
+                    metadata_query = expression.expression.sql(dialect="snowflake")
+                    try:
+                        self.catalog.cursor.describe(metadata_query)
+                    except Exception as e:
+                        logger.error(f"Unable fetching schema for metadata query {e.args} \n" + metadata_query)
+                        return expression
+                    columns = [(column.name, FIELD_TYPES[column.type_code]) for column in
+                               self.catalog.cursor.description]
+                    unsupported_columns = [(column[0], column[1].name) for column in columns if column[1].name not in (
+                        'BOOLEAN', 'TIME', 'BINARY', 'TIMESTAMP_TZ', 'TIMESTAMP_NTZ', 'TIMESTAMP_LTZ', 'TIMESTAMP',
+                        'DATE', 'FIXED',
+                        'TEXT', 'REAL')]
+                    if len(unsupported_columns) > 0:
+                        logger.error(
+                            f"Unsupported columns {unsupported_columns} in {expression.expression.sql(dialect='snowflake')}")
+                        return expression
+
+                    column_definitions = [ColumnDef(
+                        this=sqlglot.exp.parse_identifier(column[0]),
+                        kind=DataType.build(self._convert_snowflake_to_iceberg_type(column[1]), dialect="snowflake"))
+                        for
+                        column in
+                        columns]
+                    schema = Schema()
+                    schema.set('this', expression.this)
+                    schema.set('expressions', column_definitions)
+                    expression.set('this', schema)
+                    select = Select().from_(Subquery(this=expression.expression))
+                    for column in columns:
+                        col_ast = Column(this=parse_identifier(column[0]))
+                        if column[1].name in ('ARRAY', 'OBJECT'):
+                            alias = Alias(this=Anonymous(this="to_variant", expressions=[col_ast]),
+                                          alias=parse_identifier(column[0]))
+                            select = select.select(alias)
+                        else:
+                            select = select.select(col_ast)
+
+                    expression.set('expression', select)
+                    expression.set('properties', properties__set)
+        return expression
+
+    def _convert_snowflake_to_iceberg_type(self, snowflake_type: FieldType) -> str:
+        if snowflake_type.name == 'TIMESTAMP_LTZ':
+            return 'TIMESTAMP'
+        if snowflake_type.name == 'VARIANT':
+            # No support for semi-structured data. Maybe we should try OBJECT([SCHEMA])?
+            return 'TEXT'
+        if snowflake_type.name == 'ARRAY':
+            # Relies on TO_VARIANT transformation
+            return 'TEXT'
+        if snowflake_type.name == 'OBJECT':
+            # The schema is not available
+            return 'TEXT'
+        return snowflake_type.name
+
+    def execute_raw(self, compiled_sql: str) -> None:
+        run_on_warehouse = self.catalog.compute.get('warehouse') is not None
+        try:
+            emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
+            logger.info(f"[{self.catalog.query_id}] Running on Snowflake.. {emoji} \n {compiled_sql}")
+            self.catalog.cursor.execute(compiled_sql)
+        except DatabaseError as e:
+            message = f"{e.sfqid}: {e.msg} \n{compiled_sql}"
+            raise QueryError(message, e.sqlstate)
+
+    def execute(self, ast: sqlglot.exp.Expression, locations: typing.Dict[sqlglot.exp.Table, str]) -> \
+            typing.Optional[typing.Dict[sqlglot.exp.Table, str]]:
+        compiled_sql = ast.transform(self.default_create_table_as_iceberg).sql(dialect="snowflake", pretty=True)
+        self.execute_raw(compiled_sql)
+        return None
+
+    def get_query_log(self, total_duration) -> str:
+        return "Run on Snowflake"
+
+    def close(self):
+        self.catalog.cursor.close()
+
+    @staticmethod
+    def _get_ref(table_information) -> pyiceberg.table.Table:
+        location = table_information.get('metadataLocation')
+        return StaticTable.from_metadata(location)
+
+    def get_as_table(self) -> pa.Table:
+        try:
+            arrow_all = self.catalog.cursor.fetch_arrow_all(force_return_table=True)
+            for idx, column in enumerate(self.catalog.cursor._description):
+                (field, value) = get_field_for_snowflake(column, arrow_all[idx])
+                arrow_all = arrow_all.set_column(idx, field, value)
+            return arrow_all
+        # return from snowflake is not using arrow
+        except NotSupportedError:
+            row = self.catalog.cursor.fetchone()
+            values = [[] for _ in range(len(self.catalog.cursor._description))]
+
+            while row is not None:
+                for idx, column in enumerate(row):
+                    values[idx].append(column)
+                row = self.catalog.cursor.fetchone()
+
+            fields = []
+            for idx, column in enumerate(self.catalog.cursor._description):
+                (field, _) = get_field_for_snowflake(column)
+                fields.append(field)
+            schema = pa.schema(fields)
+
+            result_data = pa.Table.from_arrays([pa.array(value) for value in values], names=schema.names)
+
+            for idx, column in enumerate(self.catalog.cursor._description):
+                (field, value) = get_field_for_snowflake(column, result_data[idx])
+                try:
+                    result_data = result_data.set_column(idx, field, value)
+                except ArrowInvalid as e:
+                    # TODO: find a better approach (maybe casting?)
+                    if any(value is not None for value in values):
+                        result_data = result_data.set_column(idx, field, pa.nulls(len(result_data), field.type))
+                    else:
+                        raise QueryError(f"Unable to transform response: {e}")
+
+            return result_data

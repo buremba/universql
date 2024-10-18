@@ -1,14 +1,21 @@
 import logging
 import time
+from urllib.parse import urlparse, parse_qs
 
 import pyarrow
+import pyiceberg.table
+import sentry_sdk
 import sqlglot
+from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
+from pyiceberg.exceptions import NoSuchTableError, TableAlreadyExistsError, NoSuchNamespaceError
+from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
 from sqlglot.expressions import Create
 
+from universql.lake.cloud import CACHE_DIRECTORY_KEY
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError
-from universql.warehouse import Executor
+from universql.warehouse import Executor, Locations
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
@@ -27,12 +34,40 @@ class UniverSQLSession:
         self.token = token
         self.compute_plan = parse_compute(self.credentials.get("warehouse"))
         first_catalog_compute = next(filter(lambda x: x.get("name") == 'snowflake', self.compute_plan), {}).get('args')
-        self.catalog = SnowflakeCatalog(context, self.token, self.credentials, first_catalog_compute)
+        self.iceberg_catalog = self._create_iceberg_catalog()
+        self.catalog = SnowflakeCatalog(context, self.token, self.credentials, first_catalog_compute,
+                                        self.iceberg_catalog)
         self.catalog_executor = self.catalog.executor()
         self.computes = {"snowflake": self.catalog_executor}
 
         self.last_executor_cursor = None
         self.processing = False
+
+    def _create_iceberg_catalog(self):
+        iceberg_catalog = self.context.get('universql_catalog')
+
+        catalog_props = {
+            PY_IO_IMPL: "universql.lake.cloud.iceberg",
+            # WAREHOUSE: "gs://my-iceberg-data/custom-events/customer_iceberg_pyiceberg",
+            CACHE_DIRECTORY_KEY: self.context.get('cache_directory'),
+        }
+
+        if iceberg_catalog is not None:
+            parsed = urlparse(iceberg_catalog)
+            catalog_name = parsed.scheme
+
+            query_params = parse_qs(parsed.query)
+            catalog_props = {k: v[0] if len(v) == 1 else v for k, v in query_params.items()}
+            catalog_props['namespace'] = parsed.hostname
+            catalog_props[TYPE] = "glue"
+        else:
+            catalog_name = None
+            catalog_props |= {
+                # pass duck conn
+                PY_CATALOG_IMPL: "universql.warehouse.duckdb.DuckDBIcebergCatalog",
+                "uri": "duckdb:///:memory:",
+            }
+        return load_catalog(catalog_name, **catalog_props)
 
     def _must_run_on_catalog(self, tables, ast):
         queries_that_doesnt_need_warehouse = ["show"]
@@ -49,7 +84,6 @@ class UniverSQLSession:
         return False
 
     def _do_query(self, start_time: float, raw_query: str) -> pyarrow.Table:
-
         try:
             queries = sqlglot.parse(raw_query, read="snowflake")
         except ParseError as e:
@@ -67,15 +101,17 @@ class UniverSQLSession:
                     compute_name = compute.get('name')
                     last_executor = self.computes.get(compute_name)
                     if last_executor is None:
-                        last_executor = self.computes[compute_name] = COMPUTES[compute_name](self.context,
-                                                                                             self.token,
-                                                                                             self.credentials,
-                                                                                             compute).executor()
+                        last_executor = COMPUTES[compute_name](self.context,
+                                                               self.token,
+                                                               self.credentials,
+                                                               compute,
+                                                               self.iceberg_catalog).executor()
+                        self.computes[compute_name] = last_executor
                     try:
                         last_executor = self.perform_query(last_executor, raw_query, ast=ast)
                         break
                     except QueryError as e:
-                        logger.warning(f"Unable to run query on {compute_name}: {e.message}")
+                        logger.warning(f"Unable to run query on: {e.message}")
                         last_error = e
 
             performance_counter = time.perf_counter()
@@ -85,7 +121,8 @@ class UniverSQLSession:
                 raise last_error
 
             logger.info(
-                f"[{self.token}] {last_executor.get_query_log(query_duration)} 🚀 ({get_friendly_time_since(start_time, performance_counter)})")
+                f"[{self.token}] {last_executor.get_query_log(query_duration)} 🚀 "
+                f"({get_friendly_time_since(start_time, performance_counter)})")
 
         return last_executor.get_as_table()
 
@@ -99,16 +136,21 @@ class UniverSQLSession:
 
             must_run_on_catalog = self._must_run_on_catalog(tables, ast)
             if not must_run_on_catalog:
-                new_locations = alternative_executor.execute(ast, lambda: self.catalog.get_table_paths(tables))
+                with sentry_sdk.start_span(name="Get table paths"):
+                    locations = self.get_table_paths(tables)
+                with sentry_sdk.start_span(name="Execute query"):
+                    new_locations = alternative_executor.execute(ast, locations)
                 if new_locations is not None:
-                    self.catalog.register_locations(new_locations)
+                    with sentry_sdk.start_span(name="Register new locations"):
+                        self.catalog.register_locations(new_locations)
                 return alternative_executor
 
-        last_executor = self.catalog_executor
-        if ast is None:
-            last_executor.execute_raw(raw_query)
-        else:
-            last_executor.execute(ast, lambda: {})
+        with sentry_sdk.start_span(name="Execute query on Snowflake"):
+            last_executor = self.catalog_executor
+            if ast is None:
+                last_executor.execute_raw(raw_query)
+            else:
+                last_executor.execute(ast, {})
         return last_executor
 
     def do_query(self, raw_query: str) -> pyarrow.Table:
@@ -118,9 +160,38 @@ class UniverSQLSession:
         try:
             return self._do_query(start_time, raw_query)
         finally:
-            # logger.info(
-            # f"[{self.token}] 🌊 Done processing in total {get_friendly_time_since(start_time, time.perf_counter())}")
             self.processing = False
 
     def close(self):
         self.catalog_executor.close()
+
+    def get_table_paths(self, tables: list[sqlglot.exp.Table]) -> Locations:
+        not_existed = []
+        cached_tables = {}
+        namespace = self.iceberg_catalog.properties.get('namespace', "main")
+
+        for table in tables:
+            try:
+                table_ref = table.sql(dialect="snowflake")
+                logger.info(f"Looking up table {table_ref} in namespace {namespace}")
+                iceberg_table = self.iceberg_catalog.load_table((namespace, table_ref))
+                cached_tables[table] = iceberg_table
+            except NoSuchTableError:
+                not_existed.append(table)
+
+        locations = self.catalog.get_table_paths(not_existed)
+        for table_ast, table in locations.items():
+            if isinstance(table, pyiceberg.table.Table):
+                table_name = table_ast.sql(dialect="snowflake")
+                try:
+                    iceberg_table = self.iceberg_catalog.register_table((namespace, table_name),
+                                                                        table.metadata_location)
+                except TableAlreadyExistsError:
+                    iceberg_table = self.iceberg_catalog.load_table((namespace, table_name))
+                except NoSuchNamespaceError:
+                    self.iceberg_catalog.create_namespace((namespace,))
+                    iceberg_table = self.iceberg_catalog.register_table((namespace, table_name), table.metadata)
+                locations[table_ast] = iceberg_table
+            else:
+                raise Exception(f"Unknown table type {table}")
+        return locations | cached_tables

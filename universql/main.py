@@ -15,7 +15,7 @@ from requests import RequestException
 from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, SNOWFLAKE_HOST, LOCALHOSTCOMPUTING_COM, \
     DEFAULTS
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(levelname)-6s %(message)s',
+logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)s %(name)s %(levelname)-6s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger("🏠")
 
@@ -36,9 +36,17 @@ def cli():
               default=LOCALHOSTCOMPUTING_COM,
               envvar='SERVER_HOST',
               type=str)
-@click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
-              help='Type of the Snowflake account. Automatically detected if not provided.',
-              envvar='UNIVERSQL_CATALOG')
+@click.option('--account-catalog', type=click.Choice([e.value for e in Catalog]),
+              help='Type of the Snowflake account. Automatically detected from the account if not provided.')
+@click.option('--universql-catalog', type=str,
+                help='The external catalog that will be used for Iceberg tables. (default: duckdb:///:memory:)',
+                envvar='UNIVERSQL_CATALOG')
+# @click.option('--snowflake-catalog-integration', type=str,
+#               help='Snowflake catalog integration for CREATE TABLE queries',
+#               envvar='SNOWFLAKE_CATALOG_INTEGRATION')
+# @click.option('--snowflake-external-volume', type=str,
+#               help='Snowflake external volume for CREATE TABLE queries',
+#               envvar='SNOWFLAKE_EXTERNAL_VOLUME')
 @click.option('--aws-profile', help='AWS profile to access S3 (default: `default`)', type=str)
 @click.option('--gcp-project',
               help='GCP project to access GCS and apply quota. (to see how to setup auth for GCP and use different accounts, visit https://cloud.google.com/docs/authentication/application-default-credentials)',
@@ -67,9 +75,9 @@ def cli():
 @click.option('--database-path', type=click.Path(exists=False, writable=True), default=":memory:",
               help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)',
               envvar='DATABASE_PATH')
-def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, **kwargs):
+def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, **kwargs):
     context__params = click.get_current_context().params
-    auto_catalog_mode = catalog is None
+    auto_catalog_mode = account_catalog is None
     if auto_catalog_mode:
         try:
             polaris_server_check = requests.get(

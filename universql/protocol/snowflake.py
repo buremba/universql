@@ -10,10 +10,12 @@ from uuid import uuid4
 
 import click
 import pyarrow as pa
+import sentry_sdk
 import yaml
 
 from fastapi import FastAPI
 from pyarrow import Schema
+from sentry_sdk.integrations.asyncio import AsyncioIntegration
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, HTMLResponse
@@ -30,6 +32,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🧵")
 
 app = FastAPI()
+
+sentry_sdk.init(
+    dsn="https://7dd8ba359188efce454c24defced2f13@o29344.ingest.us.sentry.io/4508141310836736",
+    # Set traces_sample_rate to 1.0 to capture 100%
+    # of transactions for tracing.
+    traces_sample_rate=1.0,
+    debug=True,
+    # Set profiles_sample_rate to 1.0 to profile 100%
+    # of sampled transactions.
+    # We recommend adjusting this value in production.
+    profiles_sample_rate=1.0,
+    integrations=[
+        AsyncioIntegration()
+    ]
+)
 
 sessions = {}
 query_results = {}
@@ -185,6 +202,8 @@ async def query_request(request: Request) -> JSONResponse:
         body = await unpack_request_body(request)
         query = body["sqlText"]
         queryResultFormat = "arrow"
+        transaction = sentry_sdk.get_current_scope().transaction
+        transaction.set_tag("query", query)
         result = await run_in_threadpool(session.do_query, query)
         columns = get_columns_for_sf_compat(result.schema)
         if result is None:

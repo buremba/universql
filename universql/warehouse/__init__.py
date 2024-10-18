@@ -2,25 +2,12 @@ import typing
 from abc import ABC, abstractmethod
 from typing import List
 
+import sentry_sdk
 import sqlglot
+from pyiceberg.catalog import Catalog
 from snowflake.connector.options import pyarrow
-from sqlglot.expressions import Property
 
-
-class IcebergTable:
-    def __init__(self, location):
-        self.location = location
-
-
-class CreateRelation:
-    def __init__(self, properties: List[Property], kind: str, query: sqlglot.exp.Expression):
-        self.properties = properties
-        self.kind = kind
-        self.query = query
-
-
-Location = CreateRelation | IcebergTable | pyarrow.Table
-Locations = typing.Dict[sqlglot.exp.Table, Location]
+Locations = typing.Dict[sqlglot.exp.Table, sqlglot.exp.Expression]
 
 
 class Executor(ABC):
@@ -29,7 +16,7 @@ class Executor(ABC):
         pass
 
     @abstractmethod
-    def execute(self, ast: sqlglot.exp.Expression, locations: typing.Callable[[], Locations]) -> \
+    def execute(self, ast: sqlglot.exp.Expression, locations: Locations) -> \
             typing.Optional[
                 typing.Dict[sqlglot.exp.Table, str]]:
         pass
@@ -52,11 +39,12 @@ class Executor(ABC):
 
 
 class ICatalog(ABC):
-    def __init__(self, context, query_id: str, credentials: dict, compute: dict):
+    def __init__(self, context, query_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
         self.context = context
         self.query_id = query_id
         self.credentials = credentials
         self.compute = compute
+        self.iceberg_catalog = iceberg_catalog
 
     def create(self, ast: sqlglot.exp.Table, table: pyarrow.Table):
         pass

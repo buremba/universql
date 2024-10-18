@@ -10,7 +10,7 @@ http = urllib3.PoolManager()
 # url = 'https://127.0.0.1:8001/session/v1/login-request?request_id=d94ddf4b-4cb6-4de7-b8c5-788cc67d99af&databaseName=test'
 # r = http.request('POST', url)
 # print(r.data)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)
 
 
 # connection = snowflake.connector.connect(
@@ -28,7 +28,8 @@ def measure_all(**args):
     cur = connection.cursor()
     # cur.execute(
     #     "select min(convert_timezone('UTC', start_time)) from MY_CUSTOM_APP.SNOWFLAKE_COST_UNIVERSQL.stg_metering_history")
-    cur.execute("SELECT 1")
+    # cur.execute("create or replace iceberg table ICEBERG_TESTS.PUBLIC.ttt EXTERNAL_VOLUME='iceberg_jinjat' CATALOG='SNOWFLAKE' BASE_LOCATION='ttt' as select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
+    cur.execute("select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
     cur.fetchall()
     cur.close()
     connection.close()
@@ -40,20 +41,16 @@ def tt(max_iteration):
     iteration = 0
     while True:
         # measure_all(connection_name="default", port='8084', host='localhostcomputing.com') # 1.4s
-        measure_all(account="lt51601.europe-west2.gcp",
-                    user="DBT_LOCAL_USER",
-                    password="Cg8hkTjBe2E!syF",
-                    database="MY_CUSTOM_APP",
-                    role="ACCOUNTADMIN",
-                    schema="PUBLIC",
-                    port='8084', host='localhostcomputing.com'
+        measure_all(connection_name="jinjat_aws_us_east",
+                    port='8084', host='localhostcomputing.com',
+                    # host='4ho74nvv4nyxhqxmcxrnpiid2m0bpcet.lambda-url.us-east-1.on.aws',
                     )
         print(f"Done with {iteration}")
         if iteration == max_iteration:
             break
         iteration += 1
 
-tt(100)
+tt(3)
 
 # cur.execute("select count(*) from MY_ICEBERG_JINJAT.PUBLIC.MY_MANAGED_ICEBERG_TABLE")
 # cur.execute("SELECT seq4(), uniform(1, 10, RANDOM(12)) FROM TABLE(GENERATOR(ROWCOUNT => 100000)) v ORDER BY 1")

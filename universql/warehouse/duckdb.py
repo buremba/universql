@@ -1,22 +1,30 @@
 import logging
 import os
 import typing
-from typing import List
+from typing import List, Union
 
 import duckdb
+import pyiceberg.table
+import sentry_sdk
 import snowflake
 import sqlglot
 from fakesnow.conn import FakeSnowflakeConnection
 from fakesnow.cursor import FakeSnowflakeCursor
-from pyiceberg.catalog import load_catalog, PY_CATALOG_IMPL
+from pyiceberg.catalog import Catalog, PropertiesUpdateSummary
 from pyiceberg.catalog.sql import SqlCatalog
-from pyiceberg.exceptions import NoSuchTableError
-from pyiceberg.io import PY_IO_IMPL, WAREHOUSE
+from pyiceberg.exceptions import NoSuchTableError, NoSuchNamespaceError, CommitFailedException
+from pyiceberg.io import load_file_io, LOCATION
+from pyiceberg.partitioning import PartitionSpec, UNPARTITIONED_PARTITION_SPEC
+from pyiceberg.table import UNSORTED_SORT_ORDER, SortOrder, CommitTableRequest, CommitTableResponse
+from pyiceberg.table.metadata import new_table_metadata
+from pyiceberg.typedef import Identifier, EMPTY_DICT
+from sentry_sdk.integrations.fastapi import FastApiIntegration
 from snowflake.connector.options import pyarrow
-from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table
+from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
+    Var, Literal, ColumnDef, DataType
 
-from universql.warehouse import ICatalog, Executor, IcebergTable, Locations, CreateRelation, Location
-from universql.lake.cloud import s3, gcs, CACHE_DIRECTORY_KEY
+from universql.warehouse import ICatalog, Executor, Locations
+from universql.lake.cloud import s3, gcs
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from sqlglot.optimizer.simplify import simplify
@@ -24,16 +32,237 @@ from sqlglot.optimizer.simplify import simplify
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🐥")
 
+
 class DuckDBIcebergCatalog(SqlCatalog):
+    def __init__(self, name: str, **properties: str):
+        super().__init__(name, **properties)
+        self.duckdb = properties.get('duckdb')
+
     def _ensure_tables_exist(self) -> None:
         pass
+
+    def create_table(
+            self,
+            identifier: typing.Union[str, Identifier],
+            schema: typing.Union[Schema, "pa.Schema"],
+            location: typing.Optional[str] = None,
+            partition_spec: PartitionSpec = UNPARTITIONED_PARTITION_SPEC,
+            sort_order: SortOrder = UNSORTED_SORT_ORDER,
+            properties: Properties = EMPTY_DICT,
+    ) -> Table:
+        schema: Schema = self._convert_schema_if_needed(schema)  # type: ignore
+
+        identifier_nocatalog = self.identifier_to_tuple_without_catalog(identifier)
+        namespace_identifier = Catalog.namespace_from(identifier_nocatalog)
+        table_name = Catalog.table_name_from(identifier_nocatalog)
+        if not self._namespace_exists(namespace_identifier):
+            raise NoSuchNamespaceError(f"Namespace does not exist: {namespace_identifier}")
+
+        namespace = Catalog.namespace_to_string(namespace_identifier)
+        location = self._resolve_table_location(location, namespace, table_name)
+        metadata_location = self._get_metadata_location(location=location)
+        metadata = new_table_metadata(
+            location=location, schema=schema, partition_spec=partition_spec, sort_order=sort_order,
+            properties=properties
+        )
+        io = load_file_io(properties=self.properties, location=metadata_location)
+        self._write_metadata(metadata, io, metadata_location)
+
+        session.add(
+            IcebergTables(
+                catalog_name=self.name,
+                table_namespace=namespace,
+                table_name=table_name,
+                metadata_location=metadata_location,
+                previous_metadata_location=None,
+            )
+        )
+        return self.load_table(identifier=identifier)
+
+    def load_table(self, identifier: typing.Union[str, Identifier]) -> Table:
+        """Load the table's metadata and return the table instance.
+
+        You can also use this method to check for table existence using 'try catalog.table() except NoSuchTableError'.
+        Note: This method doesn't scan data stored in the table.
+
+        Args:
+            identifier (str | Identifier): Table identifier.
+
+        Returns:
+            Table: the table instance with its metadata.
+
+        Raises:
+            NoSuchTableError: If a table with the name does not exist.
+        """
+        identifier_tuple = self.identifier_to_tuple_without_catalog(identifier)
+        namespace_tuple = Catalog.namespace_from(identifier_tuple)
+        namespace = Catalog.namespace_to_string(namespace_tuple)
+        table_name = Catalog.table_name_from(identifier_tuple)
+        with Session(self.engine) as session:
+            stmt = select(IcebergTables).where(
+                IcebergTables.catalog_name == self.name,
+                IcebergTables.table_namespace == namespace,
+                IcebergTables.table_name == table_name,
+            )
+            result = session.scalar(stmt)
+        if result:
+            return self._convert_orm_to_iceberg(result)
+        raise NoSuchTableError(f"Table does not exist: {namespace}.{table_name}")
+
+    def create_namespace(self, namespace: Union[str, Identifier], properties: Properties = EMPTY_DICT) -> None:
+        """Create a namespace in the catalog.
+
+        Args:
+            namespace (str | Identifier): Namespace identifier.
+            properties (Properties): A string dictionary of properties for the given namespace.
+
+        Raises:
+            NamespaceAlreadyExistsError: If a namespace with the given name already exists.
+        """
+        if self._namespace_exists(namespace):
+            raise NamespaceAlreadyExistsError(f"Namespace {namespace} already exists")
+
+        if not properties:
+            properties = IcebergNamespaceProperties.NAMESPACE_MINIMAL_PROPERTIES
+        create_properties = properties if properties else IcebergNamespaceProperties.NAMESPACE_MINIMAL_PROPERTIES
+        with Session(self.engine) as session:
+            for key, value in create_properties.items():
+                session.add(
+                    IcebergNamespaceProperties(
+                        catalog_name=self.name,
+                        namespace=Catalog.namespace_to_string(namespace, NoSuchNamespaceError),
+                        property_key=key,
+                        property_value=value,
+                    )
+                )
+            session.commit()
+
+    def drop_table(self, identifier: Union[str, Identifier]) -> None:
+        pass
+
+    def rename_table(self, from_identifier: Union[str, Identifier], to_identifier: Union[str, Identifier]) -> Table:
+        pass
+
+    def list_tables(self, namespace: Union[str, Identifier]) -> List[Identifier]:
+        pass
+
+    def list_namespaces(self, namespace: Union[str, Identifier] = ()) -> List[Identifier]:
+        pass
+
+    def load_namespace_properties(self, namespace: Union[str, Identifier]) -> Properties:
+        pass
+
+    def update_namespace_properties(
+            self, namespace: typing.Union[str, Identifier], removals: typing.Optional[typing.Set[str]] = None,
+            updates: Properties = EMPTY_DICT
+    ) -> PropertiesUpdateSummary:
+        pass
+
+    def _commit_table(self, table_request: CommitTableRequest) -> CommitTableResponse:
+        """Update one or more tables.
+
+        Args:
+            table_request (CommitTableRequest): The table requests to be carried out.
+
+        Returns:
+            CommitTableResponse: The updated metadata.
+
+        Raises:
+            NoSuchTableError: If a table with the given identifier does not exist.
+            CommitFailedException: Requirement not met, or a conflict with a concurrent commit.
+        """
+        identifier_tuple = self.identifier_to_tuple_without_catalog(
+            tuple(table_request.identifier.namespace.root + [table_request.identifier.name])
+        )
+        namespace_tuple = Catalog.namespace_from(identifier_tuple)
+        namespace = Catalog.namespace_to_string(namespace_tuple)
+        table_name = Catalog.table_name_from(identifier_tuple)
+
+        current_table: typing.Optional[Table]
+        try:
+            current_table = self.load_table(identifier_tuple)
+        except NoSuchTableError:
+            current_table = None
+
+        updated_staged_table = self._update_and_stage_table(current_table, table_request)
+        if current_table and updated_staged_table.metadata == current_table.metadata:
+            # no changes, do nothing
+            return CommitTableResponse(metadata=current_table.metadata,
+                                       metadata_location=current_table.metadata_location)
+        self._write_metadata(
+            metadata=updated_staged_table.metadata,
+            io=updated_staged_table.io,
+            metadata_path=updated_staged_table.metadata_location,
+        )
+
+        with Session(self.engine) as session:
+            if current_table:
+                # table exists, update it
+                if self.engine.dialect.supports_sane_rowcount:
+                    stmt = (
+                        update(IcebergTables)
+                        .where(
+                            IcebergTables.catalog_name == self.name,
+                            IcebergTables.table_namespace == namespace,
+                            IcebergTables.table_name == table_name,
+                            IcebergTables.metadata_location == current_table.metadata_location,
+                        )
+                        .values(
+                            metadata_location=updated_staged_table.metadata_location,
+                            previous_metadata_location=current_table.metadata_location,
+                        )
+                    )
+                    result = session.execute(stmt)
+                    if result.rowcount < 1:
+                        raise CommitFailedException(
+                            f"Table has been updated by another process: {namespace}.{table_name}")
+                else:
+                    try:
+                        tbl = (
+                            session.query(IcebergTables)
+                            .with_for_update(of=IcebergTables)
+                            .filter(
+                                IcebergTables.catalog_name == self.name,
+                                IcebergTables.table_namespace == namespace,
+                                IcebergTables.table_name == table_name,
+                                IcebergTables.metadata_location == current_table.metadata_location,
+                            )
+                            .one()
+                        )
+                        tbl.metadata_location = updated_staged_table.metadata_location
+                        tbl.previous_metadata_location = current_table.metadata_location
+                    except NoResultFound as e:
+                        raise CommitFailedException(
+                            f"Table has been updated by another process: {namespace}.{table_name}") from e
+                session.commit()
+            else:
+                # table does not exist, create it
+                try:
+                    session.add(
+                        IcebergTables(
+                            catalog_name=self.name,
+                            table_namespace=namespace,
+                            table_name=table_name,
+                            metadata_location=updated_staged_table.metadata_location,
+                            previous_metadata_location=None,
+                        )
+                    )
+                    session.commit()
+                except IntegrityError as e:
+                    raise TableAlreadyExistsError(f"Table {namespace}.{table_name} already exists") from e
+
+        return CommitTableResponse(
+            metadata=updated_staged_table.metadata, metadata_location=updated_staged_table.metadata_location
+        )
+
+
 class DuckDBCatalog(ICatalog):
 
     def register_locations(self, tables: Locations):
-        pass
+        raise Exception("Unsupported operation")
 
-    def __init__(self, context: dict, query_id: str, credentials: dict, compute: dict):
-        super().__init__(context, query_id, credentials, compute)
+    def __init__(self, context: dict, query_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
+        super().__init__(context, query_id, credentials, compute, iceberg_catalog)
         duckdb_path = context.get('database_path')
         duck_config = {
             'max_memory': context.get('max_memory'),
@@ -49,21 +278,6 @@ class DuckDBCatalog(ICatalog):
         DuckDBFunctions.register(self.duckdb)
         self.duckdb.install_extension("iceberg")
         self.duckdb.load_extension("iceberg")
-        iceberg_catalog = context.get('iceberg_catalog')
-        if iceberg_catalog is not None:
-            catalog_name = iceberg_catalog
-            catalog_props = {}
-        else:
-            catalog_name = None
-            catalog_props = {
-                PY_IO_IMPL: "universql.lake.cloud.iceberg",
-                WAREHOUSE: "gs://my-iceberg-data/custom-events/customer_iceberg_pyiceberg",
-                PY_CATALOG_IMPL: "universql.warehouse.duckdb.DuckDBIcebergCatalog",
-                CACHE_DIRECTORY_KEY: context.get('cache_directory'),
-                # pass duck conn
-                "uri": "duckdb:///:memory:",
-            }
-        self.iceberg_catalog = load_catalog(catalog_name, **catalog_props)
 
         fake_snowflake_conn = FakeSnowflakeConnection(self.duckdb, "main", "public", False, False)
         fake_snowflake_conn.database_set = True
@@ -98,6 +312,8 @@ class DuckDBExecutor(Executor):
 
     def execute_raw(self, raw_query: str) -> None:
         try:
+            logger.info(
+                f"[{self.catalog.query_id}] Executing final query on DuckDB:\n{prepend_to_lines(raw_query)}")
             self.catalog.emulator.execute(raw_query)
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the parse locally on DuckDB. {e.args}")
@@ -116,88 +332,7 @@ class DuckDBExecutor(Executor):
             table_ref = destination_table.sql()
         return namespace, table_ref
 
-    def _sync_catalog(self, ast: sqlglot.exp.Expression,
-                      tables_getter: typing.Callable[[], Locations]) -> sqlglot.exp.Expression:
-        locations = tables_getter()
-        return self._sync_duckdb_catalog(locations,
-                                         simplify(
-                                             ast)) if locations is not None else None
-
-    def execute(self, ast: sqlglot.exp.Expression, tables_getter: typing.Callable[[], Locations]) -> \
-            typing.Optional[Locations]:
-
-        if isinstance(ast, Create) or isinstance(ast, Insert):
-            destination_table = ast.this
-            if not isinstance(destination_table, Table):
-                if isinstance(destination_table, Schema):
-                    destination_table = destination_table.this
-                    # filter columns
-                else:
-                    raise QueryError(f"CREATE {ast.kind} is not supported in DuckDB")
-
-            (catalog, schema, table) = destination_table.parts
-            catalog = sqlglot.exp.parse_identifier(catalog or self.catalog.credentials.get('database')).sql()
-            schema = sqlglot.exp.parse_identifier(schema or self.catalog.credentials.get('schema')).sql()
-
-            if isinstance(ast, Create):
-                if ast.kind == 'TABLE':
-                    properties = destination_table.args.get('properties') or Properties()
-                    is_temp = TemporaryProperty() in properties.expressions
-
-                    self.catalog.iceberg_catalog.create_namespace_if_not_exists((catalog, schema))
-                    self.execute_raw(self._sync_catalog(ast.expression, tables_getter).sql(dialect="duckdb"))
-                    arrow_table = self.get_as_table()
-                    create_iceberg_table = self.catalog.iceberg_catalog.create_table_if_not_exists(table.sql(),
-                                                                                                   arrow_table.schema)
-                    create_iceberg_table.append(arrow_table)
-
-                    if is_temp:
-                        self.catalog.duckdb.register(destination_table.sql(), arrow_table)
-                    else:
-                        return {destination_table: IcebergTable(create_iceberg_table.metadata_location)}
-                elif ast.kind == 'VIEW':
-                    properties = destination_table.args.get('properties') or Properties()
-                    is_temp = TemporaryProperty() in properties.expressions
-                    duckdb_query = self._sync_catalog(ast, tables_getter).expression.sql(dialect="duckdb")
-                    self.execute_raw(duckdb_query)
-
-                    if not is_temp:
-                        return {destination_table: CreateRelation(ast.args.get('properties'), ast.kind, ast.expression)}
-
-            elif isinstance(ast, Insert):
-                try:
-                    iceberg_table = self.catalog.iceberg_catalog.load_table((catalog, schema, table.sql()))
-                except NoSuchTableError as e:
-                    raise QueryError(f"Error accessing catalog {e.args}")
-                self.execute_raw(self._sync_catalog(ast.expression, tables_getter).sql(dialect="duckdb"))
-                table = self.get_as_table()
-                iceberg_table.append(table)
-
-        elif isinstance(ast, Drop):
-            delete_table = ast.this
-            self.catalog.iceberg_catalog.drop_table(delete_table.sql())
-        else:
-            sql = self._sync_catalog(ast, tables_getter).sql(dialect="duckdb", pretty=True)
-            self.execute_raw(sql)
-
-        return None
-
-    def get_as_table(self) -> pyarrow.Table:
-        arrow_table = self.catalog.emulator._arrow_table
-        if arrow_table is None:
-            raise QueryError("No result returned from DuckDB")
-        for idx, column in enumerate(self.catalog.duckdb.description):
-            array, schema = get_field_from_duckdb(column, arrow_table, idx)
-            arrow_table = arrow_table.set_column(idx, schema, array)
-        return arrow_table
-
-    def close(self):
-        self.catalog.emulator.close()
-
-    def _sync_duckdb_catalog(self, locations: typing.Dict[sqlglot.exp.Table, str], ast: sqlglot.exp.Expression) -> \
-            typing.Optional[
-                sqlglot.exp.Expression]:
-
+    def _sync_catalog(self, ast: sqlglot.exp.Expression, locations: Locations) -> sqlglot.exp.Expression:
         schemas = set((table.catalog, table.db) for table in locations.keys() if table.db != '')
         databases = set(table[0] for table in schemas if table[0] != '')
 
@@ -234,9 +369,108 @@ class DuckDBExecutor(Executor):
         #
         #     return expression
 
-        return (ast
-                # .transform(replace_icebergs_with_duckdb_reference)
-                .transform(self.fix_snowflake_to_duckdb_types))
+        final_ast = (simplify(ast)
+                     # .transform(replace_icebergs_with_duckdb_reference)
+                     .transform(self.fix_snowflake_to_duckdb_types))
+
+        return final_ast
+
+    def execute(self, ast: sqlglot.exp.Expression, tables: Locations) -> typing.Optional[Locations]:
+        if isinstance(ast, Create) or isinstance(ast, Insert):
+            destination_table = ast.this
+            if not isinstance(destination_table, Table):
+                if isinstance(destination_table, Schema):
+                    destination_table = destination_table.this
+                    # filter columns
+                else:
+                    raise QueryError("Query type is not supported in DuckDB")
+
+            raw_table = destination_table.parts[-1].sql()
+            raw_schema = destination_table.parts[1].sql() if len(
+                destination_table.parts) > 1 else self.catalog.credentials.get('schema')
+            raw_catalog = destination_table.parts[0].sql() if len(
+                destination_table.parts) > 2 else self.catalog.credentials.get('database')
+            full_table = f"{raw_catalog}.{raw_schema}.{raw_table}"
+            namespace = self.catalog.iceberg_catalog.properties.get('namespace')
+
+            if isinstance(ast, Create):
+                if ast.kind == 'TABLE':
+                    properties = destination_table.args.get('properties') or Properties()
+                    is_temp = TemporaryProperty() in properties.expressions
+                    is_replace = ast.args.get('replace')
+                    if_exists = ast.args.get('exists')
+                    self.execute_raw(self._sync_catalog(ast.expression, tables).sql(dialect="duckdb"))
+                    arrow_table = self.get_as_table()
+                    database_location = self.catalog.iceberg_catalog.properties.get(LOCATION)
+                    database_location = database_location.rstrip("/")
+                    location = f"{database_location}/{raw_catalog}/{raw_schema}/{raw_table}"
+                    if if_exists:
+                        create_iceberg_table = self.catalog.iceberg_catalog.create_table_if_not_exists(
+                            (namespace, full_table),
+                            arrow_table.schema,
+                            location=location)
+                    else:
+                        if is_replace:
+                            try:
+                                self.catalog.iceberg_catalog.drop_table((namespace, full_table))
+                            except NoSuchTableError:
+                                pass
+                        create_iceberg_table = self.catalog.iceberg_catalog.create_table((namespace, full_table),
+                                                                                         arrow_table.schema,
+                                                                                         location=location)
+                    create_iceberg_table.overwrite(arrow_table)
+
+                    if is_temp:
+                        self.catalog.duckdb.register(destination_table.sql(), arrow_table)
+                    else:
+                        ast.set('expression', None)
+
+                        column_definitions = [ColumnDef(
+                            this=sqlglot.exp.parse_identifier(column.name),
+                            kind=DataType.build(str(column.field_type)))
+                            for column in create_iceberg_table.metadata.schema().columns]
+                        schema = Schema()
+                        schema.set('this', ast.this)
+                        schema.set('expressions', column_definitions)
+                        ast.set('this', schema)
+                        return {destination_table: ast}
+                elif ast.kind == 'VIEW':
+                    properties = destination_table.args.get('properties') or Properties()
+                    is_temp = TemporaryProperty() in properties.expressions
+                    duckdb_query = self._sync_catalog(ast, tables).expression.sql(dialect="duckdb")
+                    self.execute_raw(duckdb_query)
+
+                    if not is_temp:
+                        return {destination_table: ast.expression}
+            elif isinstance(ast, Insert):
+                try:
+                    iceberg_table = self.catalog.iceberg_catalog.load_table((namespace, raw_table))
+                except NoSuchTableError as e:
+                    raise QueryError(f"Error accessing catalog {e.args}")
+                self.execute_raw(self._sync_catalog(ast.expression, tables).sql(dialect="duckdb"))
+                table = self.get_as_table()
+                iceberg_table.append(table)
+
+        elif isinstance(ast, Drop):
+            delete_table = ast.this
+            self.catalog.iceberg_catalog.drop_table(delete_table.sql())
+        else:
+            sql = self._sync_catalog(ast, tables).sql(dialect="duckdb", pretty=True)
+            self.execute_raw(sql)
+
+        return None
+
+    def get_as_table(self) -> pyarrow.Table:
+        arrow_table = self.catalog.emulator._arrow_table
+        if arrow_table is None:
+            raise QueryError("No result returned from DuckDB")
+        for idx, column in enumerate(self.catalog.duckdb.description):
+            array, schema = get_field_from_duckdb(column, arrow_table, idx)
+            arrow_table = arrow_table.set_column(idx, schema, array)
+        return arrow_table
+
+    def close(self):
+        self.catalog.emulator.close()
 
     @staticmethod
     def fix_snowflake_to_duckdb_types(
@@ -250,9 +484,6 @@ class DuckDBExecutor(Executor):
         return expression
 
     @staticmethod
-    def get_iceberg_read(location: Location) -> str:
-        if isinstance(location, IcebergTable):
-            return sqlglot.exp.func("iceberg_scan",
-                                    sqlglot.exp.Literal.string(location.location)).sql()
-
-        raise QueryError("Unsupported op")
+    def get_iceberg_read(location: pyiceberg.table.Table) -> str:
+        return sqlglot.exp.func("iceberg_scan",
+                                sqlglot.exp.Literal.string(location.metadata_location)).sql()
