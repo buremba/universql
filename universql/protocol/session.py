@@ -84,10 +84,11 @@ class UniverSQLSession:
         return False
 
     def _do_query(self, start_time: float, raw_query: str) -> pyarrow.Table:
-        try:
-            queries = sqlglot.parse(raw_query, read="snowflake")
-        except ParseError as e:
-            raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
+        with sentry_sdk.start_span(op="sqlglot", name="Parsing query"):
+            try:
+                queries = sqlglot.parse(raw_query, read="snowflake")
+            except ParseError as e:
+                raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
 
         last_executor = None
 
@@ -136,12 +137,13 @@ class UniverSQLSession:
 
             must_run_on_catalog = self._must_run_on_catalog(tables, ast)
             if not must_run_on_catalog:
-                with sentry_sdk.start_span(name="Get table paths"):
+                op_name = alternative_executor.__class__.__name__
+                with sentry_sdk.start_span(op=op_name, name="Get table paths"):
                     locations = self.get_table_paths(tables)
-                with sentry_sdk.start_span(name="Execute query"):
+                with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     new_locations = alternative_executor.execute(ast, locations)
                 if new_locations is not None:
-                    with sentry_sdk.start_span(name="Register new locations"):
+                    with sentry_sdk.start_span(op=op_name, name="Register new locations"):
                         self.catalog.register_locations(new_locations)
                 return alternative_executor
 

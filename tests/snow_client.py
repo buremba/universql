@@ -28,12 +28,10 @@ def measure_all(**args):
     cur = connection.cursor()
     # cur.execute(
     #     "select min(convert_timezone('UTC', start_time)) from MY_CUSTOM_APP.SNOWFLAKE_COST_UNIVERSQL.stg_metering_history")
-    # cur.execute("create or replace iceberg table ICEBERG_TESTS.PUBLIC.ttt EXTERNAL_VOLUME='iceberg_jinjat' CATALOG='SNOWFLAKE' BASE_LOCATION='ttt' as select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
+    cur.execute("create or replace iceberg table ICEBERG_TESTS.PUBLIC.ttt EXTERNAL_VOLUME='iceberg_jinjat' CATALOG='SNOWFLAKE' BASE_LOCATION='ttt' as select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
     cur.execute("select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
-    cur.fetchall()
+    cur.fetchone()
     cur.close()
-    connection.close()
-
 
 @time_me
 def tt(max_iteration):
@@ -42,8 +40,8 @@ def tt(max_iteration):
     while True:
         # measure_all(connection_name="default", port='8084', host='localhostcomputing.com') # 1.4s
         measure_all(connection_name="jinjat_aws_us_east",
-                    port='8084', host='localhostcomputing.com',
-                    # host='4ho74nvv4nyxhqxmcxrnpiid2m0bpcet.lambda-url.us-east-1.on.aws',
+                    # port='8084', host='localhostcomputing.com',
+                    host='4ho74nvv4nyxhqxmcxrnpiid2m0bpcet.lambda-url.us-east-1.on.aws',
                     )
         print(f"Done with {iteration}")
         if iteration == max_iteration:

@@ -286,9 +286,9 @@ class DuckDBCatalog(ICatalog):
         self._register_data_lake(context)
 
     def _register_data_lake(self, args: dict):
-        if 'aws_profile' in args or self.account.cloud == 'aws':
+        if args['aws_profile'] is not None or self.account.cloud == 'aws':
             self.duckdb.register_filesystem(s3(args.get('cache_directory'), args.get('aws_profile')))
-        if 'gcp_project' in args or self.account.cloud == 'gcp':
+        if args['gcp_project'] is not None or self.account.cloud == 'gcp':
             self.duckdb.register_filesystem(gcs(args.get('cache_directory'), args.get('gcp_project')))
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]):
