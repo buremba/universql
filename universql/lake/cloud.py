@@ -1,3 +1,5 @@
+import os
+
 import aiobotocore
 import gcsfs
 import s3fs
@@ -8,6 +10,7 @@ from pyiceberg.table import StaticTable
 
 from universql.lake.fsspec_util import MonitoredSimpleCacheFileSystem
 
+in_lambda = os.environ.get('AWS_EXECUTION_ENV') is not None
 
 def s3(cache_storage: str, profile: str = "default"):
     session = aiobotocore.session.AioSession(profile=profile)
@@ -35,11 +38,16 @@ CACHE_DIRECTORY_KEY = "universql.cache_directory"
 def iceberg(data):
     from pyiceberg.io.fsspec import FsspecFileIO
     io = FsspecFileIO(data)
+    directory = data.get(CACHE_DIRECTORY_KEY)
     get_fs = io.get_fs
-    io.get_fs = lambda name: MonitoredSimpleCacheFileSystem(
-        fs=get_fs(name),
-        cache_storage=data.get(CACHE_DIRECTORY_KEY),
-    )
+    if directory is not None:
+        logger.info(f"Using local cache in {directory}")
+        io.get_fs = lambda name: MonitoredSimpleCacheFileSystem(
+            fs=get_fs(name),
+            cache_storage=directory,
+        )
+    else:
+        logger.info("Local cache is not in use")
     return io
 
 

@@ -22,7 +22,7 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
     Var, Literal
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
-from universql.lake.cloud import s3, gcs
+from universql.lake.cloud import s3, gcs, in_lambda
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from sqlglot.optimizer.simplify import simplify
@@ -302,10 +302,13 @@ class DuckDBExecutor(Executor):
         self.catalog = duckdb
 
     def get_query_log(self, total_duration) -> str:
-        if 'AWS_EXECUTION_ENV' in os.environ:
-            pass
-        cost = calculate_script_cost(total_duration)
-        return f"Run locally on DuckDB: {cost}"
+        if in_lambda:
+            memory_size = os.environ['AWS_LAMBDA_FUNCTION_MEMORY_SIZE']
+            execution_env = os.environ['AWS_EXECUTION_ENV']
+            return f"Run DuckDB in AWS Lambda: memory:{memory_size} platform:{execution_env}"
+        else:
+            cost = calculate_script_cost(total_duration)
+            return f"Run locally on DuckDB: {cost}"
 
     def supports(self, ast: sqlglot.exp.Expression) -> bool:
         return isinstance(ast, Select) or isinstance(ast, Insert) or isinstance(ast, Create)
