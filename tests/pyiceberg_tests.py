@@ -14,7 +14,12 @@ from pyiceberg.typedef import Identifier, Properties, EMPTY_DICT
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY
 
-
+def get_iceberg_table_from_data_lake(metadata_file_path: str, cache_directory):
+    from_metadata = StaticTable.from_metadata(metadata_file_path, {
+        PY_IO_IMPL: "universql.lake.cloud.iceberg",
+        CACHE_DIRECTORY_KEY: cache_directory,
+    })
+    return from_metadata
 # test = get_iceberg_table_from_data_lake(
 #     "gs://my-iceberg-data/custom-events/customer_iceberg/metadata/v1719882827064000000.metadata.json", '')
 # to_arrow = test.scan().to_arrow()

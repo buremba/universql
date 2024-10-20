@@ -12,7 +12,6 @@ import requests
 import uvicorn
 from requests import RequestException
 
-from universql.lake.cloud import in_lambda
 from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, SNOWFLAKE_HOST, LOCALHOSTCOMPUTING_COM, \
     DEFAULTS
 
@@ -25,12 +24,6 @@ logger = logging.getLogger("🏠")
 @click.version_option(version="0.1")
 def cli():
     pass
-
-
-def get_default_cache_dir():
-    if in_lambda:
-        return None
-    return Path.home() / ".universql" / "cache"
 
 
 @cli.command(
@@ -46,8 +39,8 @@ def get_default_cache_dir():
 @click.option('--account-catalog', type=click.Choice([e.value for e in Catalog]),
               help='Type of the Snowflake account. Automatically detected from the account if not provided.')
 @click.option('--universql-catalog', type=str,
-              help='The external catalog that will be used for Iceberg tables. (default: duckdb:///:memory:)',
-              envvar='UNIVERSQL_CATALOG')
+                help='The external catalog that will be used for Iceberg tables. (default: duckdb:///:memory:)',
+                envvar='UNIVERSQL_CATALOG')
 # @click.option('--snowflake-catalog-integration', type=str,
 #               help='Snowflake catalog integration for CREATE TABLE queries',
 #               envvar='SNOWFLAKE_CATALOG_INTEGRATION')
@@ -68,7 +61,7 @@ def get_default_cache_dir():
               envvar='MAX_MEMORY', )
 @click.option('--cache-directory',
               help=f'Data lake cache directory (default: {Path.home() / ".universql" / "cache"})',
-              default=get_default_cache_dir(),
+              default=Path.home() / ".universql" / "cache",
               envvar='CACHE_DIRECTORY',
               type=str)
 @click.option('--home-directory',

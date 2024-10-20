@@ -264,10 +264,10 @@ class DuckDBCatalog(ICatalog):
         duckdb_path = context.get('database_path')
         duck_config = {
             'max_memory': context.get('max_memory'),
-            'max_temp_directory_size': context.get('max_cache_size'),
+            'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
         }
-        if context.get('cache_directory') is not None:
-            duck_config['temp_directory'] = os.path.join(context.get('cache_directory'), "duckdb-staging")
+        if context.get('max_cache_size') != "0":
+            duck_config['max_temp_directory_size'] = context.get('max_cache_size')
         self.account = parse_snowflake_account(context.get('account'))
 
         try:

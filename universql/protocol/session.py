@@ -12,7 +12,7 @@ from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
 from sqlglot.expressions import Create, Identifier
 
-from universql.lake.cloud import CACHE_DIRECTORY_KEY
+from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError
 from universql.warehouse import Executor, Locations, Tables
@@ -50,6 +50,7 @@ class UniverSQLSession:
             PY_IO_IMPL: "universql.lake.cloud.iceberg",
             # WAREHOUSE: "gs://my-iceberg-data/custom-events/customer_iceberg_pyiceberg",
             CACHE_DIRECTORY_KEY: self.context.get('cache_directory'),
+            MAX_CACHE_SIZE: self.context.get('max_cache_size'),
         }
 
         if iceberg_catalog is not None:
