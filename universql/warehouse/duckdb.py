@@ -23,7 +23,8 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.lake.cloud import s3, gcs, in_lambda
-from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account
+from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, \
+    TOTAL_MEMORY_SIZE
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from sqlglot.optimizer.simplify import simplify
 
@@ -286,9 +287,9 @@ class DuckDBCatalog(ICatalog):
 
     def _register_data_lake(self, args: dict):
         if args.get('aws_profile') is not None or self.account.cloud == 'aws':
-            self.duckdb.register_filesystem(s3(args.get('cache_directory'), args.get('aws_profile')))
+            self.duckdb.register_filesystem(s3(args))
         if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
-            self.duckdb.register_filesystem(gcs(args.get('cache_directory'), args.get('gcp_project')))
+            self.duckdb.register_filesystem(gcs(args))
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         pass

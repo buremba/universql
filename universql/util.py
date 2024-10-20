@@ -352,12 +352,15 @@ def remove_nulls_from_dict(input_dict):
     return {k: v for k, v in input_dict.items() if v is not None}
 
 
+TOTAL_MEMORY_SIZE = psutil.virtual_memory().total
+
+
 def calculate_script_cost(duration_second, electricity_rate=0.15, pc_lifetime_years=5):
     execution_time_hours = duration_second / (60 * 60)  # Convert ms to hours
 
     # Get system information
     cpu_count = psutil.cpu_count()
-    memory_gb = psutil.virtual_memory().total / (1024 ** 3)  # Convert bytes to GB
+    memory_gb = TOTAL_MEMORY_SIZE / (1024 ** 3)  # Convert bytes to GB
 
     # Estimate hardware costs
     cpu_cost_per_core = 50
@@ -411,7 +414,7 @@ def parse_compute(value):
     return result
 
 DEFAULTS = {
-    "max_memory": sizeof_fmt(psutil.virtual_memory().total * 0.8),
+    "max_memory": sizeof_fmt(TOTAL_MEMORY_SIZE * 0.8),
     "max_cache_size": sizeof_fmt(psutil.disk_usage("./").free * 0.8)
 }
 
