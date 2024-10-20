@@ -1,20 +1,16 @@
 import typing
-from traceback import print_exc
 
 import duckdb
 import pyarrow as pa
-import sqlglot
 from pyarrow import ChunkedArray, Table
 from snowflake.connector.constants import FIELD_TYPES, FIELD_NAME_TO_ID
 from snowflake.connector.cursor import ResultMetadataV2
 
-from universql.util import SnowflakeError
 
 class DuckDBFunctions:
     @staticmethod
     def register(db: duckdb.DuckDBPyConnection):
         db.create_function("CURRENT_WAREHOUSE", DuckDBFunctions.current_warehouse, [], duckdb.typing.VARCHAR)
-        pass
 
     @staticmethod
     def current_warehouse() -> str:
@@ -155,7 +151,7 @@ def get_field_from_duckdb(column: list[str], arrow_table: Table, idx: int) -> ty
             pa_type = pa.decimal128(getattr(value.type, 'precision', 38), getattr(value.type, 'scale', 0))
         try:
             value = value.cast(pa_type)
-        except Exception as e:
+        except Exception:
             pass
         metadata["logicalType"] = "FIXED"
         metadata["precision"] = "1"

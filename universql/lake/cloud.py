@@ -15,7 +15,7 @@ def s3(context: dict):
     cache_storage = context.get('cache_directory')
     session = aiobotocore.session.AioSession(profile=context.get("aws_profile"))
     s3_file_system = s3fs.S3FileSystem(session=session)
-    if context.get(MAX_CACHE_SIZE, "0") != "0":
+    if context.get("max_cache_size", "0") != "0":
         s3_file_system = MonitoredSimpleCacheFileSystem(
             fs=s3_file_system,
             cache_storage=cache_storage,
@@ -28,7 +28,7 @@ def gcs(context: dict):
     cache_storage = context.get('cache_directory')
     setup_logging(logger=logger, level="ERROR")
     gcs_file_system = gcsfs.GCSFileSystem(project=context.get('gcp_project'))
-    if context.get(MAX_CACHE_SIZE, "0") != "0":
+    if context.get("max_cache_size", "0") != "0":
         gcs_file_system = MonitoredSimpleCacheFileSystem(
             fs=gcs_file_system,
             cache_storage=cache_storage,
@@ -47,7 +47,6 @@ def iceberg(context: dict):
     max_cache_size = context.get(MAX_CACHE_SIZE)
     get_fs = io.get_fs
     if max_cache_size is not None and max_cache_size != '0':
-        logger.info(f"Using local cache in {directory}")
         io.get_fs = lambda name: MonitoredSimpleCacheFileSystem(
             fs=get_fs(name),
             cache_storage=directory,

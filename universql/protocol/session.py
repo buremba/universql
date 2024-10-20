@@ -10,12 +10,12 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import NoSuchTableError, TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier
+from sqlglot.expressions import Create, Identifier, DDL, Query
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError
-from universql.warehouse import Executor, Locations, Tables
+from universql.warehouse import Executor, Tables
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
@@ -81,6 +81,7 @@ class UniverSQLSession:
                     table.parts[-2].this.lower() == 'information_schema'
                     or len(table.parts) > 2 and isinstance(table.parts[-3].this, str)
                     and table.parts[-3].this.lower() == "snowflake"):
+                logger.debug(f"[{self.token}] Skipping local execution, found {table.sql()}")
                 return True
         return False
 
@@ -129,12 +130,24 @@ class UniverSQLSession:
         return last_executor.get_as_table()
 
     def _fill_qualifier(self, table: sqlglot.exp.Table):
-        catalog= sqlglot.exp.Identifier(this=self.catalog.credentials.get('database'), quoted=True) \
+        catalog = sqlglot.exp.Identifier(this=self.catalog.credentials.get('database'), quoted=True) \
             if table.args.get('catalog') is None else table.args.get('catalog')
         db = sqlglot.exp.Identifier(this=self.catalog.credentials.get('schema'), quoted=True) \
             if table.args.get('db') is None else table.args.get('db')
         new_table = sqlglot.exp.Table(catalog=catalog, db=db, this=table.this)
         return new_table
+
+    def _find_tables(self, ast: sqlglot.exp.Expression, cte_aliases=None):
+        if cte_aliases is None:
+            cte_aliases = set()
+        for expression in ast.walk(bfs=True):
+            if isinstance(expression, Query) or isinstance(expression, DDL):
+                if expression.ctes is not None and len(expression.ctes) > 0:
+                    for cte in expression.ctes:
+                        cte_aliases.add(cte.alias)
+            if isinstance(expression, sqlglot.exp.Table) and isinstance(expression.this, Identifier):
+                if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
+                    yield self._fill_qualifier(expression), cte_aliases
 
     def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
         if (ast is not None and alternative_executor.supports(ast) and
@@ -142,19 +155,18 @@ class UniverSQLSession:
             must_run_on_catalog = False
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
-                    tables = list(ast.expression.find_all(sqlglot.exp.Table))
+                    tables = self._find_tables(ast.expression)
                 else:
                     tables = []
                     must_run_on_catalog = True
             else:
-                tables = list(ast.find_all(sqlglot.exp.Table))
-            tables = [self._fill_qualifier(table) for table in tables if isinstance(table.this, Identifier)]
-
-            must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables, ast)
+                tables = self._find_tables(ast)
+            tables_list = [table[0] for table in tables]
+            must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables_list, ast)
             if not must_run_on_catalog:
                 op_name = alternative_executor.__class__.__name__
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
-                    locations = self.get_table_paths(tables)
+                    locations = self.get_table_paths(tables_list)
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     new_locations = alternative_executor.execute(ast, locations)
                 if new_locations is not None:

@@ -39,8 +39,8 @@ def cli():
 @click.option('--account-catalog', type=click.Choice([e.value for e in Catalog]),
               help='Type of the Snowflake account. Automatically detected from the account if not provided.')
 @click.option('--universql-catalog', type=str,
-                help='The external catalog that will be used for Iceberg tables. (default: duckdb:///:memory:)',
-                envvar='UNIVERSQL_CATALOG')
+              help='The external catalog that will be used for Iceberg tables. (default: duckdb:///:memory:)',
+              envvar='UNIVERSQL_CATALOG')
 # @click.option('--snowflake-catalog-integration', type=str,
 #               help='Snowflake catalog integration for CREATE TABLE queries',
 #               envvar='SNOWFLAKE_CATALOG_INTEGRATION')
@@ -72,7 +72,7 @@ def cli():
 @click.option('--max-cache-size', type=str, default=DEFAULTS["max_cache_size"],
               help='DuckDB maximum cache used in local disk (default: 80% of total available disk)',
               envvar='CACHE_PERCENTAGE', )
-@click.option('--database-path', type=click.Path(exists=False, writable=True), default=":memory:",
+@click.option('--database-path', type=click.Path(exists=False, writable=True),
               help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)',
               envvar='DATABASE_PATH')
 def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, **kwargs):

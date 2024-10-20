@@ -15,7 +15,6 @@ import yaml
 
 from fastapi import FastAPI
 from pyarrow import Schema
-from sentry_sdk.integrations.asyncio import AsyncioIntegration
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, HTMLResponse
@@ -233,6 +232,8 @@ async def query_request(request: Request) -> JSONResponse:
             b_encode = base64.b64encode(pybytes)
             encode = b_encode.decode('utf-8')
             data["rowsetBase64"] = encode
+        else:
+            raise Exception(f"Format {format} is not supported")
         return JSONResponse({"data": data, "success": True})
     except QueryError as e:
         # print_exc( limit=1)  # we print exec here because the connector + webservice combo doesn't always do a good job of
