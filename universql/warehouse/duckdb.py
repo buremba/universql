@@ -5,7 +5,6 @@ from typing import List, Union
 
 import duckdb
 import pyiceberg.table
-import sentry_sdk
 import snowflake
 import sqlglot
 from fakesnow.conn import FakeSnowflakeConnection
@@ -18,12 +17,11 @@ from pyiceberg.partitioning import PartitionSpec, UNPARTITIONED_PARTITION_SPEC
 from pyiceberg.table import UNSORTED_SORT_ORDER, SortOrder, CommitTableRequest, CommitTableResponse
 from pyiceberg.table.metadata import new_table_metadata
 from pyiceberg.typedef import Identifier, EMPTY_DICT
-from sentry_sdk.integrations.fastapi import FastApiIntegration
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
-    Var, Literal, ColumnDef, DataType
+    Var, Literal
 
-from universql.warehouse import ICatalog, Executor, Locations
+from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.lake.cloud import s3, gcs
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
@@ -291,7 +289,7 @@ class DuckDBCatalog(ICatalog):
         if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
             self.duckdb.register_filesystem(gcs(args.get('cache_directory'), args.get('gcp_project')))
 
-    def get_table_paths(self, tables: List[sqlglot.exp.Table]):
+    def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         pass
 
     def executor(self) -> Executor:
@@ -304,6 +302,8 @@ class DuckDBExecutor(Executor):
         self.catalog = duckdb
 
     def get_query_log(self, total_duration) -> str:
+        if 'AWS_EXECUTION_ENV' in os.environ:
+            pass
         cost = calculate_script_cost(total_duration)
         return f"Run locally on DuckDB: {cost}"
 
@@ -313,7 +313,7 @@ class DuckDBExecutor(Executor):
     def execute_raw(self, raw_query: str) -> None:
         try:
             logger.info(
-                f"[{self.catalog.query_id}] Executing final query on DuckDB:\n{prepend_to_lines(raw_query)}")
+                f"[{self.catalog.query_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
             self.catalog.emulator.execute(raw_query)
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the parse locally on DuckDB. {e.args}")
@@ -332,7 +332,7 @@ class DuckDBExecutor(Executor):
             table_ref = destination_table.sql()
         return namespace, table_ref
 
-    def _sync_catalog(self, ast: sqlglot.exp.Expression, locations: Locations) -> sqlglot.exp.Expression:
+    def _sync_catalog(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
         schemas = set((table.catalog, table.db) for table in locations.keys() if table.db != '')
         databases = set(table[0] for table in schemas if table[0] != '')
 
@@ -367,15 +367,21 @@ class DuckDBExecutor(Executor):
         #         else:
         #             return expression
         #
-        #     return expression
+        #     return expression          pass
 
         final_ast = (simplify(ast)
-                     # .transform(replace_icebergs_with_duckdb_reference)
                      .transform(self.fix_snowflake_to_duckdb_types))
 
         return final_ast
 
-    def execute(self, ast: sqlglot.exp.Expression, tables: Locations) -> typing.Optional[Locations]:
+    def _get_property(self, ast: sqlglot.exp.Create, name: str):
+        return next(
+            (expression.args.get('value').this for expression in ast.args['properties'].expressions
+             if isinstance(expression, Property) and isinstance(expression.this,
+                                                                Var) and expression.this.this.casefold() == name.casefold()),
+            None)
+
+    def execute(self, ast: sqlglot.exp.Expression, tables: Tables) -> typing.Optional[Locations]:
         if isinstance(ast, Create) or isinstance(ast, Insert):
             destination_table = ast.this
             if not isinstance(destination_table, Table):
@@ -399,16 +405,23 @@ class DuckDBExecutor(Executor):
                     is_temp = TemporaryProperty() in properties.expressions
                     is_replace = ast.args.get('replace')
                     if_exists = ast.args.get('exists')
-                    self.execute_raw(self._sync_catalog(ast.expression, tables).sql(dialect="duckdb"))
+                    final_query = self._sync_catalog(ast, tables)
+                    self.execute_raw(final_query.expression.sql(dialect="duckdb"))
                     arrow_table = self.get_as_table()
                     database_location = self.catalog.iceberg_catalog.properties.get(LOCATION)
                     database_location = database_location.rstrip("/")
-                    location = f"{database_location}/{raw_catalog}/{raw_schema}/{raw_table}"
+                    base_location = self._get_property(ast, 'base_location')
+                    catalog = self._get_property(ast, 'catalog')
+                    if base_location is None:
+                        base_location = f"_universql/{raw_catalog}/{raw_schema}/{raw_table}"
+
+                    table_location = str(os.path.join(database_location, base_location))
+
                     if if_exists:
                         create_iceberg_table = self.catalog.iceberg_catalog.create_table_if_not_exists(
                             (namespace, full_table),
                             arrow_table.schema,
-                            location=location)
+                            location=table_location)
                     else:
                         if is_replace:
                             try:
@@ -417,27 +430,35 @@ class DuckDBExecutor(Executor):
                                 pass
                         create_iceberg_table = self.catalog.iceberg_catalog.create_table((namespace, full_table),
                                                                                          arrow_table.schema,
-                                                                                         location=location)
+                                                                                         location=table_location)
                     create_iceberg_table.overwrite(arrow_table)
+                    if not create_iceberg_table.metadata_location.startswith(table_location):
+                        raise QueryError("Unable to determine location")
+                    metadata_file_path = create_iceberg_table.metadata_location[len(table_location):].strip('/')
 
                     if is_temp:
                         self.catalog.duckdb.register(destination_table.sql(), arrow_table)
-                    else:
+                    elif catalog is not None and catalog.lower() != 'snowflake':
                         ast.set('expression', None)
+                        properties = ast.args.get('properties') or Properties()
 
-                        column_definitions = [ColumnDef(
-                            this=sqlglot.exp.parse_identifier(column.name),
-                            kind=DataType.build(str(column.field_type)))
-                            for column in create_iceberg_table.metadata.schema().columns]
-                        schema = Schema()
-                        schema.set('this', ast.this)
-                        schema.set('expressions', column_definitions)
-                        ast.set('this', schema)
+                        # column_definitions = [ColumnDef(
+                        #     this=sqlglot.exp.parse_identifier(column.name),
+                        #     kind=DataType.build(str(column.field_type)))
+                        #     for column in create_iceberg_table.metadata.schema().columns]
+                        # schema = Schema()
+                        # schema.set('this', ast.this)
+                        # schema.set('expressions', column_definitions)
+                        # ast.set('this', schema)
+                        properties.expressions.append(
+                            Property(this=Var(this='METADATA_FILE_PATH'), value=Literal.string(metadata_file_path)))
                         return {destination_table: ast}
+                    else:
+                        return {}
                 elif ast.kind == 'VIEW':
                     properties = destination_table.args.get('properties') or Properties()
                     is_temp = TemporaryProperty() in properties.expressions
-                    duckdb_query = self._sync_catalog(ast, tables).expression.sql(dialect="duckdb")
+                    duckdb_query = self._sync_catalog(ast, tables).sql(dialect="duckdb")
                     self.execute_raw(duckdb_query)
 
                     if not is_temp:

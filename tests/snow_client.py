@@ -23,32 +23,41 @@ logging.basicConfig(level=logging.ERROR)
 #     port="8084",
 # )
 @time_me
-def measure_all(**args):
-    connection = snowflake.connector.connect(**args)
-    cur = connection.cursor()
+def measure_all(cur, query):
     # cur.execute(
     #     "select min(convert_timezone('UTC', start_time)) from MY_CUSTOM_APP.SNOWFLAKE_COST_UNIVERSQL.stg_metering_history")
-    cur.execute("create or replace iceberg table ICEBERG_TESTS.PUBLIC.ttt EXTERNAL_VOLUME='iceberg_jinjat' CATALOG='SNOWFLAKE' BASE_LOCATION='ttt' as select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
-    cur.execute("select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
-    cur.fetchone()
-    cur.close()
+    # cur.execute("create or replace iceberg table ICEBERG_TESTS.PUBLIC.ttt EXTERNAL_VOLUME='iceberg_jinjat' CATALOG='SNOWFLAKE' BASE_LOCATION='ttt' as select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
+    cur.execute(query)
+    pandas_all = cur.fetch_pandas_all()
+    print(pandas_all)
 
 @time_me
 def tt(max_iteration):
-    # cloud = measure_all(connection_name="default") # 0.4s
+    connection = snowflake.connector.connect(connection_name="jinjat_aws_us_east",
+                                             port='8084', host='localhostcomputing.com',
+                                             # warehouse='local()'
+                                             # host='4ho74nvv4nyxhqxmcxrnpiid2m0bpcet.lambda-url.us-east-1.on.aws',
+                                             )
+    cursor = connection.cursor()
+
     iteration = 0
     while True:
-        # measure_all(connection_name="default", port='8084', host='localhostcomputing.com') # 1.4s
-        measure_all(connection_name="jinjat_aws_us_east",
-                    # port='8084', host='localhostcomputing.com',
-                    host='4ho74nvv4nyxhqxmcxrnpiid2m0bpcet.lambda-url.us-east-1.on.aws',
-                    )
+        measure_all(cursor, "select o_clerk, o_shippriority, count(distinct o_clerk), count(o_orderkey), sum(o_totalprice) from ICEBERG_TESTS.TPCH_SF1.ORDERS group by all")
+        # measure_all(cursor, "select count(*) from ICEBERG_TESTS.PUBLIC.GITHUB_EVENTS where cast(CREATED_AT_TIMESTAMP as date) = '2023-01-01'")
+        # measure_all(cursor, "SELECT status, sum(record_count) FROM ICEBERG_METADATA('s3://universql-us-east-1/github_events/metadata/00059-769ac160-3ec9-42bc-9432-ada960817080.metadata.json') group by all")
+        # measure_all(cursor, "SELECT * FROM ICEBERG_SCAN('s3://universql-us-east-1/glue_tables6/DBT_TEST/PUBLIC/example/metadata/00001-80c7021f-f25f-4187-a849-d032c2826ed4.metadata.json')")
+        # measure_all(cursor, """create or replace iceberg table DBT_TEST.PUBLIC.example
+        #    external_volume = 'iceberg_jinjat'
+        #    base_location = '_dbt/PUBLIC/example'
+        #   as
+        #  (select 1 as test
+        #  )""")
         print(f"Done with {iteration}")
         if iteration == max_iteration:
             break
         iteration += 1
 
-tt(3)
+tt(1)
 
 # cur.execute("select count(*) from MY_ICEBERG_JINJAT.PUBLIC.MY_MANAGED_ICEBERG_TABLE")
 # cur.execute("SELECT seq4(), uniform(1, 10, RANDOM(12)) FROM TABLE(GENERATOR(ROWCOUNT => 100000)) v ORDER BY 1")

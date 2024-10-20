@@ -2,12 +2,13 @@ import typing
 from abc import ABC, abstractmethod
 from typing import List
 
-import sentry_sdk
+import pyiceberg.table
 import sqlglot
 from pyiceberg.catalog import Catalog
 from snowflake.connector.options import pyarrow
 
 Locations = typing.Dict[sqlglot.exp.Table, sqlglot.exp.Expression]
+Tables = typing.Dict[sqlglot.exp.Table, pyiceberg.table.Table]
 
 
 class Executor(ABC):
@@ -16,9 +17,8 @@ class Executor(ABC):
         pass
 
     @abstractmethod
-    def execute(self, ast: sqlglot.exp.Expression, locations: Locations) -> \
-            typing.Optional[
-                typing.Dict[sqlglot.exp.Table, str]]:
+    def execute(self, ast: sqlglot.exp.Expression, locations: Tables) -> \
+            typing.Optional[Locations]:
         pass
 
     @abstractmethod
@@ -50,7 +50,7 @@ class ICatalog(ABC):
         pass
 
     @abstractmethod
-    def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> typing.Dict[sqlglot.exp.Table, str]:
+    def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         pass
 
     @abstractmethod

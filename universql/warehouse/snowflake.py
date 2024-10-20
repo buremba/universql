@@ -20,7 +20,7 @@ from snowflake.connector.constants import FIELD_TYPES, FieldType
 from sqlglot.expressions import Literal, Var, Property, IcebergProperty, Properties, ColumnDef, DataType, \
     Schema, TransientProperty, TemporaryProperty, Select, Column, Alias, Anonymous, parse_identifier, Subquery
 
-from universql.warehouse import ICatalog, Executor, Locations
+from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
 from universql.protocol.utils import get_field_for_snowflake
 
@@ -54,10 +54,19 @@ class SnowflakeCatalog(ICatalog):
 
         self.databases = {}
         credentials["warehouse"] = compute.get('warehouse', str(uuid4()))
-        try:
-            self.cursor = snowflake.connector.connect(**credentials).cursor()
-        except DatabaseError as e:
-            raise QueryError(e.msg, e.sqlstate)
+        # lazily create
+        self._cursor = None
+
+    def cursor(self, create_if_not_exists=True):
+        if self._cursor is not None or not create_if_not_exists:
+            return self._cursor
+        with sentry_sdk.start_span(op="snowflake", name="Initialize Snowflake Connection"):
+            try:
+                self._cursor = snowflake.connector.connect(**self.credentials).cursor()
+            except DatabaseError as e:
+                raise QueryError(e.msg, e.sqlstate)
+
+        return self._cursor
 
     def register_locations(self, tables: Locations):
         start_time = time.perf_counter()
@@ -67,7 +76,7 @@ class SnowflakeCatalog(ICatalog):
         final_query = '\n'.join(queries)
         logger.info(f"[{self.query_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
         try:
-            self.cursor.execute(final_query)
+            self.cursor().execute(final_query)
             performance_counter = time.perf_counter()
             logger.info(
                 f"[{self.query_id}] Synced catalog with Snowflake ❄️ "
@@ -78,15 +87,15 @@ class SnowflakeCatalog(ICatalog):
     def executor(self) -> Executor:
         return SnowflakeExecutor(self)
 
-    def get_table_paths(self, tables: List[sqlglot.exp.Table]):
+    def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         if len(tables) == 0:
             return {}
         sqls = ["SYSTEM$GET_ICEBERG_TABLE_INFORMATION(%s)" for _ in tables]
         values = [table.sql(comments=False, dialect="snowflake") for table in tables]
         final_query = f"SELECT {(', '.join(sqls))}"
         try:
-            self.cursor.execute(final_query, values)
-            result = self.cursor.fetchall()
+            self.cursor().execute(final_query, values)
+            result = self.cursor().fetchall()
             return {table: SnowflakeExecutor._get_ref(json.loads(result[0][idx])) for idx, table in
                     enumerate(tables)}
         except DatabaseError as e:
@@ -192,12 +201,12 @@ class SnowflakeExecutor(Executor):
 
                     metadata_query = expression.expression.sql(dialect="snowflake")
                     try:
-                        self.catalog.cursor.describe(metadata_query)
+                        self.catalog.cursor().describe(metadata_query)
                     except Exception as e:
                         logger.error(f"Unable fetching schema for metadata query {e.args} \n" + metadata_query)
                         return expression
                     columns = [(column.name, FIELD_TYPES[column.type_code]) for column in
-                               self.catalog.cursor.description]
+                               self.catalog.cursor().description]
                     unsupported_columns = [(column[0], column[1].name) for column in columns if column[1].name not in (
                         'BOOLEAN', 'TIME', 'BINARY', 'TIMESTAMP_TZ', 'TIMESTAMP_NTZ', 'TIMESTAMP_LTZ', 'TIMESTAMP',
                         'DATE', 'FIXED',
@@ -250,14 +259,16 @@ class SnowflakeExecutor(Executor):
         try:
             emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
             logger.info(f"[{self.catalog.query_id}] Running on Snowflake.. {emoji} \n {compiled_sql}")
-            self.catalog.cursor.execute(compiled_sql)
+            self.catalog.cursor().execute(compiled_sql)
         except DatabaseError as e:
             message = f"{e.sfqid}: {e.msg} \n{compiled_sql}"
             raise QueryError(message, e.sqlstate)
 
-    def execute(self, ast: sqlglot.exp.Expression, locations: typing.Dict[sqlglot.exp.Table, str]) -> \
+    def execute(self, ast: sqlglot.exp.Expression, locations: Tables) -> \
             typing.Optional[typing.Dict[sqlglot.exp.Table, str]]:
-        compiled_sql = ast.transform(self.default_create_table_as_iceberg).sql(dialect="snowflake", pretty=True)
+        compiled_sql = (ast
+                        # .transform(self.default_create_table_as_iceberg)
+                        .sql(dialect="snowflake", pretty=True))
         self.execute_raw(compiled_sql)
         return None
 
@@ -265,7 +276,9 @@ class SnowflakeExecutor(Executor):
         return "Run on Snowflake"
 
     def close(self):
-        self.catalog.cursor.close()
+        cursor = self.catalog.cursor(create_if_not_exists=False)
+        if cursor is not None:
+            cursor.close()
 
     @staticmethod
     def _get_ref(table_information) -> pyiceberg.table.Table:
@@ -274,30 +287,30 @@ class SnowflakeExecutor(Executor):
 
     def get_as_table(self) -> pa.Table:
         try:
-            arrow_all = self.catalog.cursor.fetch_arrow_all(force_return_table=True)
-            for idx, column in enumerate(self.catalog.cursor._description):
+            arrow_all = self.catalog.cursor().fetch_arrow_all(force_return_table=True)
+            for idx, column in enumerate(self.catalog.cursor()._description):
                 (field, value) = get_field_for_snowflake(column, arrow_all[idx])
                 arrow_all = arrow_all.set_column(idx, field, value)
             return arrow_all
         # return from snowflake is not using arrow
         except NotSupportedError:
-            row = self.catalog.cursor.fetchone()
-            values = [[] for _ in range(len(self.catalog.cursor._description))]
+            row = self.catalog.cursor().fetchone()
+            values = [[] for _ in range(len(self.catalog.cursor()._description))]
 
             while row is not None:
                 for idx, column in enumerate(row):
                     values[idx].append(column)
-                row = self.catalog.cursor.fetchone()
+                row = self.catalog.cursor().fetchone()
 
             fields = []
-            for idx, column in enumerate(self.catalog.cursor._description):
+            for idx, column in enumerate(self.catalog.cursor()._description):
                 (field, _) = get_field_for_snowflake(column)
                 fields.append(field)
             schema = pa.schema(fields)
 
             result_data = pa.Table.from_arrays([pa.array(value) for value in values], names=schema.names)
 
-            for idx, column in enumerate(self.catalog.cursor._description):
+            for idx, column in enumerate(self.catalog.cursor()._description):
                 (field, value) = get_field_for_snowflake(column, result_data[idx])
                 try:
                     result_data = result_data.set_column(idx, field, value)

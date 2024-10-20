@@ -10,12 +10,12 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import NoSuchTableError, TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create
+from sqlglot.expressions import Create, Identifier
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError
-from universql.warehouse import Executor, Locations
+from universql.warehouse import Executor, Locations, Tables
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
@@ -35,7 +35,7 @@ class UniverSQLSession:
         self.compute_plan = parse_compute(self.credentials.get("warehouse"))
         first_catalog_compute = next(filter(lambda x: x.get("name") == 'snowflake', self.compute_plan), {}).get('args')
         self.iceberg_catalog = self._create_iceberg_catalog()
-        self.catalog = SnowflakeCatalog(context, self.token, self.credentials, first_catalog_compute,
+        self.catalog = SnowflakeCatalog(context, self.token, self.credentials, first_catalog_compute or {},
                                         self.iceberg_catalog)
         self.catalog_executor = self.catalog.executor()
         self.computes = {"snowflake": self.catalog_executor}
@@ -57,7 +57,7 @@ class UniverSQLSession:
             catalog_name = parsed.scheme
 
             query_params = parse_qs(parsed.query)
-            catalog_props = {k: v[0] if len(v) == 1 else v for k, v in query_params.items()}
+            catalog_props |= {k: v[0] if len(v) == 1 else v for k, v in query_params.items()}
             catalog_props['namespace'] = parsed.hostname
             catalog_props[TYPE] = "glue"
         else:
@@ -112,7 +112,7 @@ class UniverSQLSession:
                         last_executor = self.perform_query(last_executor, raw_query, ast=ast)
                         break
                     except QueryError as e:
-                        logger.warning(f"Unable to run query on: {e.message}")
+                        logger.warning(f"Unable to run query: {e.message}")
                         last_error = e
 
             performance_counter = time.perf_counter()
@@ -127,15 +127,29 @@ class UniverSQLSession:
 
         return last_executor.get_as_table()
 
+    def _fill_qualifier(self, table: sqlglot.exp.Table):
+        catalog= sqlglot.exp.Identifier(this=self.catalog.credentials.get('database'), quoted=True) \
+            if table.args.get('catalog') is None else table.args.get('catalog')
+        db = sqlglot.exp.Identifier(this=self.catalog.credentials.get('schema'), quoted=True) \
+            if table.args.get('db') is None else table.args.get('db')
+        new_table = sqlglot.exp.Table(catalog=catalog, db=db, this=table.this)
+        return new_table
+
     def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
         if (ast is not None and alternative_executor.supports(ast) and
                 alternative_executor != self.catalog_executor):
+            must_run_on_catalog = False
             if isinstance(ast, Create):
-                tables = list(ast.expression.find_all(sqlglot.exp.Table))
+                if ast.kind in ('TABLE', 'VIEW'):
+                    tables = list(ast.expression.find_all(sqlglot.exp.Table))
+                else:
+                    tables = []
+                    must_run_on_catalog = True
             else:
                 tables = list(ast.find_all(sqlglot.exp.Table))
+            tables = [self._fill_qualifier(table) for table in tables if isinstance(table.this, Identifier)]
 
-            must_run_on_catalog = self._must_run_on_catalog(tables, ast)
+            must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables, ast)
             if not must_run_on_catalog:
                 op_name = alternative_executor.__class__.__name__
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
@@ -167,7 +181,7 @@ class UniverSQLSession:
     def close(self):
         self.catalog_executor.close()
 
-    def get_table_paths(self, tables: list[sqlglot.exp.Table]) -> Locations:
+    def get_table_paths(self, tables: list[sqlglot.exp.Table]) -> Tables:
         not_existed = []
         cached_tables = {}
         namespace = self.iceberg_catalog.properties.get('namespace', "main")
