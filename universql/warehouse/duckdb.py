@@ -268,9 +268,14 @@ class DuckDBCatalog(ICatalog):
         if context.get('max_cache_size') != "0":
             duck_config['max_temp_directory_size'] = context.get('max_cache_size')
         self.account = parse_snowflake_account(context.get('account'))
+        database_path = self.context.get('database_path')
+        if database_path is not None:
+            database = os.path.join(database_path, "main.duckdb")
+        else:
+            database = ':memory:'
 
         try:
-            self.duckdb = duckdb.connect(":memory:", config=duck_config)
+            self.duckdb = duckdb.connect(database, config=duck_config)
         except duckdb.InvalidInputException as e:
             raise QueryError(f"Unable to spin up DuckDB with config {duck_config}: {e}")
         DuckDBFunctions.register(self.duckdb)
