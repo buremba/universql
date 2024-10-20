@@ -23,8 +23,7 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.lake.cloud import s3, gcs, in_lambda
-from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, \
-    TOTAL_MEMORY_SIZE
+from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from sqlglot.optimizer.simplify import simplify
 
@@ -337,13 +336,23 @@ class DuckDBExecutor(Executor):
             table_ref = destination_table.sql()
         return namespace, table_ref
 
+    def _get_db_path(self, db_name):
+        database_path = self.catalog.context.get('database_path')
+        if database_path is not None:
+            duckdb_path = database_path / f'{db_name}.duckdb'
+        else:
+            duckdb_path = ':memory:'
+        return duckdb_path
+
     def _sync_catalog(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
         schemas = set((table.catalog, table.db) for table in locations.keys() if table.db != '')
         databases = set(table[0] for table in schemas if table[0] != '')
 
-        databases_sql = [f"ATTACH IF NOT EXISTS ':memory:' AS {sqlglot.exp.parse_identifier(database).sql()}" for
-                         database in
-                         databases]
+        databases_sql = [
+            f"ATTACH IF NOT EXISTS '{self._get_db_path(database)}' AS {sqlglot.exp.parse_identifier(database).sql()}"
+            for
+            database in
+            databases]
         schemas_sql = [
             f"CREATE SCHEMA IF NOT EXISTS {sqlglot.exp.parse_identifier(db).sql()}.{sqlglot.exp.parse_identifier(schema).sql()}"
             for
