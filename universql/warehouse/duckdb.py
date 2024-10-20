@@ -261,7 +261,6 @@ class DuckDBCatalog(ICatalog):
 
     def __init__(self, context: dict, query_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
         super().__init__(context, query_id, credentials, compute, iceberg_catalog)
-        duckdb_path = context.get('database_path')
         duck_config = {
             'max_memory': context.get('max_memory'),
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
@@ -271,9 +270,9 @@ class DuckDBCatalog(ICatalog):
         self.account = parse_snowflake_account(context.get('account'))
 
         try:
-            self.duckdb = duckdb.connect(duckdb_path, config=duck_config)
+            self.duckdb = duckdb.connect(":memory:", config=duck_config)
         except duckdb.InvalidInputException as e:
-            raise QueryError(f"Unable to spin up DuckDB ({duckdb_path}) with config {duck_config}: {e}")
+            raise QueryError(f"Unable to spin up DuckDB with config {duck_config}: {e}")
         DuckDBFunctions.register(self.duckdb)
         self.duckdb.install_extension("iceberg")
         self.duckdb.load_extension("iceberg")
