@@ -338,7 +338,7 @@ class DuckDBExecutor(Executor):
     def _get_db_path(self, db_name):
         database_path = self.catalog.context.get('database_path')
         if database_path is not None:
-            duckdb_path = database_path / f'{db_name}.duckdb'
+            duckdb_path = os.path.join(database_path, f'{db_name}.duckdb')
         else:
             duckdb_path = ':memory:'
         return duckdb_path
