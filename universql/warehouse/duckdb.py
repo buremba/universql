@@ -270,7 +270,7 @@ class DuckDBCatalog(ICatalog):
         self.account = parse_snowflake_account(context.get('account'))
         database_path = self.context.get('database_path')
         if database_path is not None:
-            database = os.path.join(database_path, "sessions", f"{query_id}.duckdb")
+            database = os.path.join(database_path, f"{query_id}.duckdb")
         else:
             database = ':memory:'
 
