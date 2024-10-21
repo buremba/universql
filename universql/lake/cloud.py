@@ -51,6 +51,4 @@ def iceberg(context: dict):
             fs=get_fs(name),
             cache_storage=directory,
         )
-    else:
-        logger.info("Local cache is not in use")
     return io

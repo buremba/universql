@@ -104,8 +104,7 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, *
                 "The DNS setting for localhostcomputing.com doesn't point to localhost, refusing to start. Please update UniverSQL.")
             sys.exit(1)
 
-    # Don't use SSL inside Snowflake container
-    if SNOWFLAKE_HOST is None or ssl_certfile is not None:
+    if host == LOCALHOSTCOMPUTING_COM or ssl_certfile is not None:
         with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:
             cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
             cert_file.flush()

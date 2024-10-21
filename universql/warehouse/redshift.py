@@ -2,15 +2,20 @@ import typing
 from typing import List
 
 import sqlglot
+from duckdb.experimental.spark.errors import UnsupportedOperationException
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Select, Insert, Create
 
+from universql.util import Catalog
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 
 
 class RedshiftCatalog(ICatalog):
+    def __init__(self, context, query_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
+        super().__init__(context, query_id, credentials, compute, iceberg_catalog)
+
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
-        pass
+        raise UnsupportedOperationException("BigQuery does not support registering tables")
 
     def register_locations(self, tables: Locations):
         pass
