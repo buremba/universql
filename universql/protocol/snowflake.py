@@ -365,7 +365,7 @@ async def startup_event():
     signal.signal(signal.SIGINT, harakiri)
     host_port = f"{current_context.get('host')}:{current_context.get('port')}"
     connections = {
-        "Node.js": f"snowflake.createConnection({{accessUrl: 'https://{host_port}'}})",
+        "Node.js": f"snowflake.createConnection({{accessUrl: '{host_port}'}})",
         "JDBC": f"jdbc:snowflake://{host_port}/dbname",
         "Python": f"snowflake.connector.connect(host='{current_context.get('host')}', port='{current_context.get('port')}')",
         "PHP": f"new PDO('snowflake:host={host_port}', '<user>', '<password>')",

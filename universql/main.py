@@ -31,7 +31,7 @@ def cli():
 @click.option('--account',
               help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
               prompt='Account ID', envvar='SNOWFLAKE_ACCOUNT')
-@click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, type=int)
+@click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, envvar='SERVER_PORT', type=int)
 @click.option('--host', help='Host for Snowflake proxy server (default: localhostcomputing.com)',
               default=LOCALHOSTCOMPUTING_COM,
               envvar='SERVER_HOST',
