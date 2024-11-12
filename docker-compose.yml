@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  universql-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: universql-server
+    ports:
+      - "${SERVER_PORT}:${SERVER_PORT}"
+    volumes:
+      - ./ssl:/app/ssl:ro
+    environment:
+      - UNIVERSQL_HOST=${HOST}
+    command: snowflake --account ${SNOWFLAKE_ACCOUNT} --host ${HOST} --ssl_keyfile /app/ssl/${SSL_KEYFILE_NAME} --ssl_certfile /app/ssl/${SSL_CERTFILE_NAME} 
