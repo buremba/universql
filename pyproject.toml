@@ -11,7 +11,7 @@ repository = "https://github.com/buremba/universql"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.13"
-duckdb = "^1.1.2"
+duckdb = "^1.1.3"
 fastapi = "^0.111.0"
 uvicorn = "^0.30.1"
 snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], version = "^3.12.0"}
@@ -21,25 +21,22 @@ fsspec = "^2024.6.1"
 click = ">7"
 pyiceberg = {extras = ["glue"], version = "^0.7.1"}
 #pyiceberg = { git = "https://github.com/buremba/iceberg-python", branch = "main", develop = true, extras = ["glue"] }
-#fakesnow = "^0.9.25"
-fakesnow = { git = "https://github.com/tekumara/fakesnow", branch = "dependabot/pip/duckdb-approx-eq-1.1.1" }
+fakesnow = "^0.9.26"
 humanize = "^4.10.0"
 mangum = "^0.19.0"
 pyarrow = "^17.0.0"
 psutil = "^6.0.0"
 # once we get rid of from pyiceberg.catalog.sql import SqlCatalog, remove it
 sqlalchemy = "^2.0.35"
-duckdb-engine = "^0.13.2"
 
 # GCS
 gcsfs = "^2024.6.1"
 google-cloud-bigquery = "^3.25.0"
 # AWS
 s3fs = "^2024.6.1"
-aws-cdk-lib = "^2.162.1"
-
-
+aws-cdk-lib = "^2.162.0"
 sentry-sdk = {extras = ["fastapi"], version = "^2.17.0"}
+aws-cdk-aws-codestar-alpha = "^2.162.1a0"
 [tool.poetry.dev-dependencies]
 pylint = ">=2.11.1"
 pystray = "^0.19.5"

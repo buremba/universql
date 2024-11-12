@@ -12,7 +12,7 @@ import requests
 import uvicorn
 from requests import RequestException
 
-from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, SNOWFLAKE_HOST, LOCALHOSTCOMPUTING_COM, \
+from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, LOCALHOSTCOMPUTING_COM, \
     DEFAULTS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)s %(name)s %(levelname)-6s %(message)s',
