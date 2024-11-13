@@ -63,10 +63,17 @@ class UniverSQLSession:
             catalog_props[TYPE] = "glue"
         else:
             catalog_name = None
+            # catalog_props |= {
+            #     # pass duck conn
+            #     PY_CATALOG_IMPL: "universql.warehouse.duckdb.DuckDBIcebergCatalog",
+            #     "uri": "duckdb:///:memory:",
+            # }
+            database_path = self.context.get('database_path') or "universql"
+
             catalog_props |= {
                 # pass duck conn
-                PY_CATALOG_IMPL: "universql.warehouse.duckdb.DuckDBIcebergCatalog",
-                "uri": "duckdb:///:memory:",
+                PY_CATALOG_IMPL: "pyiceberg.catalog.sql.SqlCatalog",
+                "uri": f"sqlite:///{database_path}.metadata.sqlite",
             }
         return load_catalog(catalog_name, **catalog_props)
 

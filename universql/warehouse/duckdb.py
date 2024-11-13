@@ -78,33 +78,21 @@ class DuckDBIcebergCatalog(SqlCatalog):
         return self.load_table(identifier=identifier)
 
     def load_table(self, identifier: typing.Union[str, Identifier]) -> Table:
-        """Load the table's metadata and return the table instance.
-
-        You can also use this method to check for table existence using 'try catalog.table() except NoSuchTableError'.
-        Note: This method doesn't scan data stored in the table.
-
-        Args:
-            identifier (str | Identifier): Table identifier.
-
-        Returns:
-            Table: the table instance with its metadata.
-
-        Raises:
-            NoSuchTableError: If a table with the name does not exist.
-        """
         identifier_tuple = self.identifier_to_tuple_without_catalog(identifier)
         namespace_tuple = Catalog.namespace_from(identifier_tuple)
         namespace = Catalog.namespace_to_string(namespace_tuple)
         table_name = Catalog.table_name_from(identifier_tuple)
-        with Session(self.engine) as session:
-            stmt = select(IcebergTables).where(
-                IcebergTables.catalog_name == self.name,
-                IcebergTables.table_namespace == namespace,
-                IcebergTables.table_name == table_name,
-            )
-            result = session.scalar(stmt)
-        if result:
-            return self._convert_orm_to_iceberg(result)
+        # io = load_file_io(properties=self.properties, location=metadata_location)
+        # file = io.new_input(metadata_location)
+        # metadata = FromInputFile.table_metadata(file)
+        # return Table(
+        #     identifier=(self.name,) + Catalog.identifier_to_tuple(table_namespace) + (table_name,),
+        #     metadata=metadata,
+        #     metadata_location=metadata_location,
+        #     io=self._load_file_io(metadata.properties, metadata_location),
+        #     catalog=self,
+        # )
+
         raise NoSuchTableError(f"Table does not exist: {namespace}.{table_name}")
 
     def create_namespace(self, namespace: Union[str, Identifier], properties: Properties = EMPTY_DICT) -> None:
@@ -149,6 +137,44 @@ class DuckDBIcebergCatalog(SqlCatalog):
 
     def load_namespace_properties(self, namespace: Union[str, Identifier]) -> Properties:
         pass
+
+    def register_table(self, identifier: Union[str, Identifier], metadata_location: str) -> Table:
+        """Register a new table using existing metadata.
+
+        Args:
+            identifier Union[str, Identifier]: Table identifier for the table
+            metadata_location str: The location to the metadata
+
+        Returns:
+            Table: The newly registered table
+
+        Raises:
+            TableAlreadyExistsError: If the table already exists
+            NoSuchNamespaceError: If namespace does not exist
+        """
+        identifier_tuple = self.identifier_to_tuple_without_catalog(identifier)
+        namespace_tuple = Catalog.namespace_from(identifier_tuple)
+        namespace = Catalog.namespace_to_string(namespace_tuple)
+        table_name = Catalog.table_name_from(identifier_tuple)
+        if not self._namespace_exists(namespace):
+            raise NoSuchNamespaceError(f"Namespace does not exist: {namespace}")
+
+        with Session(self.engine) as session:
+            try:
+                session.add(
+                    IcebergTables(
+                        catalog_name=self.name,
+                        table_namespace=namespace,
+                        table_name=table_name,
+                        metadata_location=metadata_location,
+                        previous_metadata_location=None,
+                    )
+                )
+                session.commit()
+            except IntegrityError as e:
+                raise TableAlreadyExistsError(f"Table {namespace}.{table_name} already exists") from e
+
+        return self.load_table(identifier=identifier)
 
     def update_namespace_properties(
             self, namespace: typing.Union[str, Identifier], removals: typing.Optional[typing.Set[str]] = None,

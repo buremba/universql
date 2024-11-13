@@ -19,7 +19,7 @@ snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], versi
 sqlglot = "~25.24.1"
 fsspec = "^2024.6.1"
 click = ">7"
-pyiceberg = {extras = ["glue"], version = "^0.7.1"}
+pyiceberg = {extras = ["glue", "sql-sqlite"], version = "^0.7.1"}
 #pyiceberg = { git = "https://github.com/buremba/iceberg-python", branch = "main", develop = true, extras = ["glue"] }
 fakesnow = "^0.9.26"
 humanize = "^4.10.0"
@@ -28,6 +28,7 @@ pyarrow = "^17.0.0"
 psutil = "^6.0.0"
 # once we get rid of from pyiceberg.catalog.sql import SqlCatalog, remove it
 sqlalchemy = "^2.0.35"
+duckdb-engine = "^0.13.2"
 
 # GCS
 gcsfs = "^2024.6.1"

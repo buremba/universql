@@ -42,31 +42,31 @@ def tt(max_iteration):
 
     iteration = 0
     while True:
-        # measure_all(cursor, "select o_clerk, o_shippriority, count(distinct o_clerk), count(o_orderkey), sum(o_totalprice) from ICEBERG_TESTS.TPCH_SF1.ORDERS group by all")
+        measure_all(cursor, "select o_clerk, o_shippriority, count(distinct o_clerk), count(o_orderkey), sum(o_totalprice) from ICEBERG_TESTS.TPCH_SF1.ORDERS group by all")
         # measure_all(cursor, "select count(*) from ICEBERG_TESTS.PUBLIC.GITHUB_EVENTS where cast(CREATED_AT_TIMESTAMP as date) = '2023-01-01'")
         # measure_all(cursor, "SELECT status, sum(record_count) FROM ICEBERG_METADATA('s3://universql-us-east-1/github_events/metadata/00059-769ac160-3ec9-42bc-9432-ada960817080.metadata.json') group by all")
         # measure_all(cursor, "SELECT * FROM ICEBERG_SCAN('s3://universql-us-east-1/glue_tables6/DBT_TEST/PUBLIC/example/metadata/00001-80c7021f-f25f-4187-a849-d032c2826ed4.metadata.json')")
-        measure_all(cursor, """create or replace iceberg table DBT_TEST.TPCH_10.orders
-           external_volume = 'iceberg_jinjat'
-           catalog = 'snowflake'
-           base_location = '_dbt/TPCH_10/orders'
-          as
-         with orders as (
-                select * from DBT_TEST.TPCH_10.base_orders
-            )
-            select 
-                o.order_key, 
-                o.order_date,
-                o.customer_key,
-                o.order_status_code,
-                o.order_priority_code,
-                o.order_clerk_name,
-                o.shipping_priority,
-                o.order_amount
-            from
-                orders o
-            order by
-                o.order_date""")
+        # measure_all(cursor, """create or replace iceberg table DBT_TEST.TPCH_10.orders
+        #    external_volume = 'iceberg_jinjat'
+        #    catalog = 'snowflake'
+        #    base_location = '_dbt/TPCH_10/orders'
+        #   as
+        #  with orders as (
+        #         select * from DBT_TEST.TPCH_10.base_orders
+        #     )
+        #     select
+        #         o.order_key,
+        #         o.order_date,
+        #         o.customer_key,
+        #         o.order_status_code,
+        #         o.order_priority_code,
+        #         o.order_clerk_name,
+        #         o.shipping_priority,
+        #         o.order_amount
+        #     from
+        #         orders o
+        #     order by
+        #         o.order_date""")
         print(f"Done with {iteration}")
         if iteration == max_iteration:
             break

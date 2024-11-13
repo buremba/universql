@@ -871,6 +871,22 @@ files = [
 ]
 
 [[package]]
+name = "duckdb-engine"
+version = "0.13.5"
+description = "SQLAlchemy driver for duckdb"
+optional = false
+python-versions = "<4,>=3.8"
+files = [
+    {file = "duckdb_engine-0.13.5-py3-none-any.whl", hash = "sha256:c32c553bf145cd32d1f9e9acfacea2b0288c4d014abd766a3f1f13efd11d0d90"},
+    {file = "duckdb_engine-0.13.5.tar.gz", hash = "sha256:5265cf2401c7053d34ceb8222cf03eb5e7a51c73e999ad4b286769e3546e9532"},
+]
+
+[package.dependencies]
+duckdb = ">=0.5.0"
+packaging = ">=21"
+sqlalchemy = ">=1.3.22"
+
+[[package]]
 name = "email-validator"
 version = "2.2.0"
 description = "A robust email address syntax and deliverability validation library."
@@ -1359,13 +1375,13 @@ requests = ["requests (>=2.18.0,<3.0.0dev)"]
 
 [[package]]
 name = "googleapis-common-protos"
-version = "1.65.0"
+version = "1.66.0"
 description = "Common protobufs used in Google APIs"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "googleapis_common_protos-1.65.0-py2.py3-none-any.whl", hash = "sha256:2972e6c496f435b92590fd54045060867f3fe9be2c82ab148fc8885035479a63"},
-    {file = "googleapis_common_protos-1.65.0.tar.gz", hash = "sha256:334a29d07cddc3aa01dee4988f9afd9b2916ee2ff49d6b757155dc0d197852c0"},
+    {file = "googleapis_common_protos-1.66.0-py2.py3-none-any.whl", hash = "sha256:d7abcd75fabb2e0ec9f74466401f6c119a0b498e27370e9be4c94cb7e382b8ed"},
+    {file = "googleapis_common_protos-1.66.0.tar.gz", hash = "sha256:c3e7b33d15fdca5374cc0a7346dd92ffa847425cc4ea941d970f13680052ec8c"},
 ]
 
 [package.dependencies]
@@ -2274,13 +2290,13 @@ typing-extensions = {version = ">=4.1.0", markers = "python_version < \"3.12\""}
 
 [[package]]
 name = "narwhals"
-version = "1.13.3"
+version = "1.13.4"
 description = "Extremely lightweight compatibility layer between dataframe libraries"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "narwhals-1.13.3-py3-none-any.whl", hash = "sha256:cde49b59b4540885d822777b747ed3fad65632b3d34648040308afcf08e62547"},
-    {file = "narwhals-1.13.3.tar.gz", hash = "sha256:db95cb5b5a6b99bad9fe7f2e2dacf937d57dee1c76c4544d4354a324084e36b5"},
+    {file = "narwhals-1.13.4-py3-none-any.whl", hash = "sha256:1e3068d69d7801cb26fb8ed7b3032591f0c2281d6392ce020d39186aed422b3d"},
+    {file = "narwhals-1.13.4.tar.gz", hash = "sha256:06f38209717b6586e15cabdccf725bce0374699a2e9778848a829d6e5fcd82b2"},
 ]
 
 [package.extras]
@@ -4655,4 +4671,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.13"
-content-hash = "2d30c05ff8c33795755fbd3f80f207f765c8ed1408056cb137ec607aaa7ace54"
+content-hash = "e839e7fd6a69749a26c177d509fd60392d0cc67b14bcd047c8168e88440ba075"
