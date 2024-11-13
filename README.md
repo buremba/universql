@@ -81,6 +81,20 @@ For Docker:
 docker run buremba/universql snowflake --account eq06461.eu-west-2.aws
 ```
 
+### Docker Compose
+
+Make a copy of the `.env.example` file and update the values.
+
+**Note:** The SSL certificates are not included in the repository, and are optional. If you want to use SSL, you need to generate your own and place them in the `ssl` directory then update the `.env` file with the correct names.
+
+```bash
+cp .env.example .env
+```
+
+```bash
+docker compose up
+```
+
 # CLI
 
 ```
