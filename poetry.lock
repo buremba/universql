@@ -3095,6 +3095,7 @@ pyparsing = ">=3.1.0,<4.0.0"
 requests = ">=2.20.0,<3.0.0"
 rich = ">=10.11.0,<14.0.0"
 sortedcontainers = "2.4.0"
+sqlalchemy = {version = ">=2.0.18,<3.0.0", optional = true, markers = "extra == \"sql-postgres\" or extra == \"sql-sqlite\""}
 strictyaml = ">=1.7.0,<2.0.0"
 tenacity = ">=8.2.3,<9.0.0"
 
@@ -4671,4 +4672,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.13"
-content-hash = "e839e7fd6a69749a26c177d509fd60392d0cc67b14bcd047c8168e88440ba075"
+content-hash = "099a06cc03f7b4c34cac152df3cbc76d57cea70ecde3b5afb7be21892f00b3e1"
