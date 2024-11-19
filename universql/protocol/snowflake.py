@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 import click
+import pandas as pd
 import pyarrow as pa
 import sentry_sdk
 import yaml
@@ -215,8 +216,6 @@ async def query_request(request: Request) -> JSONResponse:
         if body.get("asyncExec", False):
             # we should store the result in the server for when it gets retrieved
             query_results[query_id] = result
-        if not result:
-            return JSONResponse({"data": data, "success": True})
 
         format = data.get('queryResultFormat')
         if format == "json":
@@ -224,8 +223,13 @@ async def query_request(request: Request) -> JSONResponse:
         elif format == "arrow":
             sink = pa.BufferOutputStream()
             with pa.ipc.new_stream(sink, result.schema) as writer:
-                for batch in result.to_batches():
-                    writer.write_batch(batch)
+                batches = result.to_batches()
+                if len(batches) == 0:
+                    empty_batch = pa.RecordBatch.from_pylist([], schema=result.schema)
+                    writer.write_batch(empty_batch)
+                else:
+                    for batch in batches:
+                        writer.write_batch(batch)
             buf = sink.getvalue()
             # one-copy
             pybytes = buf.to_pybytes()

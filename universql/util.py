@@ -293,7 +293,7 @@ def session_from_request(sessions: List[str], request: Request):
     token = auth[17:-1]
     if token not in sessions:
         raise HTTPException(status_code=401,
-                            detail="User must login again to access the service. Maybe server restarted?")
+                            detail="User must login again to access the service. Maybe server restarted? Restarting Universql aborts all the concurrent sessions.")
     return sessions[token]
 
 
