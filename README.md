@@ -37,6 +37,36 @@ sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) tha
 
 # Getting Started
 
+## Access to Storage
+
+### Snowflake
+
+Since Snowflake doesn't provide direct access to data lake, UniverSQL uses your local credentials for cloud storage so [make sure you configure the cloud SDKs](#install-data-lake-sdks).
+You should install the your cloud's SDK and configure it with your credentials.
+
+### Polaris
+
+Polaris Catalog is a managed Iceberg table catalog that is available in Snowflake.
+It manages access credentials to data lake and the metadata of the Iceberg tables.
+If your Snowflake account (`snowflake --account`) is a Polaris Catalog, UniverSQL will use PyIceberg to fetch data from your data lake and map them as Arrow tables in DuckDB.
+
+###### AWS
+
+[Install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and [configure](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) AWS CLI.
+If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
+By default, UniverSQL uses your default AWS profile, you can pass `--aws-profile` option to `universql` to use a different profile than the default profile.
+
+###### Google Cloud
+
+[Install](https://cloud.google.com/sdk/docs/initializing) and [configure](https://cloud.google.com/sdk/docs/authorizing) Google Cloud SDK. You can use `gcloud auth application-default login` to login with your Google Cloud account.
+By default, UniverSQL uses your default GCP account attached to `gcloud`, you can pass `--gcp-account` option to `universql` to use a different profile than the default account.
+
+###### Azure
+
+[Install](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) and [configure](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli-interactively) Azure CLI.
+By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.com/en-us/cli/azure/manage-azure-subscriptions-azure-cli?tabs=bash#change-the-active-tenant) attached to `az`, you can pass `--azure-tenant` option to `universql` to use a different profile than the default account.
+
+
 ### Python
 
 ```bash
@@ -58,27 +88,20 @@ source universql-env/bin/activate         # activate the environment for Mac and
 universql-env\Scripts\activate            # activate the environment for Windows
 ```
 
+```bash
+universql 
+    snowflake --account-url lt51601.europe-west2.gcp
+```
+
 ### Docker
 
 Alternatively, pull the Docker image: (recommended for running in background)
 
 ```bash
-docker pull buremba/universql
-```
-
-And then:
-
-```bash
-universql 
+docker run  buremba/universql
   --network=host \
   --mount type=bind,source=<>,target=/usr/app \
     snowflake --account-url lt51601.europe-west2.gcp
-```
-
-For Docker:
-
-```bash
-docker run buremba/universql snowflake --account eq06461.eu-west-2.aws
 ```
 
 ### Docker Compose
@@ -134,35 +157,6 @@ Options:
                                   (default: 80% of total available disk)
   --help                          Show this message and exit.
 ```
-
-# Access to Storage
-
-### Polaris
-
-Polaris Catalog is a managed Iceberg table catalog that is available in Snowflake.
-It manages access credentials to data lake and the metadata of the Iceberg tables.
-If your Snowflake account (`snowflake --account`) is a Polaris Catalog, UniverSQL will use PyIceberg to fetch data from your data lake and map them as Arrow tables in DuckDB.
-
-### Snowflake
-
-Since Snowflake doesn't provide direct access to data lake, UniverSQL uses your local credentials for cloud storage so [make sure you configure the cloud SDKs](#install-data-lake-sdks).
-You should install the your cloud's SDK and configure it with your credentials.
-
-###### AWS
-
-[Install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and [configure](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) AWS CLI.
-If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
-By default, UniverSQL uses your default AWS profile, you can pass `--aws-profile` option to `universql` to use a different profile than the default profile.
-
-###### Google Cloud
-
-[Install](https://cloud.google.com/sdk/docs/initializing) and [configure](https://cloud.google.com/sdk/docs/authorizing) Google Cloud SDK. You can use `gcloud auth application-default login` to login with your Google Cloud account.
-By default, UniverSQL uses your default GCP account attached to `gcloud`, you can pass `--gcp-account` option to `universql` to use a different profile than the default account.
-
-###### Azure
-
-[Install](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) and [configure](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli-interactively) Azure CLI.
-By default, UniverSQL uses [your default Azure tenant](https://learn.microsoft.com/en-us/cli/azure/manage-azure-subscriptions-azure-cli?tabs=bash#change-the-active-tenant) attached to `az`, you can pass `--azure-tenant` option to `universql` to use a different profile than the default account.
 
 ## Compute Strategies
 
