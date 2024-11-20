@@ -14,7 +14,7 @@ from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
-    Var, Literal
+    Var, Literal, IcebergProperty
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.lake.cloud import s3, gcs, in_lambda
@@ -185,9 +185,11 @@ class DuckDBExecutor(Executor):
             raw_table = destination_table.parts[-1].sql()
 
             if isinstance(ast, Create):
+                properties = ast.args.get('properties') or Properties()
+                is_temp = TemporaryProperty() in properties.expressions
+                is_iceberg = IcebergProperty() in properties.expressions
+
                 if ast.kind == 'TABLE':
-                    properties = ast.args.get('properties') or Properties()
-                    is_temp = TemporaryProperty() in properties.expressions
                     is_replace = ast.args.get('replace')
                     if_exists = ast.args.get('exists')
                     final_query = self._sync_catalog(ast, tables)
@@ -195,17 +197,15 @@ class DuckDBExecutor(Executor):
                     base_location = self._get_property(ast, 'base_location')
                     catalog = self._get_property(ast, 'catalog')
 
-                    if final_query.expression is not None:
-                        self.execute_raw(final_query.expression.sql(dialect="duckdb"))
-                        arrow_table = self.get_as_table()
-                    else:
-                        arrow_table = None
-
-                    if not is_temp:
+                    if is_iceberg:
+                        if final_query.expression is not None:
+                            self.execute_raw(final_query.expression.sql(dialect="duckdb"))
+                            arrow_table = self.get_as_table()
+                        else:
+                            arrow_table = None
                         database_location = self.catalog.iceberg_catalog.properties.get(LOCATION)
                         database_location = database_location.rstrip("/")
                         table_location = str(os.path.join(database_location, base_location))
-                        raw_table = destination_table.parts[-1].sql()
                         raw_schema = destination_table.parts[1].sql() if len(
                             destination_table.parts) > 1 else self.catalog.credentials.get('schema')
                         raw_catalog = destination_table.parts[0].sql() if len(
@@ -234,6 +234,7 @@ class DuckDBExecutor(Executor):
                             ast.set('expression', None)
                             properties = ast.args.get('properties') or Properties()
 
+                            # adds column definitions to DDL
                             # column_definitions = [ColumnDef(
                             #     this=sqlglot.exp.parse_identifier(column.name),
                             #     kind=DataType.build(str(column.field_type)))
@@ -245,13 +246,10 @@ class DuckDBExecutor(Executor):
                             properties.expressions.append(
                                 Property(this=Var(this='METADATA_FILE_PATH'), value=Literal.string(metadata_file_path)))
                             return {destination_table: ast}
-                    elif arrow_table is not None:
-                        self.catalog.duckdb.register(destination_table.sql(), arrow_table)
                     else:
                         self.execute_raw(ast.sql(dialect="duckdb"))
                 elif ast.kind == 'VIEW':
                     properties = destination_table.args.get('properties') or Properties()
-                    is_temp = TemporaryProperty() in properties.expressions
                     duckdb_query = self._sync_catalog(ast, tables).sql(dialect="duckdb")
                     self.execute_raw(duckdb_query)
 

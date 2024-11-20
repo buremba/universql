@@ -87,6 +87,10 @@ class SnowflakeCatalog(ICatalog):
     def executor(self) -> Executor:
         return SnowflakeExecutor(self)
 
+    def _get_ref(self, table_information) -> pyiceberg.table.Table:
+        location = table_information.get('metadataLocation')
+        return StaticTable.from_metadata(location, self.iceberg_catalog.properties)
+
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         if len(tables) == 0:
             return {}
@@ -96,7 +100,7 @@ class SnowflakeCatalog(ICatalog):
         try:
             self.cursor().execute(final_query, values)
             result = self.cursor().fetchall()
-            return {table: SnowflakeExecutor._get_ref(json.loads(result[0][idx])) for idx, table in
+            return {table: self._get_ref(json.loads(result[0][idx])) for idx, table in
                     enumerate(tables)}
         except DatabaseError as e:
             err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: \n {e.msg} \n{final_query}"
@@ -279,11 +283,6 @@ class SnowflakeExecutor(Executor):
         cursor = self.catalog.cursor(create_if_not_exists=False)
         if cursor is not None:
             cursor.close()
-
-    @staticmethod
-    def _get_ref(table_information) -> pyiceberg.table.Table:
-        location = table_information.get('metadataLocation')
-        return StaticTable.from_metadata(location)
 
     def get_as_table(self) -> pa.Table:
         try:
