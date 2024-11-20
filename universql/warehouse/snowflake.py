@@ -99,7 +99,7 @@ class SnowflakeCatalog(ICatalog):
             return {table: SnowflakeExecutor._get_ref(json.loads(result[0][idx])) for idx, table in
                     enumerate(tables)}
         except DatabaseError as e:
-            err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: \n {e.msg}"
+            err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: \n {e.msg} \n{final_query}"
             raise QueryError(err_message, e.sqlstate)
 
     # def get_volume_lake_path(self, volume : str) -> str:
