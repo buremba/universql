@@ -97,7 +97,10 @@ class UniverSQLSession:
             try:
                 queries = sqlglot.parse(raw_query, read="snowflake")
             except ParseError as e:
-                raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
+                queries = None
+                has_snowflake = any(compute.get('name') == 'snowflake' for compute in self.compute_plan)
+                if not has_snowflake:
+                    raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
 
         last_executor = None
 
@@ -162,7 +165,7 @@ class UniverSQLSession:
             must_run_on_catalog = False
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
-                    tables = self._find_tables(ast.expression)
+                    tables = self._find_tables(ast.expression) if ast.expression is not None else []
                 else:
                     tables = []
                     must_run_on_catalog = True
