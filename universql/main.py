@@ -12,6 +12,7 @@ import requests
 import uvicorn
 from requests import RequestException
 
+from universql.agent.cloudflared import start_cloudflared
 from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, LOCALHOSTCOMPUTING_COM, \
     DEFAULTS
 
@@ -35,6 +36,10 @@ def cli():
 @click.option('--host', help='Host for Snowflake proxy server (default: localhostcomputing.com)',
               default=LOCALHOSTCOMPUTING_COM,
               envvar='SERVER_HOST',
+              type=str)
+@click.option('--metrics-port', help='Grafana metrics port, only available for cloudflared host (default: 5675)',
+              default=5675,
+              envvar='METRICS_PORT',
               type=str)
 @click.option('--account-catalog', type=click.Choice([e.value for e in Catalog]),
               help='Type of the Snowflake account. Automatically detected from the account if not provided.')
@@ -75,7 +80,9 @@ def cli():
 @click.option('--database-path', type=click.Path(exists=False, writable=True),
               help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)',
               envvar='DATABASE_PATH')
-def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, **kwargs):
+@click.option('--tunnel', type=click.Choice(["cloudflared", "ngrok"]),
+              help='Use tunnel for accessing server from public internet', envvar='TUNNEL')
+def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, metrics_port, tunnel, **kwargs):
     context__params = click.get_current_context().params
     auto_catalog_mode = account_catalog is None
     if auto_catalog_mode:
@@ -103,6 +110,13 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, *
             logger.error(
                 "The DNS setting for localhostcomputing.com doesn't point to localhost, refusing to start. Please update UniverSQL.")
             sys.exit(1)
+
+    if tunnel == 'cloudflared':
+        start_cloudflared(port, metrics_port)
+        host = '127.0.0.1'
+    elif tunnel == 'ngrok':
+        logger.error("Ngrok is not supported yet. Please use cloudflared.")
+        sys.exit(1)
 
     if host == LOCALHOSTCOMPUTING_COM or ssl_certfile is not None:
         with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:

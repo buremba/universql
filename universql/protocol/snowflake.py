@@ -9,7 +9,6 @@ from typing import Any
 from uuid import uuid4
 
 import click
-import pandas as pd
 import pyarrow as pa
 import sentry_sdk
 import yaml
@@ -20,6 +19,7 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, HTMLResponse
 
+from universql.agent.cloudflared import get_cloudflare_url
 from universql.lake.fsspec_util import get_friendly_disk_usage
 from universql.util import unpack_request_body, session_from_request, parameters, \
     print_dict_as_markdown_table, QueryError
@@ -366,20 +366,31 @@ async def shutdown_event():
 
 @app.on_event("startup")
 async def startup_event():
+    context = current_context
+    params = {k: v for k, v in context.items() if
+              v is not None and k not in ["host", "port"]}
+    click.secho(yaml.dump(params).strip())
     signal.signal(signal.SIGINT, harakiri)
-    host_port = f"{current_context.get('host')}:{current_context.get('port')}"
+    host = context.get('host')
+    tunnel = context.get('tunnel')
+    port = context.get('port')
+    if tunnel == "cloudflared":
+        metrics_port = context.get('metrics_port')
+        click.secho(f" * Traffic stats available on http://127.0.0.1:{metrics_port}/metrics")
+        host_port = host = get_cloudflare_url(metrics_port)
+        port = 443
+        click.secho(f" * Tunnel available at https://{host_port}")
+    else:
+        host_port = f"{host}:{port}"
     connections = {
         "Node.js": f"snowflake.createConnection({{accessUrl: '{host_port}'}})",
         "JDBC": f"jdbc:snowflake://{host_port}/dbname",
-        "Python": f"snowflake.connector.connect(host='{current_context.get('host')}', port='{current_context.get('port')}')",
+        "Python": f"snowflake.connector.connect(host='{host}', port='{port}')",
         "PHP": f"new PDO('snowflake:host={host_port}', '<user>', '<password>')",
         "Go": f"sql.Open('snowflake', 'user:pass@{host_port}/dbname')",
         ".NET": f"host={host_port};db=testdb",
-        "ODBC": f"Server={current_context.get('host')}; Database=dbname; Port={current_context.get('port')}",
+        "ODBC": f"Server={host}; Database=dbname; Port={port}",
     }
-    params = {k: v for k, v in current_context.items() if
-              v is not None and k not in ["host", "port"]}
-    click.secho(yaml.dump(params).strip())
     click.secho(print_dict_as_markdown_table(connections, footer_message=(
         "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
         "For application support, see https://github.com/buremba/universql",)))

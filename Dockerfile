@@ -19,5 +19,6 @@ RUN poetry install
 
 EXPOSE 8084
 ENV UNIVERSQL_HOST=0.0.0.0
+ENV TUNNEL=cloudflared
 
 ENTRYPOINT ["poetry", "run", "universql"]
