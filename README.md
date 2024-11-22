@@ -78,7 +78,7 @@ python3 -m pip install universql
 We recommend using virtual environments (venv) to namespace pip modules. Create a new venv as follows:
 
 ```bash
-python -m venv universql-env              # create the environment
+python -m venv universql-env
 ```
 
 Activate that same virtual environment each time you create a shell window or session:
@@ -90,7 +90,7 @@ universql-env\Scripts\activate            # activate the environment for Windows
 
 ```bash
 universql 
-    snowflake --account-url lt51601.europe-west2.gcp
+    snowflake --account lt51601.europe-west2.gcp
 ```
 
 ### Docker
@@ -101,7 +101,7 @@ Alternatively, pull the Docker image: (recommended for running in background)
 docker run  buremba/universql
   --network=host \
   --mount type=bind,source=<>,target=/usr/app \
-    snowflake --account-url lt51601.europe-west2.gcp
+    snowflake --account lt51601.europe-west2.gcp
 ```
 
 ### Docker Compose

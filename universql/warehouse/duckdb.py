@@ -7,6 +7,7 @@ import duckdb
 import pyiceberg.table
 import snowflake
 import sqlglot
+from fakesnow import macros, info_schema
 from fakesnow.conn import FakeSnowflakeConnection
 from fakesnow.cursor import FakeSnowflakeCursor
 from pyiceberg.catalog import Catalog
@@ -54,7 +55,7 @@ class DuckDBCatalog(ICatalog):
         self.duckdb.install_extension("iceberg")
         self.duckdb.load_extension("iceberg")
 
-        fake_snowflake_conn = FakeSnowflakeConnection(self.duckdb, "main", "public", False, False)
+        fake_snowflake_conn = FakeSnowflakeConnection(self.duckdb, None, None, False, False)
         fake_snowflake_conn.database_set = True
         fake_snowflake_conn.schema_set = True
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
@@ -125,7 +126,7 @@ class DuckDBExecutor(Executor):
         databases = set(table[0] for table in schemas if table[0] != '')
 
         databases_sql = [
-            f"ATTACH IF NOT EXISTS '{self._get_db_path(database)}' AS {sqlglot.exp.parse_identifier(database).sql()}"
+            f"ATTACH IF NOT EXISTS '{self._get_db_path(database)}' AS {sqlglot.exp.parse_identifier(database).sql()};\n" + info_schema.creation_sql(sqlglot.exp.parse_identifier(database).sql())
             for
             database in
             databases]
@@ -133,9 +134,12 @@ class DuckDBExecutor(Executor):
             f"CREATE SCHEMA IF NOT EXISTS {sqlglot.exp.parse_identifier(db).sql()}.{sqlglot.exp.parse_identifier(schema).sql()}"
             for
             (db, schema) in schemas]
+
+        # macros.creation_sql(self.database)
+
         views_sql = [f"CREATE OR REPLACE VIEW {table.sql()} AS SELECT * FROM {self.get_iceberg_read(location)}" for
                      table, location
-                     in locations.items()]
+                     in locations.items() if location is not None]
         views_sql = ";\n".join(databases_sql + schemas_sql + views_sql)
 
         if views_sql != "":
@@ -165,6 +169,8 @@ class DuckDBExecutor(Executor):
         return final_ast
 
     def _get_property(self, ast: sqlglot.exp.Create, name: str):
+        if "properties" not in ast.args:
+            return None
         return next(
             (expression.args.get('value').this for expression in ast.args['properties'].expressions
              if isinstance(expression, Property) and isinstance(expression.this,
@@ -192,10 +198,7 @@ class DuckDBExecutor(Executor):
                 if ast.kind == 'TABLE':
                     is_replace = ast.args.get('replace')
                     if_exists = ast.args.get('exists')
-                    final_query = self._sync_catalog(ast, tables)
-
-                    base_location = self._get_property(ast, 'base_location')
-                    catalog = self._get_property(ast, 'catalog')
+                    final_query = self._sync_catalog(ast, tables | {destination_table: None})
 
                     if is_iceberg:
                         if final_query.expression is not None:
@@ -205,6 +208,7 @@ class DuckDBExecutor(Executor):
                             arrow_table = None
                         database_location = self.catalog.iceberg_catalog.properties.get(LOCATION)
                         database_location = database_location.rstrip("/")
+                        base_location = self._get_property(ast, 'base_location')
                         table_location = str(os.path.join(database_location, base_location))
                         raw_schema = destination_table.parts[1].sql() if len(
                             destination_table.parts) > 1 else self.catalog.credentials.get('schema')
@@ -230,6 +234,8 @@ class DuckDBExecutor(Executor):
                         if not create_iceberg_table.metadata_location.startswith(table_location):
                             raise QueryError("Unable to determine location")
                         metadata_file_path = create_iceberg_table.metadata_location[len(table_location):].strip('/')
+                        catalog = self._get_property(ast, 'catalog')
+
                         if catalog is not None and catalog.lower() != 'snowflake':
                             ast.set('expression', None)
                             properties = ast.args.get('properties') or Properties()
@@ -247,6 +253,11 @@ class DuckDBExecutor(Executor):
                                 Property(this=Var(this='METADATA_FILE_PATH'), value=Literal.string(metadata_file_path)))
                             return {destination_table: ast}
                     else:
+                        if is_temp:
+                            ast.args['properties'] = Properties(
+                                expressions=[expression for expression in properties.expressions if
+                                             not isinstance(expression, TemporaryProperty)])
+
                         self.execute_raw(ast.sql(dialect="duckdb"))
                 elif ast.kind == 'VIEW':
                     properties = destination_table.args.get('properties') or Properties()
