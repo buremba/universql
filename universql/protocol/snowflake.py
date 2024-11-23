@@ -208,8 +208,13 @@ async def query_request(request: Request) -> JSONResponse:
         data: dict = {
             "finalDatabaseName": session.credentials.get("database"),
             "finalSchemaName": session.credentials.get("schema"),
+            "finalWarehouseName": session.credentials.get("warehouse"),
+            "finalRoleName": session.credentials.get("role"),
             "rowtype": columns,
             "queryResultFormat": queryResultFormat,
+            "databaseProvider": None,
+            "numberOfBinds": 0,
+            "arrayBindSupported": False,
             "queryId": query_id,
             "parameters": parameters
         }
@@ -221,20 +226,25 @@ async def query_request(request: Request) -> JSONResponse:
         if format == "json":
             data["rowset"] = jsonable_encoder(result)
         elif format == "arrow":
-            sink = pa.BufferOutputStream()
-            with pa.ipc.new_stream(sink, result.schema) as writer:
-                batches = result.to_batches()
-                if len(batches) == 0:
-                    empty_batch = pa.RecordBatch.from_pylist([], schema=result.schema)
-                    writer.write_batch(empty_batch)
-                else:
-                    for batch in batches:
-                        writer.write_batch(batch)
-            buf = sink.getvalue()
-            # one-copy
-            pybytes = buf.to_pybytes()
-            b_encode = base64.b64encode(pybytes)
-            encode = b_encode.decode('utf-8')
+            number_of_rows = len(result)
+            data["returned"] = number_of_rows
+            if number_of_rows > 0:
+                sink = pa.BufferOutputStream()
+                with pa.ipc.new_stream(sink, result.schema) as writer:
+                    batches = result.to_batches()
+                    if len(batches) == 0:
+                        empty_batch = pa.RecordBatch.from_pylist([], schema=result.schema)
+                        writer.write_batch(empty_batch)
+                    else:
+                        for batch in batches:
+                            writer.write_batch(batch)
+                buf = sink.getvalue()
+                # one-copy
+                pybytes = buf.to_pybytes()
+                b_encode = base64.b64encode(pybytes)
+                encode = b_encode.decode('utf-8')
+            else:
+                encode = ""
             data["rowsetBase64"] = encode
         else:
             raise Exception(f"Format {format} is not supported")
