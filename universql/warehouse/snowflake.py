@@ -71,18 +71,20 @@ class SnowflakeCatalog(ICatalog):
     def register_locations(self, tables: Locations):
         start_time = time.perf_counter()
         queries = []
-        for location, table in tables.items():
-            queries.append(table.sql(dialect='snowflake'))
+        for table, location in tables.items():
+            if location is not None:
+                queries.append(table.sql(dialect='snowflake'))
         final_query = '\n'.join(queries)
-        logger.info(f"[{self.query_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
-        try:
-            self.cursor().execute(final_query)
-            performance_counter = time.perf_counter()
-            logger.info(
-                f"[{self.query_id}] Synced catalog with Snowflake ❄️ "
-                f"({get_friendly_time_since(start_time, performance_counter)})")
-        except snowflake.connector.Error as e:
-            raise QueryError(e.msg, e.sqlstate)
+        if final_query:
+            logger.info(f"[{self.query_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
+            try:
+                self.cursor().execute(final_query)
+                performance_counter = time.perf_counter()
+                logger.info(
+                    f"[{self.query_id}] Synced catalog with Snowflake ❄️ "
+                    f"({get_friendly_time_since(start_time, performance_counter)})")
+            except snowflake.connector.Error as e:
+                raise QueryError(e.msg, e.sqlstate)
 
     def executor(self) -> Executor:
         return SnowflakeExecutor(self)

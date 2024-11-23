@@ -7,7 +7,7 @@ import sqlglot
 from pyiceberg.catalog import Catalog
 from snowflake.connector.options import pyarrow
 
-Locations = typing.Dict[sqlglot.exp.Table, sqlglot.exp.Expression]
+Locations = typing.Dict[sqlglot.exp.Table, sqlglot.exp.Expression | None]
 Tables = typing.Dict[sqlglot.exp.Table, pyiceberg.table.Table | None]
 
 

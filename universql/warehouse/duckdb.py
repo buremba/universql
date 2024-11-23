@@ -55,7 +55,9 @@ class DuckDBCatalog(ICatalog):
         self.duckdb.install_extension("iceberg")
         self.duckdb.load_extension("iceberg")
 
-        fake_snowflake_conn = FakeSnowflakeConnection(self.duckdb, None, None, False, False)
+        fake_snowflake_conn = FakeSnowflakeConnection(self.duckdb, self.credentials.get('database'),
+                                                      self.credentials.get('schema'),
+                                                      False, False)
         fake_snowflake_conn.database_set = True
         fake_snowflake_conn.schema_set = True
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
@@ -103,16 +105,6 @@ class DuckDBExecutor(Executor):
         except snowflake.connector.ProgrammingError as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.msg}")
 
-    def _get_iceberg_ref(self, default_namespace, destination_table, ):
-        namespace = '.'.join([part.sql() for part in destination_table.parts[0:-1]])
-        if namespace == '':
-            namespace = default_namespace
-            table_ref = f"{default_namespace}.{destination_table.sql()}"
-        else:
-            namespace = namespace
-            table_ref = destination_table.sql()
-        return namespace, table_ref
-
     def _get_db_path(self, db_name):
         database_path = self.catalog.context.get('database_path')
         if database_path is not None:
@@ -122,11 +114,14 @@ class DuckDBExecutor(Executor):
         return duckdb_path
 
     def _sync_catalog(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
-        schemas = set((table.catalog, table.db) for table in locations.keys() if table.db != '')
+        schemas = set((table.catalog or self.catalog.credentials.get('database'), table.db or self.catalog.credentials.get('schema'))
+                      for table in locations.keys())
         databases = set(table[0] for table in schemas if table[0] != '')
 
         databases_sql = [
-            f"ATTACH IF NOT EXISTS '{self._get_db_path(database)}' AS {sqlglot.exp.parse_identifier(database).sql()};\n" + info_schema.creation_sql(sqlglot.exp.parse_identifier(database).sql())
+            f"-- Compatibility layer for Snowflake \n ATTACH IF NOT EXISTS '{self._get_db_path(database)}' AS {sqlglot.exp.parse_identifier(database).sql()};" +
+            info_schema.creation_sql(sqlglot.exp.parse_identifier(database).sql()) +
+            macros.creation_sql(sqlglot.exp.parse_identifier(database).sql())
             for
             database in
             databases]
@@ -134,8 +129,6 @@ class DuckDBExecutor(Executor):
             f"CREATE SCHEMA IF NOT EXISTS {sqlglot.exp.parse_identifier(db).sql()}.{sqlglot.exp.parse_identifier(schema).sql()}"
             for
             (db, schema) in schemas]
-
-        # macros.creation_sql(self.database)
 
         views_sql = [f"CREATE OR REPLACE VIEW {table.sql()} AS SELECT * FROM {self.get_iceberg_read(location)}" for
                      table, location
@@ -258,9 +251,11 @@ class DuckDBExecutor(Executor):
                                 expressions=[expression for expression in properties.expressions if
                                              not isinstance(expression, TemporaryProperty)])
 
-                        self.execute_raw(ast.sql(dialect="duckdb"))
+                            self.execute_raw(ast.sql(dialect="duckdb"))
+                            return {destination_table: None}
+                        else:
+                            return {destination_table: ast.expression}
                 elif ast.kind == 'VIEW':
-                    properties = destination_table.args.get('properties') or Properties()
                     duckdb_query = self._sync_catalog(ast, tables).sql(dialect="duckdb")
                     self.execute_raw(duckdb_query)
 
@@ -274,7 +269,6 @@ class DuckDBExecutor(Executor):
                 self.execute_raw(self._sync_catalog(ast.expression, tables).sql(dialect="duckdb"))
                 table = self.get_as_table()
                 iceberg_table.append(table)
-
         elif isinstance(ast, Drop):
             delete_table = ast.this
             self.catalog.iceberg_catalog.drop_table(delete_table.sql())

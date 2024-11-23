@@ -42,6 +42,7 @@ class UniverSQLSession:
 
         self.last_executor_cursor = None
         self.processing = False
+        self.session_relations = set()
 
     def _create_iceberg_catalog(self):
         iceberg_catalog = self.context.get('universql_catalog')
@@ -88,7 +89,7 @@ class UniverSQLSession:
                     table.parts[-2].this.lower() == 'information_schema'
                     or len(table.parts) > 2 and isinstance(table.parts[-3].this, str)
                     and table.parts[-3].this.lower() == "snowflake"):
-                logger.debug(f"[{self.token}] Skipping local execution, found {table.sql()}")
+                logger.info(f"[{self.token}] Skipping local execution, found {table.sql()}")
                 return True
         return False
 
@@ -181,6 +182,9 @@ class UniverSQLSession:
                     new_locations = alternative_executor.execute(ast, locations)
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
+                        for table, destination in new_locations.items():
+                            if destination is None:
+                                self.session_relations.add(self._fill_qualifier(table))
                         self.catalog.register_locations(new_locations)
                 return alternative_executor
 
@@ -210,6 +214,10 @@ class UniverSQLSession:
         namespace = self.iceberg_catalog.properties.get('namespace', "main")
 
         for table in tables:
+            full_qualifier = self._fill_qualifier(table)
+            if full_qualifier in self.session_relations:
+                continue
+
             try:
                 table_ref = table.sql(dialect="snowflake")
                 logger.info(f"Looking up table {table_ref} in namespace {namespace}")
