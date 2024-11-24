@@ -113,12 +113,15 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, m
 
     if tunnel == 'cloudflared':
         start_cloudflared(port, metrics_port)
-        host = '127.0.0.1'
+        if os.getenv('USE_LOCALCOMPUTING_COM') == '1':
+            host = "0.0.0.0"
+        else:
+            host = '127.0.0.1'
     elif tunnel == 'ngrok':
         logger.error("Ngrok is not supported yet. Please use cloudflared.")
         sys.exit(1)
 
-    if host == LOCALHOSTCOMPUTING_COM or ssl_certfile is not None or os.getenv('USE_LOCALCOMPUTING_COM_SSL') == '1':
+    if host == LOCALHOSTCOMPUTING_COM or ssl_certfile is not None or os.getenv('USE_LOCALCOMPUTING_COM') == '1':
         with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:
             cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
             cert_file.flush()

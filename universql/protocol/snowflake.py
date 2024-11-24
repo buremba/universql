@@ -22,7 +22,7 @@ from starlette.responses import JSONResponse, Response, HTMLResponse
 from universql.agent.cloudflared import get_cloudflare_url
 from universql.lake.fsspec_util import get_friendly_disk_usage
 from universql.util import unpack_request_body, session_from_request, parameters, \
-    print_dict_as_markdown_table, QueryError
+    print_dict_as_markdown_table, QueryError, LOCALHOSTCOMPUTING_COM
 from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
 from universql.protocol.session import UniverSQLSession
@@ -374,6 +374,11 @@ async def shutdown_event():
         session.close()
 
 
+def log_exit(sig, frame):
+    kill_event.set()
+    logger.info("Received SIGTERM signal")
+
+
 @app.on_event("startup")
 async def startup_event():
     context = current_context
@@ -381,6 +386,7 @@ async def startup_event():
               v is not None and k not in ["host", "port"]}
     click.secho(yaml.dump(params).strip())
     signal.signal(signal.SIGINT, harakiri)
+    signal.signal(signal.SIGTERM, log_exit)
     host = context.get('host')
     tunnel = context.get('tunnel')
     port = context.get('port')
@@ -390,6 +396,8 @@ async def startup_event():
         host_port = host = get_cloudflare_url(metrics_port)
         port = 443
         click.secho(f" * Tunnel available at https://{host_port}")
+    elif os.getenv('USE_LOCALCOMPUTING_COM') == '1':
+        host_port = f"{LOCALHOSTCOMPUTING_COM}:{port}"
     else:
         host_port = f"{host}:{port}"
     connections = {
