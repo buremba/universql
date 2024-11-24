@@ -19,5 +19,6 @@ RUN poetry install
 
 EXPOSE 8084
 ENV SERVER_HOST=0.0.0.0
+ENV USE_LOCALCOMPUTING_COM_SSL=1
 
 ENTRYPOINT ["poetry", "run", "universql"]

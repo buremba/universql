@@ -15,7 +15,7 @@ from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
-    Var, Literal, IcebergProperty
+    Var, Literal, IcebergProperty, Copy, Delete, Merge
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.lake.cloud import s3, gcs, in_lambda
@@ -91,7 +91,9 @@ class DuckDBExecutor(Executor):
             return f"Run locally on DuckDB: {cost}"
 
     def supports(self, ast: sqlglot.exp.Expression) -> bool:
-        return isinstance(ast, Select) or isinstance(ast, Insert) or isinstance(ast, Create)
+        return isinstance(ast, Select) or isinstance(ast, Insert) or isinstance(ast, Create) or isinstance(ast,
+                                                                                                           Copy) or isinstance(
+            ast, Delete) or isinstance(ast, Merge)
 
     def execute_raw(self, raw_query: str) -> None:
         try:
@@ -114,7 +116,8 @@ class DuckDBExecutor(Executor):
         return duckdb_path
 
     def _sync_catalog(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
-        schemas = set((table.catalog or self.catalog.credentials.get('database'), table.db or self.catalog.credentials.get('schema'))
+        schemas = set((table.catalog or self.catalog.credentials.get('database'),
+                       table.db or self.catalog.credentials.get('schema'))
                       for table in locations.keys())
         databases = set(table[0] for table in schemas if table[0] != '')
 
