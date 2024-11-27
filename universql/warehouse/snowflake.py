@@ -45,8 +45,8 @@ Summary.__init__ = summary_init
 
 class SnowflakeCatalog(ICatalog):
 
-    def __init__(self, context: dict, query_id: str, credentials: dict, compute, iceberg_catalog: Catalog):
-        super().__init__(context, query_id, credentials, compute, iceberg_catalog)
+    def __init__(self, context: dict, session_id: str, credentials: dict, compute, iceberg_catalog: Catalog):
+        super().__init__(context, session_id, credentials, compute, iceberg_catalog)
         if context.get('account') is not None:
             credentials["account"] = context.get('account')
         if SNOWFLAKE_HOST is not None:
@@ -76,12 +76,12 @@ class SnowflakeCatalog(ICatalog):
                 queries.append(table.sql(dialect='snowflake'))
         final_query = '\n'.join(queries)
         if final_query:
-            logger.info(f"[{self.query_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
+            logger.info(f"[{self.session_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
             try:
                 self.cursor().execute(final_query)
                 performance_counter = time.perf_counter()
                 logger.info(
-                    f"[{self.query_id}] Synced catalog with Snowflake ❄️ "
+                    f"[{self.session_id}] Synced catalog with Snowflake ❄️ "
                     f"({get_friendly_time_since(start_time, performance_counter)})")
             except snowflake.connector.Error as e:
                 raise QueryError(e.msg, e.sqlstate)
@@ -264,7 +264,7 @@ class SnowflakeExecutor(Executor):
         run_on_warehouse = self.catalog.compute.get('warehouse') is not None
         try:
             emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
-            logger.info(f"[{self.catalog.query_id}] Running on Snowflake.. {emoji} \n {compiled_sql}")
+            logger.info(f"[{self.catalog.session_id}] Running on Snowflake.. {emoji} \n {compiled_sql}")
             self.catalog.cursor().execute(compiled_sql)
         except DatabaseError as e:
             message = f"{e.sfqid}: {e.msg} \n{compiled_sql}"

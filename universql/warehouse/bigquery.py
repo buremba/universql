@@ -84,12 +84,12 @@ class BigQueryIcebergExecutor(Executor):
 
 class BigQueryCatalog(ICatalog):
 
-    def __init__(self, context: dict, query_id: str, credentials: dict, compute: dict):
-        super().__init__(context, query_id, credentials, compute)
+    def __init__(self, context: dict, session_id: str, credentials: dict, compute: dict):
+        super().__init__(context, session_id, credentials, compute)
         self.tables = None
 
     def executor(self) -> Executor:
-        return BigQueryIcebergExecutor(self.query_id, self.tables)
+        return BigQueryIcebergExecutor(self.session_id, self.tables)
 
     def register_locations(self, tables: Locations):
         self.tables = tables

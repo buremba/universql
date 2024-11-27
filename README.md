@@ -13,27 +13,15 @@ UniverSQL relies on Snowflake for access control and data catalog so it's comple
 
 **[Watch on YouTube](https://www.youtube.com/watch?v=s1fpSEE-pAc)**
 
-
-# How it works?
-
-* Snowflake SQL API implementation to handle the Snowflake connections, acting as a proxy between DuckDB and Snowflake.
-  * You can connect UniverSQL using Snowflake Python Connector, Snowflake JDBC, ODBC or any other Snowflake client.
-  * UniverSQL uses Snowflake Arrow integration to fetch the data from Snowflake and convert it to DuckDB relation.
-* [SQLGlot](https://sqlglot.com) and [Fakesnow](https://github.com/tekumara/fakesnow) for query translation from Snowflake to DuckDB,
-* [Snowflake Iceberg tables](https://docs.snowflake.com/en/user-guide/tables-iceberg) and [Polaris](https://other-docs.snowflake.com/en/polaris/overview) as data catalog, depending on `--account' you proxy to.
-* Your local disk for the storage with direct access to data lakes (S3, GCS) for the cloud storage.
-* [DuckDB](https://duckdb.org) as local compute engine.
-
 When you query an Iceberg table on Snowflake for the first time, UniverSQL looks up Iceberg metadata from Snowflake, (metadata operation, no compute cost) re-writes the query for DuckDB dialect, 
 sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) that connects to your data lake with [your cloud credentials](#install-data-lake-sdks) and caches the Parquet files and executes the query on DuckDB.
 
 # Use Cases
 
-* Smart caching for your Snowflake queries, reducing the compute costs. UniverSQL caches the SQL AST locally and re-uses the cache across multiple runs, better than Snowflake's [result cache](https://docs.snowflake.com/en/user-guide/querying-persisted-results). 
-* Query local files without any need to upload them to Snowflake for prototyping and only upload them when you want to share data with your colleagues.
+* Smart caching for your Snowflake queries, reducing the compute costs. UniverSQL optimize the query and re-uses the cache across multiple runs, better than Snowflake's [result cache](https://docs.snowflake.com/en/user-guide/querying-persisted-results). 
+* Query local files without any need to upload them to Snowflake for prototyping and only upload them when you want to publish data on cloud.
 * Utilize your hardware for running queries faster on small datasets and run queries on your data even when you don't have internet connectivity.
-* Develop end-user facing applications on top Snowflake, using DuckDB to query the data.
-* Use DuckDB warehouse for managed and on-premise Polaris Catalog.
+* Use DuckDB warehouse for managed and on-premise Polaris Catalog. If you pass a Polaris account (`--account` parameter), UniverSQL will use embedded DuckDB as local warehouse.
 
 # Getting Started
 
@@ -98,10 +86,7 @@ universql
 Alternatively, pull the Docker image: (recommended for running in background)
 
 ```bash
-docker run  buremba/universql
-  --network=host \
-  --mount type=bind,source=<>,target=/usr/app \
-    snowflake --account lt51601.europe-west2.gcp
+docker run -p 8084:8084 -v ~/.universql:/root/.universql buremba/universql snowflake --account lt51601.europe-west2.gcp
 ```
 
 ### Docker Compose
@@ -118,6 +103,17 @@ cp .env.example .env
 docker compose up
 ```
 
+# How it works?
+
+* Snowflake SQL API implementation to handle the Snowflake connections, acting as a proxy between DuckDB and Snowflake.
+  * You can connect UniverSQL using Snowflake Python Connector, Snowflake JDBC, ODBC or any other Snowflake client.
+  * UniverSQL uses Snowflake Arrow integration to fetch the data from Snowflake and convert it to DuckDB relation.
+* [SQLGlot](https://sqlglot.com) and [Fakesnow](https://github.com/tekumara/fakesnow) for query translation from Snowflake to DuckDB,
+* [Snowflake Iceberg tables](https://docs.snowflake.com/en/user-guide/tables-iceberg) and [Polaris](https://other-docs.snowflake.com/en/polaris/overview) as data catalog, depending on `--account' you proxy to.
+* Your local disk for the storage with direct access to data lakes (S3, GCS) for the cloud storage.
+* [DuckDB](https://duckdb.org) as local compute engine.
+
+
 # CLI
 
 ```
@@ -132,12 +128,14 @@ Options:
                                   8084)
   --host TEXT                     Host for Snowflake proxy server (default:
                                   localhostcomputing.com)
-  --compute [local|auto|snowflake]
-                                  Enforce the query execution layer (default:
-                                  auto, try with DuckDB and use Snowflake if
-                                  it fails)
-  --catalog [snowflake|polaris]   Type of the Snowflake account. Automatically
-                                  detected if not provided.
+  --metrics-port TEXT             Grafana metrics port, only available for
+                                  cloudflared host (default: 5675)
+  --account-catalog [snowflake|polaris]
+                                  Type of the Snowflake account. Automatically
+                                  detected from the account if not provided.
+  --universql-catalog TEXT        The external catalog that will be used for
+                                  Iceberg tables. (default:
+                                  duckdb:///:memory:)
   --aws-profile TEXT              AWS profile to access S3 (default:
                                   `default`)
   --gcp-project TEXT              GCP project to access GCS and apply quota.
@@ -152,19 +150,20 @@ Options:
   --max-memory TEXT               DuckDB Max memory to use for the server
                                   (default: 80% of total memory)
   --cache-directory TEXT          Data lake cache directory (default:
-                                  ~/.universql/cache)
+                                  /Users/bkabak/.universql/cache)
+  --home-directory TEXT           Home directory for local operations
+                                  (default: /Users/bkabak)
   --max-cache-size TEXT           DuckDB maximum cache used in local disk
                                   (default: 80% of total available disk)
+  --database-path PATH            For persistent storage, provide a path to
+                                  the DuckDB database file (default: :memory:)
+  --tunnel [cloudflared|ngrok]    Use tunnel for accessing server from public
+                                  internet
   --help                          Show this message and exit.
+
+  [BETA] Check out docs at https://github.com/buremba/universql and let me
+  know if you have any cool use-case on Github!
 ```
-
-## Compute Strategies
-
-`auto` (default): Best effort to run the query locally, with the fallback option to run it on Snowflake.
-
-`local`: Runs the queries locally and on Snowflake only if it doesn't require a running warehouse. Useful for spinning up local test environments.
-
-`snowflake`: Runs the queries directly on Snowflake as passthrough. Useful for rewriting and blocking queries on the fly based on specific rules or re-routing warehouses based on custom logic.
 
 # Limitations
 
@@ -183,8 +182,9 @@ You will only **need to pay for the egress network costs** from your cloud provi
 
 ### Performance
 
-UniverSQL uses DuckDB as the local compute engine, which is a columnar database that is optimized for analytical queries. The queries that fit in your memory will mostly run under a second but for larger queries, the performance is comparable to Snowflake up to a certain point, depending on your hardware.
-On Macbook Pro M2 2023, the performance is comparable to Snowflake up to 2B rows.
+UniverSQL uses DuckDB as the local compute engine, which is a columnar database that is optimized for analytical queries.
+The queries that fit in your memory will mostly run under a second but for larger queries, the performance is comparable to Snowflake up to a certain point, depending on your hardware.
+It can be used for prototyping and ad-hoc queries on small datasets but Universql automatically tries to route your queries to Snowflake when it can't be executed locally.
 
 [![Clickbench](resources/clickbench.png)](https://benchmark.clickhouse.com/#eyJzeXN0ZW0iOnsiQWxsb3lEQiI6ZmFsc2UsIkF0aGVuYSAocGFydGl0aW9uZWQpIjpmYWxzZSwiQXRoZW5hIChzaW5nbGUpIjpmYWxzZSwiQXVyb3JhIGZvciBNeVNRTCI6ZmFsc2UsIkF1cm9yYSBmb3IgUG9zdGdyZVNRTCI6ZmFsc2UsIkJ5Q29uaXR5IjpmYWxzZSwiQnl0ZUhvdXNlIjpmYWxzZSwiY2hEQiAoUGFycXVldCwgcGFydGl0aW9uZWQpIjpmYWxzZSwiY2hEQiI6ZmFsc2UsIkNpdHVzIjpmYWxzZSwiQ2xpY2tIb3VzZSBDbG91ZCAoYXdzKSI6ZmFsc2UsIkNsaWNrSG91c2UgQ2xvdWQgKGF3cykgUGFyYWxsZWwgUmVwbGljYXMgT04iOmZhbHNlLCJDbGlja0hvdXNlIENsb3VkIChBenVyZSkiOmZhbHNlLCJDbGlja0hvdXNlIENsb3VkIChBenVyZSkgUGFyYWxsZWwgUmVwbGljYSBPTiI6ZmFsc2UsIkNsaWNrSG91c2UgQ2xvdWQgKEF6dXJlKSBQYXJhbGxlbCBSZXBsaWNhcyBPTiI6ZmFsc2UsIkNsaWNrSG91c2UgQ2xvdWQgKGdjcCkiOmZhbHNlLCJDbGlja0hvdXNlIENsb3VkIChnY3ApIFBhcmFsbGVsIFJlcGxpY2FzIE9OIjpmYWxzZSwiQ2xpY2tIb3VzZSAoZGF0YSBsYWtlLCBwYXJ0aXRpb25lZCkiOmZhbHNlLCJDbGlja0hvdXNlIChkYXRhIGxha2UsIHNpbmdsZSkiOmZhbHNlLCJDbGlja0hvdXNlIChQYXJxdWV0LCBwYXJ0aXRpb25lZCkiOmZhbHNlLCJDbGlja0hvdXNlIChQYXJxdWV0LCBzaW5nbGUpIjpmYWxzZSwiQ2xpY2tIb3VzZSAod2ViKSI6ZmFsc2UsIkNsaWNrSG91c2UiOmZhbHNlLCJDbGlja0hvdXNlICh0dW5lZCkiOmZhbHNlLCJDbGlja0hvdXNlICh0dW5lZCwgbWVtb3J5KSI6ZmFsc2UsIkNsb3VkYmVycnkiOmZhbHNlLCJDcmF0ZURCIjpmYWxzZSwiRGF0YWJlbmQiOmZhbHNlLCJEYXRhRnVzaW9uIChQYXJxdWV0LCBwYXJ0aXRpb25lZCkiOmZhbHNlLCJEYXRhRnVzaW9uIChQYXJxdWV0LCBzaW5nbGUpIjpmYWxzZSwiQXBhY2hlIERvcmlzIjpmYWxzZSwiRHJ1aWQiOmZhbHNlLCJEdWNrREIgKFBhcnF1ZXQsIHBhcnRpdGlvbmVkKSI6dHJ1ZSwiRHVja0RCIjpmYWxzZSwiRWxhc3RpY3NlYXJjaCI6ZmFsc2UsIkVsYXN0aWNzZWFyY2ggKHR1bmVkKSI6ZmFsc2UsIkdsYXJlREIiOmZhbHNlLCJHcmVlbnBsdW0iOmZhbHNlLCJIZWF2eUFJIjpmYWxzZSwiSHlkcmEiOmZhbHNlLCJJbmZvYnJpZ2h0IjpmYWxzZSwiS2luZXRpY2EiOmZhbHNlLCJNYXJpYURCIENvbHVtblN0b3JlIjpmYWxzZSwiTWFyaWFEQiI6ZmFsc2UsIk1vbmV0REIiOmZhbHNlLCJNb25nb0RCIjpmYWxzZSwiTW90aGVyZHVjayI6ZmFsc2UsIk15U1FMIChNeUlTQU0pIjpmYWxzZSwiTXlTUUwiOmZhbHNlLCJPeGxhIjpmYWxzZSwiUGFyYWRlREIgKFBhcnF1ZXQsIHBhcnRpdGlvbmVkKSI6ZmFsc2UsIlBhcmFkZURCIChQYXJxdWV0LCBzaW5nbGUpIjpmYWxzZSwiUGlub3QiOmZhbHNlLCJQb3N0Z3JlU1FMICh0dW5lZCkiOmZhbHNlLCJQb3N0Z3JlU1FMIjpmYWxzZSwiUXVlc3REQiAocGFydGl0aW9uZWQpIjpmYWxzZSwiUXVlc3REQiI6ZmFsc2UsIlJlZHNoaWZ0IjpmYWxzZSwiU2VsZWN0REIiOmZhbHNlLCJTaW5nbGVTdG9yZSI6ZmFsc2UsIlNub3dmbGFrZSI6dHJ1ZSwiU1FMaXRlIjpmYWxzZSwiU3RhclJvY2tzIjpmYWxzZSwiVGFibGVzcGFjZSI6ZmFsc2UsIlRlbWJvIE9MQVAgKGNvbHVtbmFyKSI6ZmFsc2UsIlRpbWVzY2FsZURCIChjb21wcmVzc2lvbikiOmZhbHNlLCJUaW1lc2NhbGVEQiI6ZmFsc2UsIlVtYnJhIjpmYWxzZX0sInR5cGUiOnsiQyI6dHJ1ZSwiY29sdW1uLW9yaWVudGVkIjp0cnVlLCJQb3N0Z3JlU1FMIGNvbXBhdGlibGUiOnRydWUsIm1hbmFnZWQiOnRydWUsImdjcCI6dHJ1ZSwic3RhdGVsZXNzIjp0cnVlLCJKYXZhIjp0cnVlLCJDKysiOnRydWUsIk15U1FMIGNvbXBhdGlibGUiOnRydWUsInJvdy1vcmllbnRlZCI6dHJ1ZSwiQ2xpY2tIb3VzZSBkZXJpdmF0aXZlIjp0cnVlLCJlbWJlZGRlZCI6dHJ1ZSwic2VydmVybGVzcyI6dHJ1ZSwiYXdzIjp0cnVlLCJwYXJhbGxlbCByZXBsaWNhcyI6dHJ1ZSwiQXp1cmUiOnRydWUsIlJ1c3QiOnRydWUsInNlYXJjaCI6dHJ1ZSwiZG9jdW1lbnQiOnRydWUsImFuYWx5dGljYWwiOnRydWUsInNvbWV3aGF0IFBvc3RncmVTUUwgY29tcGF0aWJsZSI6dHJ1ZSwidGltZS1zZXJpZXMiOnRydWV9LCJtYWNoaW5lIjp7IjE2IHZDUFUgMTI4R0IiOnRydWUsIjggdkNQVSA2NEdCIjp0cnVlLCJzZXJ2ZXJsZXNzIjp0cnVlLCIxNmFjdSI6dHJ1ZSwiYzZhLjR4bGFyZ2UsIDUwMGdiIGdwMiI6dHJ1ZSwiTCI6dHJ1ZSwiTSI6dHJ1ZSwiUyI6dHJ1ZSwiWFMiOnRydWUsImM2YS5tZXRhbCwgNTAwZ2IgZ3AyIjp0cnVlLCIxOTJHQiI6dHJ1ZSwiMjRHQiI6dHJ1ZSwiMzYwR0IiOnRydWUsIjQ4R0IiOnRydWUsIjcyMEdCIjp0cnVlLCI5NkdCIjp0cnVlLCIxNDMwR0IiOnRydWUsImRldiI6dHJ1ZSwiNzA4R0IiOnRydWUsImM1bi40eGxhcmdlLCA1MDBnYiBncDIiOnRydWUsImM1LjR4bGFyZ2UsIDUwMGdiIGdwMiI6dHJ1ZSwiYzZhLjR4bGFyZ2UsIDE1MDBnYiBncDIiOnRydWUsImNsb3VkIjp0cnVlLCJkYzIuOHhsYXJnZSI6dHJ1ZSwicmEzLjE2eGxhcmdlIjp0cnVlLCJyYTMuNHhsYXJnZSI6dHJ1ZSwicmEzLnhscGx1cyI6dHJ1ZSwiUzIiOnRydWUsIlMyNCI6dHJ1ZSwiMlhMIjp0cnVlLCIzWEwiOnRydWUsIjRYTCI6dHJ1ZSwiWEwiOnRydWUsIkwxIC0gMTZDUFUgMzJHQiI6dHJ1ZSwiYzZhLjR4bGFyZ2UsIDUwMGdiIGdwMyI6dHJ1ZSwiQW5hbHl0aWNzLTI1NkdCICg2NCB2Q29yZXMsIDI1NiBHQikiOnRydWV9LCJjbHVzdGVyX3NpemUiOnsiMSI6dHJ1ZSwiMiI6dHJ1ZSwiNCI6ZmFsc2UsIjgiOmZhbHNlLCIxNiI6ZmFsc2UsIjMyIjpmYWxzZSwiNjQiOmZhbHNlLCIxMjgiOmZhbHNlLCJzZXJ2ZXJsZXNzIjpmYWxzZSwiZGVkaWNhdGVkIjpmYWxzZX0sIm1ldHJpYyI6ImhvdCIsInF1ZXJpZXMiOlt0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlLHRydWUsdHJ1ZSx0cnVlXX0=)
 
@@ -211,9 +211,8 @@ It gives you free https connection to your local server and it's the default hos
 
 ## Can't query native Snowflake tables locally
 
-UniverSQL doesn't support querying native Snowflake tables as they're not accessible from outside of Snowflake. If you try to query a Snowflake table directly, it will return an error.
-For Catalog, [Snowflake](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-snowflake) and [Object Store](https://docs.snowflake.com/en/sql-reference/sql/create-iceberg-table-iceberg-files) catalogs are supported at the moment.
-For Data lake, S3 and GCS supported.
+UniverSQL doesn't support querying native Snowflake tables as they're not accessible from outside of Snowflake. 
+If you try to query a Snowflake table, Universql will run the query
 
  ```sql
     SELECT * FROM my_snowflake_table;
@@ -241,23 +240,25 @@ Dynamic tables are the recommended approach **if your native tables have more th
 SELECT * FROM table(to_query('select col1 from my_snowflake_table')) where col1 = 2
 ```
 
-UniverSQL doesn't actually require you to create the `to_query` function in your Snowflake database. When you use the proxy server, it will create a query plan to execute your Snowflake query first and map the result as an Arrow table in DuckDB. 
+When you use the proxy server, it will create a query plan to execute your Snowflake query first and map the result as an Arrow table in DuckDB. 
 This approach is recommended for hybrid execution where you need to query your native Snowflake tables on the fly. 
-
-## Only read-only `SELECT` queries can use local warehouse.
-
-Since UniverSQL uses SQLGlot for parsing Snowflake queries and it supports most of the Snowflake syntax. 
-* In the cases where we can't parse the query, we can't run the query locally. If you run into such case, please open an issue with the query. You can use `--passthrough` option when starting the proxy server to run the query in Snowflake if it can't be parsed. That way you can make sure your client applications don't break.
-* Anything except `SELECT` query is directly executed in your target Snowflake account. That way, your changes (including `CREATE TABLE`) are visible to all other Snowflake users.
 
 ## You need a tunnel service to connect from external tools
 If your local computer is not accessible from public network, (i.e. no external IP) external tools such as notebooks (Hex, Google Colab etc.) and BI tools (Tableau Online, Looker, Mode etc.) can't connect UniverSQL. 
-The workaround is to use a public tunnel service to expose your local server to the internet. Here are some options:
-
-* [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/) (recommended)
-* [ngrok](https://ngrok.com/)
+The workaround is to use a public tunnel service to expose your local server to the internet, please see `--tunnel` parameter to enable a tunnel service:
 
 ## No support for Snowflake SQL V2 API yet
 
 While SQL V1 API is internal, most Snowflake clients are using SQL V1 API, including JDBC, Python, ODBC etc. Feel free to help support [SQL V2 API](https://docs.snowflake.com/en/developer-guide/sql-api/intro) by contributing to the project. It should be easy enough as we already use Arrow interface for the V1 API, which is the interface for V2.
 
+## Support for syntax
+
+| **Syntax**                  | **Explanation**                                                                                                                                                                                                                                                       |                                                
+|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `SELECT`                    |                                                                                                   |
+| `CREATE ICEBERG TABLE`      | `AS SELECT` part is executed in DuckDB; metadata is synced to both external Iceberg Catalog (`--universql-catalog` if you enable it) and Snowflake as Iceberg table.                                                                                                  |
+| `INSERT`, `MERGE`, `DELETE` | Executed in DuckDB if `SELECT` references to temporary and Iceberg tables. Otherwise it runs on Snowflake. If the target is an Iceberg table, the external Iceberg Catalog (`--universql-catalog` if you enable it) and Snowflake's Iceberg metadata will be updated. |
+| `CREATE TABLE`              | Both the `AS SELECT` query and metadata management are handled natively by Snowflake.                                                                                                                                                                                 |
+| `CREATE TEMP TABLE`         | Temporary tables are fully managed by DuckDB, And DML and `AS SELECT` query on the table will be executed in DuckDB.                                                                                                                                                  |
+| `COPY INTO`                 | Executed in DuckDB if `SELECT` references to temporary and Iceberg tables. Otherwise it runs on Snowflake.                                                                                                                                                                              |
+| `SHOW`                      | Snowflake executes the queries. Note that a running warehouse is not needed for metadata queries so they're cheap.                                                                                                                                                    |

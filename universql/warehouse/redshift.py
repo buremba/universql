@@ -11,8 +11,8 @@ from universql.warehouse import ICatalog, Executor, Locations, Tables
 
 
 class RedshiftCatalog(ICatalog):
-    def __init__(self, context, query_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
-        super().__init__(context, query_id, credentials, compute, iceberg_catalog)
+    def __init__(self, context, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
+        super().__init__(context, session_id, credentials, compute, iceberg_catalog)
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         raise UnsupportedOperationException("BigQuery does not support registering tables")

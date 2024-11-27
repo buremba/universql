@@ -1,6 +1,7 @@
 import logging
 import os
 import typing
+from string import Template
 from typing import List
 
 import duckdb
@@ -29,21 +30,20 @@ logger = logging.getLogger("🐥")
 
 class DuckDBCatalog(ICatalog):
 
-    def register_locations(self, tables: Locations):
-        raise Exception("Unsupported operation")
-
-    def __init__(self, context: dict, query_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
-        super().__init__(context, query_id, credentials, compute, iceberg_catalog)
+    def __init__(self, context: dict, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
+        super().__init__(context, session_id, credentials, compute, iceberg_catalog)
         duck_config = {
             'max_memory': context.get('max_memory'),
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
+            'lock_configuration': 'true',
+            'enable_external_access': 'true',
         }
         if context.get('max_cache_size') != "0":
             duck_config['max_temp_directory_size'] = context.get('max_cache_size')
         self.account = parse_snowflake_account(context.get('account'))
         database_path = self.context.get('database_path')
         if database_path is not None:
-            database = os.path.join(database_path, f"{query_id}.duckdb")
+            database = Template(database_path).substitute({'session_id': session_id})
         else:
             database = ':memory:'
 
@@ -54,6 +54,9 @@ class DuckDBCatalog(ICatalog):
         DuckDBFunctions.register(self.duckdb)
         self.duckdb.install_extension("iceberg")
         self.duckdb.load_extension("iceberg")
+        motherduck_token = self.context.get('motherduck_token')
+        if motherduck_token is not None:
+            self.duckdb.execute("ATTACH 'md:'")
 
         fake_snowflake_conn = FakeSnowflakeConnection(self.duckdb, self.credentials.get('database'),
                                                       self.credentials.get('schema'),
@@ -62,6 +65,9 @@ class DuckDBCatalog(ICatalog):
         fake_snowflake_conn.schema_set = True
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
         self._register_data_lake(context)
+
+    def register_locations(self, tables: Locations):
+        raise Exception("Unsupported operation")
 
     def _register_data_lake(self, args: dict):
         if args.get('aws_profile') is not None or self.account.cloud == 'aws':
@@ -98,7 +104,7 @@ class DuckDBExecutor(Executor):
     def execute_raw(self, raw_query: str) -> None:
         try:
             logger.info(
-                f"[{self.catalog.query_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
+                f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
             self.catalog.emulator.execute(raw_query)
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
@@ -107,13 +113,16 @@ class DuckDBExecutor(Executor):
         except snowflake.connector.ProgrammingError as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.msg}")
 
-    def _get_db_path(self, db_name):
-        database_path = self.catalog.context.get('database_path')
-        if database_path is not None:
-            duckdb_path = os.path.join(database_path, f'{db_name}.duckdb')
+    def _register_db(self, db_name):
+        if self.catalog.context.get('motherduck_token') is not None:
+            return f"CREATE DATABASE IF NOT EXISTS {sqlglot.exp.parse_identifier(db_name).sql()}"
         else:
-            duckdb_path = ':memory:'
-        return duckdb_path
+            database_path = self.catalog.context.get('database_path')
+            if database_path is not None:
+                duckdb_path = os.path.join(database_path, f'{db_name}.duckdb')
+            else:
+                duckdb_path = ':memory:'
+            return f'ATTACH IF NOT EXISTS {duckdb_path} AS {sqlglot.exp.parse_identifier(db_name).sql()}'
 
     def _sync_catalog(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
         schemas = set((table.catalog or self.catalog.credentials.get('database'),
@@ -122,7 +131,7 @@ class DuckDBExecutor(Executor):
         databases = set(table[0] for table in schemas if table[0] != '')
 
         databases_sql = [
-            f"-- Compatibility layer for Snowflake \n ATTACH IF NOT EXISTS '{self._get_db_path(database)}' AS {sqlglot.exp.parse_identifier(database).sql()};" +
+            f"{self._register_db(database)};" +
             info_schema.creation_sql(sqlglot.exp.parse_identifier(database).sql()) +
             macros.creation_sql(sqlglot.exp.parse_identifier(database).sql())
             for
@@ -140,7 +149,7 @@ class DuckDBExecutor(Executor):
 
         if views_sql != "":
             logger.info(
-                f"[{self.catalog.query_id}] DuckDB environment is setting up:\n{prepend_to_lines(views_sql)}")
+                f"[{self.catalog.session_id}] DuckDB environment is setting up:\n{prepend_to_lines(views_sql)}")
             try:
                 self.catalog.duckdb.execute(views_sql)
             except duckdb.Error as e:

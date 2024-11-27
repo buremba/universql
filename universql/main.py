@@ -1,6 +1,7 @@
 import base64
 import logging
 import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -21,7 +22,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)s %(name)s %
 logger = logging.getLogger("🏠")
 
 
-@click.group()
+@click.group(context_settings={'max_content_width': shutil.get_terminal_size().columns - 10})
 @click.version_option(version="0.1")
 def cli():
     pass
@@ -78,10 +79,12 @@ def cli():
               help='DuckDB maximum cache used in local disk (default: 80% of total available disk)',
               envvar='CACHE_PERCENTAGE', )
 @click.option('--database-path', type=click.Path(exists=False, writable=True),
-              help='For persistent storage, provide a path to the DuckDB database file (default: :memory:)',
+              help='Optional DuckDB Path. (default: :memory:) For persistent storage, provide a path similar to `~/.universql/$session_id.duckdb`',
               envvar='DATABASE_PATH')
 @click.option('--tunnel', type=click.Choice(["cloudflared", "ngrok"]),
               help='Use tunnel for accessing server from public internet', envvar='TUNNEL')
+@click.option('--motherduck-token', type=str,
+              help='Motherduck token to enable', envvar='MOTHERDUCK_TOKEN')
 def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, metrics_port, tunnel, **kwargs):
     context__params = click.get_current_context().params
     auto_catalog_mode = account_catalog is None

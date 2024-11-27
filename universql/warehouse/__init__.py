@@ -39,9 +39,9 @@ class Executor(ABC):
 
 
 class ICatalog(ABC):
-    def __init__(self, context, query_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
+    def __init__(self, context, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
         self.context = context
-        self.query_id = query_id
+        self.session_id = session_id
         self.credentials = credentials
         self.compute = compute
         self.iceberg_catalog = iceberg_catalog

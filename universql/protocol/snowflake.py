@@ -83,13 +83,14 @@ async def login_request(request: Request) -> JSONResponse:
     if "role" not in credentials:
         credentials["role"] = params.get('roleName')
     if "schema" not in credentials:
-        credentials["schema"] = params.get('schemaName')
+        # TODO: support different default schemas stored in `SHOW PARAMETERS LIKE 'search_path'`
+        credentials["schema"] = params.get('schemaName') or "PUBLIC"
 
     token = str(uuid4())
     message = None
     try:
         session = UniverSQLSession(current_context, token, credentials, login_data.get("SESSION_PARAMETERS"))
-        sessions[session.token] = session
+        sessions[session.session_id] = session
     except QueryError as e:
         message = e.message
 
@@ -107,6 +108,7 @@ async def login_request(request: Request) -> JSONResponse:
             "data":
                 {
                     "token": token,
+                    # TODO: figure out how to generate safe token
                     "masterToken": token,
                     "parameters": parameters,
                     "sessionInfo": {f'{k}Name': v for k, v in credentials.items()},
@@ -140,8 +142,8 @@ async def delete_session(request: Request):
                 # most likely the server has started
                 return JSONResponse({"success": True})
 
-        del sessions[session.token]
-        logger.info(f"[{session.token}] Session closed, cleaning up resources.")
+        del sessions[session.session_id]
+        logger.info(f"[{session.session_id}] Session closed, cleaning up resources.")
         session.close()
         return JSONResponse({"success": True})
     return Response(status_code=404)
@@ -373,12 +375,6 @@ async def shutdown_event():
     for token, session in sessions.items():
         session.close()
 
-
-def log_exit(sig, frame):
-    kill_event.set()
-    logger.info("Received SIGTERM signal")
-
-
 @app.on_event("startup")
 async def startup_event():
     context = current_context
@@ -386,7 +382,6 @@ async def startup_event():
               v is not None and k not in ["host", "port"]}
     click.secho(yaml.dump(params).strip())
     signal.signal(signal.SIGINT, harakiri)
-    signal.signal(signal.SIGTERM, log_exit)
     host = context.get('host')
     tunnel = context.get('tunnel')
     port = context.get('port')

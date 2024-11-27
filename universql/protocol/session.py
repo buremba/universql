@@ -1,5 +1,6 @@
 import logging
 import time
+from string import Template
 from urllib.parse import urlparse, parse_qs
 
 import pyarrow
@@ -27,15 +28,15 @@ COMPUTES = {"duckdb": DuckDBCatalog, "local": DuckDBCatalog, "bigquery": BigQuer
 
 
 class UniverSQLSession:
-    def __init__(self, context, token, credentials: dict, session_parameters: dict):
+    def __init__(self, context, session_id, credentials: dict, session_parameters: dict):
         self.context = context
         self.credentials = credentials
         self.session_parameters = [{"name": item[0], "value": item[1]} for item in session_parameters.items()]
-        self.token = token
+        self.session_id = session_id
         self.compute_plan = parse_compute(self.credentials.get("warehouse"))
         first_catalog_compute = next(filter(lambda x: x.get("name") == 'snowflake', self.compute_plan), {}).get('args')
         self.iceberg_catalog = self._create_iceberg_catalog()
-        self.catalog = SnowflakeCatalog(context, self.token, self.credentials, first_catalog_compute or {},
+        self.catalog = SnowflakeCatalog(context, self.session_id, self.credentials, first_catalog_compute or {},
                                         self.iceberg_catalog)
         self.catalog_executor = self.catalog.executor()
         self.computes = {"snowflake": self.catalog_executor}
@@ -69,7 +70,8 @@ class UniverSQLSession:
             #     PY_CATALOG_IMPL: "universql.warehouse.duckdb.DuckDBIcebergCatalog",
             #     "uri": "duckdb:///:memory:",
             # }
-            database_path = self.context.get('database_path') or "universql"
+            database_path = Template(self.context.get('database_path') or "universql").substitute(
+                {"session_id": self.credentials.get('account')})
 
             catalog_props |= {
                 # pass duck conn
@@ -89,7 +91,7 @@ class UniverSQLSession:
                     table.parts[-2].this.lower() == 'information_schema'
                     or len(table.parts) > 2 and isinstance(table.parts[-3].this, str)
                     and table.parts[-3].this.lower() == "snowflake"):
-                logger.info(f"[{self.token}] Skipping local execution, found {table.sql()}")
+                logger.info(f"[{self.session_id}] Skipping local execution, found {table.sql()}")
                 return True
         return False
 
@@ -116,7 +118,7 @@ class UniverSQLSession:
                     last_executor = self.computes.get(compute_name)
                     if last_executor is None:
                         last_executor = COMPUTES[compute_name](self.context,
-                                                               self.token,
+                                                               self.session_id,
                                                                self.credentials,
                                                                compute,
                                                                self.iceberg_catalog).executor()
@@ -135,7 +137,7 @@ class UniverSQLSession:
                 raise last_error
 
             logger.info(
-                f"[{self.token}] {last_executor.get_query_log(query_duration)} 🚀 "
+                f"[{self.session_id}] {last_executor.get_query_log(query_duration)} 🚀 "
                 f"({get_friendly_time_since(start_time, performance_counter)})")
 
         return last_executor.get_as_table()
@@ -198,7 +200,7 @@ class UniverSQLSession:
 
     def do_query(self, raw_query: str) -> pyarrow.Table:
         start_time = time.perf_counter()
-        logger.info(f"[{self.token}] Transpiling query \n{prepend_to_lines(raw_query)}")
+        logger.info(f"[{self.session_id}] Transpiling query \n{prepend_to_lines(raw_query)}")
         self.processing = True
         try:
             return self._do_query(start_time, raw_query)
