@@ -35,7 +35,7 @@ class DuckDBCatalog(ICatalog):
         duck_config = {
             'max_memory': context.get('max_memory'),
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
-            'lock_configuration': 'true',
+            # 'lock_configuration': 'true',
             'enable_external_access': 'true',
         }
         if context.get('max_cache_size') != "0":
