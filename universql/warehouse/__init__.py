@@ -11,7 +11,35 @@ Locations = typing.Dict[sqlglot.exp.Table, sqlglot.exp.Expression | None]
 Tables = typing.Dict[sqlglot.exp.Table, pyiceberg.table.Table | None]
 
 
+class ICatalog(ABC):
+    def __init__(self, context, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
+        self.context = context
+        self.session_id = session_id
+        self.credentials = credentials
+        self.compute = compute
+        self.iceberg_catalog = iceberg_catalog
+
+    def create(self, ast: sqlglot.exp.Table, table: pyarrow.Table):
+        pass
+
+    @abstractmethod
+    def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
+        pass
+
+    @abstractmethod
+    def register_locations(self, tables: Locations):
+        pass
+
+    @abstractmethod
+    def executor(self) -> "Executor":
+        pass
+
+
 class Executor(ABC):
+
+    def __init__(self, catalog: ICatalog):
+        self.catalog = catalog
+
     @abstractmethod
     def supports(self, ast: sqlglot.exp.Expression) -> bool:
         pass
@@ -35,28 +63,4 @@ class Executor(ABC):
 
     @abstractmethod
     def close(self):
-        pass
-
-
-class ICatalog(ABC):
-    def __init__(self, context, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
-        self.context = context
-        self.session_id = session_id
-        self.credentials = credentials
-        self.compute = compute
-        self.iceberg_catalog = iceberg_catalog
-
-    def create(self, ast: sqlglot.exp.Table, table: pyarrow.Table):
-        pass
-
-    @abstractmethod
-    def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
-        pass
-
-    @abstractmethod
-    def register_locations(self, tables: Locations):
-        pass
-
-    @abstractmethod
-    def executor(self) -> Executor:
         pass

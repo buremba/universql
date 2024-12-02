@@ -42,7 +42,7 @@ def cli():
               default=5675,
               envvar='METRICS_PORT',
               type=str)
-@click.option('--account-catalog', type=click.Choice([e.value for e in Catalog]),
+@click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
               help='Type of the Snowflake account. Automatically detected from the account if not provided.')
 @click.option('--universql-catalog', type=str,
               help='The external catalog that will be used for Iceberg tables. (default: duckdb:///:memory:)',
@@ -85,9 +85,9 @@ def cli():
               help='Use tunnel for accessing server from public internet', envvar='TUNNEL')
 @click.option('--motherduck-token', type=str,
               help='Motherduck token to enable', envvar='MOTHERDUCK_TOKEN')
-def snowflake(host, port, ssl_keyfile, ssl_certfile, account, account_catalog, metrics_port, tunnel, **kwargs):
+def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, metrics_port, tunnel, **kwargs):
     context__params = click.get_current_context().params
-    auto_catalog_mode = account_catalog is None
+    auto_catalog_mode = catalog is None
     if auto_catalog_mode:
         try:
             polaris_server_check = requests.get(

@@ -72,8 +72,7 @@ class SnowflakeCatalog(ICatalog):
         start_time = time.perf_counter()
         queries = []
         for table, location in tables.items():
-            if location is not None:
-                queries.append(table.sql(dialect='snowflake'))
+            queries.append(table.sql(dialect='snowflake'))
         final_query = '\n'.join(queries)
         if final_query:
             logger.info(f"[{self.session_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
@@ -175,7 +174,7 @@ class SnowflakeCatalog(ICatalog):
 class SnowflakeExecutor(Executor):
 
     def __init__(self, catalog: SnowflakeCatalog):
-        self.catalog = catalog
+        super().__init__(catalog)
 
     def supports(self, ast: sqlglot.exp.Expression) -> bool:
         return True

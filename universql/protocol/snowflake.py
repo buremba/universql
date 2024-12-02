@@ -346,7 +346,7 @@ def watch_tower(cache_directory, **kwargs):
                         f"| System: {cpu_percent} {memory_percent} [Disk: {disk_info}] ")
 
 
-thread = Thread(target=watch_tower, kwargs=(current_context))
+thread = Thread(target=watch_tower, kwargs=current_context)
 thread.daemon = False
 thread.start()
 
@@ -381,7 +381,10 @@ async def startup_event():
     params = {k: v for k, v in context.items() if
               v is not None and k not in ["host", "port"]}
     click.secho(yaml.dump(params).strip())
-    signal.signal(signal.SIGINT, harakiri)
+    try:
+        signal.signal(signal.SIGINT, harakiri)
+    except Exception as e:
+        logger.warning("Failed to set signal handler for SIGINT: %s", str(e))
     host = context.get('host')
     tunnel = context.get('tunnel')
     port = context.get('port')

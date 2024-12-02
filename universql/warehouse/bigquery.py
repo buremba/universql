@@ -17,9 +17,8 @@ from universql.protocol.utils import get_field_for_snowflake, arrow_to_snowflake
 
 class BigQueryIcebergExecutor(Executor):
 
-    def __init__(self, query_id: str, tables):
-        self.query_id = query_id
-        self.tables = tables
+    def __init__(self, catalog: "BigQueryCatalog"):
+        super().__init__(catalog)
         self.query = self.result = None
         self.client = bigquery.Client()
 
@@ -89,7 +88,7 @@ class BigQueryCatalog(ICatalog):
         self.tables = None
 
     def executor(self) -> Executor:
-        return BigQueryIcebergExecutor(self.session_id, self.tables)
+        return BigQueryIcebergExecutor(self)
 
     def register_locations(self, tables: Locations):
         self.tables = tables

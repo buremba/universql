@@ -15,8 +15,8 @@ from sqlglot.expressions import Create, Identifier, DDL, Query
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
-    prepend_to_lines, parse_compute, QueryError
-from universql.warehouse import Executor, Tables
+    prepend_to_lines, parse_compute, QueryError, fill_qualifier
+from universql.warehouse import Executor, Tables, ICatalog
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
@@ -43,7 +43,6 @@ class UniverSQLSession:
 
         self.last_executor_cursor = None
         self.processing = False
-        self.session_relations = set()
 
     def _create_iceberg_catalog(self):
         iceberg_catalog = self.context.get('universql_catalog')
@@ -77,6 +76,7 @@ class UniverSQLSession:
                 # pass duck conn
                 PY_CATALOG_IMPL: "pyiceberg.catalog.sql.SqlCatalog",
                 "uri": f"sqlite:///{database_path}.metadata.sqlite",
+                "namespace": "main"
             }
         return load_catalog(catalog_name, **catalog_props)
 
@@ -142,14 +142,6 @@ class UniverSQLSession:
 
         return last_executor.get_as_table()
 
-    def _fill_qualifier(self, table: sqlglot.exp.Table):
-        catalog = sqlglot.exp.Identifier(this=self.catalog.credentials.get('database'), quoted=True) \
-            if table.args.get('catalog') is None else table.args.get('catalog')
-        db = sqlglot.exp.Identifier(this=self.catalog.credentials.get('schema'), quoted=True) \
-            if table.args.get('db') is None else table.args.get('db')
-        new_table = sqlglot.exp.Table(catalog=catalog, db=db, this=table.this)
-        return new_table
-
     def _find_tables(self, ast: sqlglot.exp.Expression, cte_aliases=None):
         if cte_aliases is None:
             cte_aliases = set()
@@ -160,7 +152,7 @@ class UniverSQLSession:
                         cte_aliases.add(cte.alias)
             if isinstance(expression, sqlglot.exp.Table) and isinstance(expression.this, Identifier):
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
-                    yield self._fill_qualifier(expression), cte_aliases
+                    yield fill_qualifier(expression, self.credentials), cte_aliases
 
     def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
         if (ast is not None and alternative_executor.supports(ast) and
@@ -179,14 +171,11 @@ class UniverSQLSession:
             if not must_run_on_catalog:
                 op_name = alternative_executor.__class__.__name__
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
-                    locations = self.get_table_paths(tables_list)
+                    locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     new_locations = alternative_executor.execute(ast, locations)
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
-                        for table, destination in new_locations.items():
-                            if destination is None:
-                                self.session_relations.add(self._fill_qualifier(table))
                         self.catalog.register_locations(new_locations)
                 return alternative_executor
 
@@ -210,16 +199,16 @@ class UniverSQLSession:
     def close(self):
         self.catalog_executor.close()
 
-    def get_table_paths(self, tables: list[sqlglot.exp.Table]) -> Tables:
+    def get_table_paths_from_catalog(self, alternative_catalog: ICatalog, tables: list[sqlglot.exp.Table]) -> Tables:
         not_existed = []
         cached_tables = {}
-        namespace = self.iceberg_catalog.properties.get('namespace', "main")
+        namespace = self.iceberg_catalog.properties.get('namespace')
 
         for table in tables:
-            full_qualifier = self._fill_qualifier(table)
-            if full_qualifier in self.session_relations:
+            full_qualifier_ = fill_qualifier(table, self.credentials)
+            native_executor_exists = full_qualifier_ in alternative_catalog.get_table_paths([full_qualifier_])
+            if native_executor_exists:
                 continue
-
             try:
                 table_ref = table.sql(dialect="snowflake")
                 logger.info(f"Looking up table {table_ref} in namespace {namespace}")

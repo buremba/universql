@@ -25,6 +25,9 @@ class RedshiftCatalog(ICatalog):
 
 
 class RedshiftExecutor(Executor):
+    def __init__(self, catalog: RedshiftCatalog):
+        super().__init__(catalog)
+
     def supports(self, ast: sqlglot.exp.Expression) -> bool:
         return isinstance(ast, Select) or isinstance(ast, Insert) or isinstance(ast, Create)
 
