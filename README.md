@@ -13,6 +13,8 @@ UniverSQL relies on Snowflake for access control and data catalog so it's comple
 
 **[Watch on YouTube](https://www.youtube.com/watch?v=s1fpSEE-pAc)**
 
+[![Launch GitHub Codespace](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=buremba/universql)
+
 When you query an Iceberg table on Snowflake for the first time, UniverSQL looks up Iceberg metadata from Snowflake, (metadata operation, no compute cost) re-writes the query for DuckDB dialect, 
 sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) that connects to your data lake with [your cloud credentials](#install-data-lake-sdks) and caches the Parquet files and executes the query on DuckDB.
 

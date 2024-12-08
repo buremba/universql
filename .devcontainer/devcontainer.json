@@ -1,0 +1,26 @@
+{
+  "name": "universql",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "forwardPorts": [
+    8084
+  ],
+  "postCreateCommand": "poetry install",
+  "portsAttributes": {
+    "8084": {
+      "label": "universql-app",
+      "protocol": "https"
+    }
+  },
+  "remoteEnv": {
+    "SERVER_HOST": "0.0.0.0"
+  },
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        ".devcontainer/README.md"
+      ]
+    }
+  }
+}

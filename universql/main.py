@@ -32,7 +32,7 @@ def cli():
     epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
 @click.option('--account',
               help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
-              prompt='Account ID', envvar='SNOWFLAKE_ACCOUNT')
+              prompt='Account ID (example: rt21601.europe-west2.gcp)', envvar='SNOWFLAKE_ACCOUNT')
 @click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, envvar='SERVER_PORT', type=int)
 @click.option('--host', help='Host for Snowflake proxy server (default: localhostcomputing.com)',
               default=LOCALHOSTCOMPUTING_COM,
