@@ -6,7 +6,7 @@
   "forwardPorts": [
     8084
   ],
-  "postCreateCommand": "poetry install && echo 'poetry run universql snowflake'",
+  "postCreateCommand": "poetry install && echo 'poetry run universql snowflake --host 0.0.0.0'",
   "customizations": {
     "vscode": {
       "extensions": [
