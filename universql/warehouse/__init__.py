@@ -1,6 +1,6 @@
 import typing
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, T
 
 import pyiceberg.table
 import sqlglot
@@ -35,9 +35,9 @@ class ICatalog(ABC):
         pass
 
 
-class Executor(ABC):
+class Executor(ABC, typing.Generic[T]):
 
-    def __init__(self, catalog: ICatalog):
+    def __init__(self, catalog: T):
         self.catalog = catalog
 
     @abstractmethod

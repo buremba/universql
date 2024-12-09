@@ -74,7 +74,8 @@ class DuckDBCatalog(ICatalog):
 
     def _get_table_location(self, table: sqlglot.exp.Table) -> typing.Optional[TableType]:
         def get_identifier(is_quoted):
-            return '?' if is_quoted else "upper(?)"
+            # return '?' if is_quoted else "upper(?)"
+            return "upper(?)"
 
         database = get_identifier(table.parts[0].quoted)
         schema = get_identifier(table.parts[1].quoted)
@@ -82,7 +83,7 @@ class DuckDBCatalog(ICatalog):
         table_relation = self.duckdb.sql(f"""
             with selected_table as (
               select * from {table.parts[0].sql()}.information_schema.tables 
-                where table_catalog = {database} and table_schema = {schema} and table_name = {table_name} 
+                where upper(table_catalog) = {database} and upper(table_schema) = {schema} and upper(table_name) = {table_name} 
               ) 
             select sql from selected_table 
             left join duckdb_views() on 
@@ -121,9 +122,8 @@ class DuckDBCatalog(ICatalog):
 
 class DuckDBExecutor(Executor):
 
-    def __init__(self, duckdb: DuckDBCatalog):
-        super().__init__(duckdb)
-        self.duckdb = duckdb
+    def __init__(self, catalog: DuckDBCatalog):
+        super().__init__(catalog)
 
     def get_query_log(self, total_duration) -> str:
         if in_lambda:
@@ -201,7 +201,6 @@ class DuckDBExecutor(Executor):
                 self.catalog.duckdb.execute(views_sql)
             except duckdb.Error as e:
                 raise QueryError(f"Unable to sync DuckDB catalog. {e.args}")
-                pass
 
         final_ast = (simplify(ast)
                      .transform(self.fix_snowflake_to_duckdb_types))
@@ -303,7 +302,8 @@ class DuckDBExecutor(Executor):
                             self.execute_raw(ast.sql(dialect="duckdb"))
                             return None
                         else:
-                            raise QueryError("DuckDB can't create native Snowflake tables, please use Iceberg or External tables")
+                            raise QueryError(
+                                "DuckDB can't create native Snowflake tables, please use Iceberg or External tables")
                 elif ast.kind == 'VIEW':
                     duckdb_query = self._sync_catalog(ast, tables).sql(dialect="duckdb")
                     self.execute_raw(duckdb_query)
@@ -311,7 +311,7 @@ class DuckDBExecutor(Executor):
                     if not is_temp:
                         return {destination_table: ast.expression}
             elif isinstance(ast, Insert):
-                table_type = self.duckdb._get_table_location(destination_table)
+                table_type = self.catalog._get_table_location(destination_table)
                 if table_type == TableType.ICEBERG:
                     namespace = self.catalog.iceberg_catalog.properties.get('namespace')
                     try:

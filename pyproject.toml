@@ -16,12 +16,12 @@ fastapi = "^0.111.0"
 uvicorn = "^0.30.1"
 snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], version = "^3.12.0"}
 # same with fakesnow
-sqlglot = "~25.24.1"
+sqlglot = "~25.34.0"
 fsspec = "^2024.6.1"
 click = ">7"
 pyiceberg = {extras = ["glue", "sql-sqlite"], version = "^0.7.1"}
 #pyiceberg = { git = "https://github.com/buremba/iceberg-python", branch = "main", develop = true, extras = ["glue"] }
-fakesnow = "^0.9.26"
+fakesnow = "^0.9.27"
 humanize = "^4.10.0"
 mangum = "^0.19.0"
 pyarrow = "^17.0.0"

@@ -6,7 +6,7 @@
   "forwardPorts": [
     8084
   ],
-  "postCreateCommand": "poetry install",
+  "postCreateCommand": "poetry install && gh codespace ports visibility 8084:public -c $CODESPACE_NAME",
   "portsAttributes": {
     "8084": {
       "label": "universql-app",
