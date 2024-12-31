@@ -47,7 +47,7 @@ st-link-analysis = "^0.3.0"
 shandy-sqlfmt = "^0.17.0"
 streamlit-ace = "^0.1.1"
 
-[tool.poetry.group.test.dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest-randomly = "^3.15.0"
 pytest = "^8.2.0"
 
