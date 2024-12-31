@@ -121,7 +121,8 @@ class UniverSQLSession:
                                                                self.session_id,
                                                                self.credentials,
                                                                compute,
-                                                               self.iceberg_catalog).executor()
+                                                               self.iceberg_catalog,
+                                                               self.catalog).executor()
                         self.computes[compute_name] = last_executor
                     try:
                         last_executor = self.perform_query(last_executor, raw_query, ast=ast)

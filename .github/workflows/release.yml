@@ -46,6 +46,9 @@ jobs:
           poetry version patch &&
           version=$(poetry version | awk '{ print $2 }') &&
           poetry version $version.dev.$(date +%s)
+      - name: Test project
+        run: |
+          poetry run pytest tests/integration/*
       - name: Build package
         run: |
           poetry build --ansi

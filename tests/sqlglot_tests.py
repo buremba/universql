@@ -7,7 +7,9 @@ import sqlglot
 from google.cloud import bigquery
 from google.cloud.bigquery import QueryJobConfig
 
-one = sqlglot.parse_one("create table if not exists test as select 1", read="snowflake")
+# one = sqlglot.parse_one("create table if not exists test as select 1", read="snowflake")
+one = sqlglot.parse_one("select * from @test", read="snowflake")
+one = sqlglot.parse_one("select * from 's3://test'", read="snowflake")
 # one = sqlglot.parse_one("select to_variant(test) as test from (select 1)", read="snowflake")
 # one = sqlglot.parse_one("create table test as select to_variant(test) as test from (select 1)", read="snowflake")
 

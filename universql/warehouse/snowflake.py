@@ -90,7 +90,10 @@ class SnowflakeCatalog(ICatalog):
 
     def _get_ref(self, table_information) -> pyiceberg.table.Table:
         location = table_information.get('metadataLocation')
-        return StaticTable.from_metadata(location, self.iceberg_catalog.properties)
+        try:
+            return StaticTable.from_metadata(location, self.iceberg_catalog.properties)
+        except PermissionError as e:
+            raise QueryError(f"Unable to access Iceberg metadata {location}. Cause: \n" + str(e))
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         if len(tables) == 0:
@@ -107,18 +110,28 @@ class SnowflakeCatalog(ICatalog):
             err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: \n {e.msg} \n{final_query}"
             raise QueryError(err_message, e.sqlstate)
 
-    # def get_volume_lake_path(self, volume : str) -> str:
-    #     volume_location = pd.read_sql("DESC EXTERNAL VOLUME identifier(%s)", self.connection, params=[volume])
-    #     active_storage = duckdb.sql("""select property_value from volume_location
-    #                 where parent_property = 'STORAGE_LOCATIONS' and property = 'ACTIVE'
-    #                """).fetchall()[0][0]
-    #     all_properties = duckdb.execute("""select property_value from volume_location
-    #             where parent_property = 'STORAGE_LOCATIONS' and property like 'STORAGE_LOCATION_%'""").fetchall()
-    #     for properties in all_properties:
-    #         loads = json.loads(properties[0])
-    #         if loads.get('NAME') == active_storage:
-    #             volume_mapping[volume] = loads
-    #             break
+    def get_volume_lake_path(self, volume: str) -> str:
+        cursor = self.cursor()
+        cursor.execute("DESC EXTERNAL VOLUME identifier(%s)", [volume])
+        volume_location = cursor.fetchall()
+
+        # Find the active storage location name
+        active_storage_name = next((item[3] for item in volume_location if item[1] == 'ACTIVE' and item[0] == 'STORAGE_LOCATIONS'), None)
+
+        # Extract the STORAGE_BASE_URL from the corresponding storage location
+        storage_base_url = None
+        if active_storage_name:
+            for item in volume_location:
+                if item[1].startswith('STORAGE_LOCATION_'):
+                    storage_data = json.loads(item[3])
+                    if storage_data.get('NAME') == active_storage_name:
+                        storage_base_url = storage_data.get('STORAGE_BASE_URL')
+                        break
+
+        if storage_base_url is None:
+            raise QueryError(f"Unable to find storage location for volume {volume}.")
+
+        return storage_base_url
     # def find_table_location(self, database: str, schema: str, table_name: str, lazy_check: bool = True) -> str:
     #     table_location = self.databases.get(database, {}).get(schema, {}).get(table_name)
     #     if table_location is None:

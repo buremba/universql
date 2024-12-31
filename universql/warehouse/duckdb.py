@@ -36,8 +36,8 @@ class TableType(Enum):
 
 class DuckDBCatalog(ICatalog):
 
-    def __init__(self, context: dict, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
-        super().__init__(context, session_id, credentials, compute, iceberg_catalog)
+    def __init__(self, context: dict, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog, base_catalog: ICatalog):
+        super().__init__(context, session_id, credentials, compute, iceberg_catalog, base_catalog)
         duck_config = {
             'max_memory': context.get('max_memory'),
             'temp_directory': os.path.join(context.get('cache_directory'), "duckdb-staging"),
@@ -80,17 +80,21 @@ class DuckDBCatalog(ICatalog):
         database = get_identifier(table.parts[0].quoted)
         schema = get_identifier(table.parts[1].quoted)
         table_name = get_identifier(table.parts[2].quoted)
-        table_relation = self.duckdb.sql(f"""
-            with selected_table as (
-              select * from {table.parts[0].sql()}.information_schema.tables 
-                where upper(table_catalog) = {database} and upper(table_schema) = {schema} and upper(table_name) = {table_name} 
-              ) 
-            select sql from selected_table 
-            left join duckdb_views() on 
-                view_name = selected_table.table_name and
-                selected_table.table_type = 'VIEW' and internal = false
-        """, params=(table.catalog, table.db, table.name))
-        table_exists = table_relation.fetchone()
+        try:
+            table_relation = self.duckdb.sql(f"""
+                with selected_table as (
+                  select * from {table.parts[0].sql()}.information_schema.tables 
+                    where upper(table_catalog) = {database} and upper(table_schema) = {schema} and upper(table_name) = {table_name} 
+                  ) 
+                select sql from selected_table 
+                left join duckdb_views() on 
+                    view_name = selected_table.table_name and
+                    selected_table.table_type = 'VIEW' and internal = false
+            """, params=(table.catalog, table.db, table.name))
+            table_exists = table_relation.fetchone()
+        except duckdb.BinderException as e:
+            return None
+
         if table_exists is None:
             return None
         if table_exists[0] is None:
@@ -254,7 +258,10 @@ class DuckDBExecutor(Executor):
                             database_location = database_location.rstrip("/")
                             table_location = str(os.path.join(database_location, base_location))
                         elif base_location is not None:
-                            table_location = str(os.path.join(raw_table, base_location))
+                            external_volume = self._get_property(ast, 'external_volume')
+                            lake_path = self.catalog.base_catalog.get_volume_lake_path(external_volume)
+                            # resolve external volume location
+                            table_location = str(os.path.join(lake_path, base_location))
                         else:
                             table_location = None
                         if if_exists:
