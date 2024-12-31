@@ -46,12 +46,12 @@ jobs:
           poetry version patch &&
           version=$(poetry version | awk '{ print $2 }') &&
           poetry version $version.dev.$(date +%s)
-      - name: Test project
-        run: |
-          poetry run pytest tests/integration/*
       - name: Build package
         run: |
           poetry build --ansi
+      - name: Test project
+        run: |
+          poetry run pytest tests/integration/*
       - name: Publish package on PyPI
 #        if: steps.check-version.outputs.tag
         uses: pypa/gh-action-pypi-publish@v1.8.3
