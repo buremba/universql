@@ -12,8 +12,6 @@ from snowflake.connector.config_manager import CONFIG_MANAGER
 
 from universql.util import LOCALHOSTCOMPUTING_COM
 
-
-
 # Configuration using separate connection strings for direct and proxy connections
 # export SNOWFLAKE_CONNECTION_STRING="account=xxx;user=xxx;password=xxx;warehouse=xxx;database=xxx;schema=xxx"
 # export UNIVERSQL_CONNECTION_STRING="warehouse=xxx"
@@ -88,6 +86,8 @@ def snowflake_connection() -> Generator:
 def universql_connection(warehouse: str) -> SnowflakeConnection:
     """Create a connection through UniversQL proxy."""
     connections = CONFIG_MANAGER["connections"]
+    if SNOWFLAKE_CONNECTION_NAME not in connections:
+        raise pytest.fail(f"Snowflake connection '{SNOWFLAKE_CONNECTION_NAME}' not found in config")
     connection = connections[SNOWFLAKE_CONNECTION_NAME]
     from universql.main import snowflake
     with socketserver.TCPServer(("localhost", 0), None) as s:
