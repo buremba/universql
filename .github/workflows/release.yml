@@ -50,7 +50,7 @@ jobs:
           poetry build --ansi
       - name: Test project
         env:
-          SNOWFLAKE_CONNECTIONS: ${{ secrets.SNOWFLAKE_CONNECTIONS }}
+          SNOWFLAKE_CONNECTIONS: ${{ secrets.SNOWFLAKE_CONNECTIONS_BASE64 }}
         run: |
           mkdir -p ~/.snowflake
           echo $SNOWFLAKE_CONNECTIONS | base64 --decode > ~/.snowflake/connections.toml
