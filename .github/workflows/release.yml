@@ -27,6 +27,7 @@ jobs:
         run: |
           pip install --constraint=.github/workflows/constraints.txt poetry
           poetry --version
+          poetry install
       - name: Check if there is a parent commit
         id: check-parent-commit
         run: |
@@ -49,8 +50,8 @@ jobs:
           poetry build --ansi
       - name: Test project
         run: |
-          mkdir -p ~/.snowflake && printf "%s" "${{ secrets.SNOWFLAKE_CONNECTIONS }}" > ~/.snowflake/connections.toml 
-          poetry install
+          mkdir -p ~/.snowflake
+          printf "%s\n" "${{ secrets.SNOWFLAKE_CONNECTIONS }}" > ~/.snowflake/connections.toml
           poetry run pytest tests/integration/*
       - name: Publish package on PyPI
 #        if: steps.check-version.outputs.tag
