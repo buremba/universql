@@ -49,9 +49,11 @@ jobs:
         run: |
           poetry build --ansi
       - name: Test project
+        env:
+          SNOWFLAKE_CONNECTIONS: ${{ secrets.SNOWFLAKE_CONNECTIONS }}
         run: |
           mkdir -p ~/.snowflake
-          printf "%s\n" "${{ secrets.SNOWFLAKE_CONNECTIONS }}" > ~/.snowflake/connections.toml
+          echo $SNOWFLAKE_CONNECTIONS | base64 --decode > ~/.snowflake/connections.toml
           poetry run pytest tests/integration/*
       - name: Publish package on PyPI
 #        if: steps.check-version.outputs.tag
