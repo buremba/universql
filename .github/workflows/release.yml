@@ -51,7 +51,7 @@ jobs:
           poetry build --ansi
       - name: Test project
         run: |
-          poetry run pytest tests/integration/*
+          poetry install && poetry run pytest tests/integration/*
       - name: Publish package on PyPI
 #        if: steps.check-version.outputs.tag
         uses: pypa/gh-action-pypi-publish@v1.8.3
