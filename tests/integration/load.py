@@ -5,7 +5,7 @@ from tests.integration.utils import execute_query, universql_connection, SIMPLE_
 
 class TestCreate:
     def test_create_iceberg_table(self):
-        with universql_connection("local()") as conn:
+        with universql_connection(warehouse="local()") as conn:
             universql_result = execute_query(conn, f"""
             CREATE OR REPLACE ICEBERG TABLE test_table
             external_volume = iceberg_external_volume
@@ -16,7 +16,7 @@ class TestCreate:
             print(universql_result)
 
     def test_create_temp_table(self):
-        with universql_connection("local()") as conn:
+        with universql_connection(warehouse="local()") as conn:
             execute_query(conn, f"CREATE TEMP TABLE test_table AS {SIMPLE_QUERY}")
             execute_query(conn, "SELECT * FROM test_table")
 

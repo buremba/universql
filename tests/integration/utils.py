@@ -83,7 +83,7 @@ def snowflake_connection() -> Generator:
     conn.close()
 
 
-def universql_connection(warehouse: str) -> SnowflakeConnection:
+def universql_connection(**properties) -> SnowflakeConnection:
     """Create a connection through UniversQL proxy."""
     connections = CONFIG_MANAGER["connections"]
     if SNOWFLAKE_CONNECTION_NAME not in connections:
@@ -109,7 +109,7 @@ def universql_connection(warehouse: str) -> SnowflakeConnection:
     thread.daemon = True
     thread.start()
     # with runner.isolated_filesystem():
-    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port, "warehouse": warehouse}
+    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
 
     return snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
 

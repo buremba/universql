@@ -1,23 +1,30 @@
 import typing
 from abc import ABC, abstractmethod
-from typing import List, T
+from typing import List
 
 import pyiceberg.table
 import sqlglot
 from pyiceberg.catalog import Catalog
 from snowflake.connector.options import pyarrow
 
+
 Locations = typing.Dict[sqlglot.exp.Table, sqlglot.exp.Expression | None]
 Tables = typing.Dict[sqlglot.exp.Table, pyiceberg.table.Table | None]
 
 
 class ICatalog(ABC):
-    def __init__(self, context, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
+    def __init__(self, context,
+                 session_id: str,
+                 credentials: dict,
+                 compute: dict,
+                 iceberg_catalog: Catalog,
+                 base_catalog: "universql.warehouse.snowflake.SnowflakeCatalog" = None):
         self.context = context
         self.session_id = session_id
         self.credentials = credentials
         self.compute = compute
         self.iceberg_catalog = iceberg_catalog
+        self.base_catalog = base_catalog
 
     def create(self, ast: sqlglot.exp.Table, table: pyarrow.Table):
         pass
@@ -33,6 +40,9 @@ class ICatalog(ABC):
     @abstractmethod
     def executor(self) -> "Executor":
         pass
+
+
+T = typing.TypeVar('T', bound=ICatalog)
 
 
 class Executor(ABC, typing.Generic[T]):
