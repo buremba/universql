@@ -49,7 +49,7 @@ jobs:
           poetry build --ansi
       - name: Test project
         run: |
-          printf "%s" "${{ secrets.SNOWFLAKE_CONNECTIONS }}" > ~/.snowflake/connections.toml 
+          mkdir -p ~/.snowflake && printf "%s" "${{ secrets.SNOWFLAKE_CONNECTIONS }}" > ~/.snowflake/connections.toml 
           poetry install
           poetry run pytest tests/integration/*
       - name: Publish package on PyPI
