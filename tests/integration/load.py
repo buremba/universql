@@ -3,7 +3,6 @@ import pytest
 from tests.integration.utils import execute_query, universql_connection, SIMPLE_QUERY
 
 
-@pytest.mark.integration
 class TestCreate:
     def test_create_iceberg_table(self):
         with universql_connection("local()") as conn:

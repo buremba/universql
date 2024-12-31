@@ -3,7 +3,6 @@ import pytest
 from tests.integration.utils import execute_query, universql_connection, SIMPLE_QUERY, ALL_COLUMNS_QUERY
 
 
-@pytest.mark.integration
 class TestSelect:
     def test_simple_select(self):
         with universql_connection("local()") as conn:

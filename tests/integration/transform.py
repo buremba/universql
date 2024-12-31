@@ -3,7 +3,6 @@ import pytest
 from tests.integration.utils import execute_query, universql_connection, SIMPLE_QUERY
 
 
-@pytest.mark.integration
 class TestTransform:
     @pytest.mark.skip(reason="not implemented")
     def test_insert_table(self):
