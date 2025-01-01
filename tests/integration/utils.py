@@ -9,6 +9,7 @@ import pytest
 from click.testing import CliRunner
 from snowflake.connector import connect as snowflake_connect, SnowflakeConnection
 from snowflake.connector.config_manager import CONFIG_MANAGER
+from snowflake.connector.constants import CONNECTIONS_FILE
 
 from universql.util import LOCALHOSTCOMPUTING_COM
 
@@ -85,6 +86,10 @@ def snowflake_connection() -> Generator:
 
 def universql_connection(**properties) -> SnowflakeConnection:
     """Create a connection through UniversQL proxy."""
+    print(f"Reading {CONNECTIONS_FILE} with {properties}")
+    with open(CONNECTIONS_FILE, 'r') as file:
+        connections_content = file.read()
+        print(connections_content)
     connections = CONFIG_MANAGER["connections"]
     if SNOWFLAKE_CONNECTION_NAME not in connections:
         raise pytest.fail(f"Snowflake connection '{SNOWFLAKE_CONNECTION_NAME}' not found in config")

@@ -2,9 +2,10 @@ from typing import Union, Optional, Set, List
 
 import duckdb
 import pyarrow
+import sqlglot
 from pyiceberg.catalog import WAREHOUSE_LOCATION, Catalog, PropertiesUpdateSummary
 from pyiceberg.catalog.sql import SqlCatalog
-from pyiceberg.exceptions import NoSuchNamespaceError, TableAlreadyExistsError
+from pyiceberg.exceptions import NoSuchNamespaceError, TableAlreadyExistsError, NoSuchIcebergTableError
 from pyiceberg.io import PY_IO_IMPL, load_file_io
 from pyiceberg.partitioning import PartitionSpec, UNPARTITIONED_PARTITION_SPEC
 from pyiceberg.schema import Schema
@@ -12,6 +13,7 @@ from pyiceberg.table import SortOrder, UNSORTED_SORT_ORDER, CommitTableRequest, 
     CreateTableTransaction, StaticTable
 from pyiceberg.table.metadata import new_table_metadata
 from pyiceberg.typedef import Identifier, Properties, EMPTY_DICT
+from sqlglot.optimizer import build_scope
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, s3
 
@@ -44,7 +46,9 @@ class DuckDBCatalog(Catalog):
         super().__init__(name, **properties)
         self.conn = conn
         self.conn.install_extension("iceberg")
+        self.conn.install_extension("substrait")
         self.conn.load_extension("iceberg")
+        self.conn.load_extension("substrait")
 
     def create_table(self, identifier: Union[str, Identifier], schema: Union[Schema, "pa.Schema"],
                      location: Optional[str] = None, partition_spec: PartitionSpec = UNPARTITIONED_PARTITION_SPEC,
@@ -108,10 +112,16 @@ class DuckDBCatalog(Catalog):
         """, params=identifier)
         create_view_sql = table_relation.fetchone()
         if create_view_sql is None:
-            raise NoSuchNamespaceError(f"Table does not exist: {table}")
+            raise NoSuchIcebergTableError(f"Table does not exist: {table}")
 
-        self.conn.get_substrait_json(create_view_sql[0])
+        parsed_query = sqlglot.parse_one(create_view_sql[0], dialect="duckdb")
 
+        try:
+            pointer = parsed_query.args["expression"].args["from"].this.this.args['expressions'][0]
+            metadata_location = pointer.this
+            pointer.set('this', "?")
+        except:
+            raise NoSuchIcebergTableError(f"Table does not exist: {table}")
 
         return StaticTable.from_metadata(metadata_location, self.properties)
 
