@@ -4,9 +4,9 @@ from tests.integration.utils import execute_query, dynamic_universql_connection,
 from dotenv import load_dotenv
 import os
 import logging
+import time
 
 logger = logging.getLogger(__name__)
-
 
 class TestObjectIdentifiers:
 
@@ -31,16 +31,38 @@ class TestObjectIdentifiers:
         for query in all_queries_no_duplicates:
             logger.info(f"{query}: TBE")
 
+        counter = 0
+        total_counter = 0
+        successful_queries = []
+        failed_queries = {}
+
         connection_params = generate_usql_connection_params(self.account, self.user, self.password, self.role, database, schema)
-        
-        with dynamic_universql_connection(**connection_params) as conn:
-            for query in all_queries_no_duplicates:
+        for query in all_queries_no_duplicates:
+            counter += 1
+            total_counter += 1
+            if counter >= 2:
+                break
+                logger.info("LETS SLEEP FOR 60 SECONDS")
+                time.sleep(60)
+                counter = 0
+            logger.info(f"current counter: {counter}")
+            logger.info(f"total counter: {total_counter}")
+
+            with dynamic_universql_connection(**connection_params) as conn:
                 try:
                     result = execute_query(conn, query)
-                    logger.info(f"{query}: SUCCEEDED")
-                    logger.info("RESULT:")
-                    logger.info(result)
+                    successful_queries.append(query)
                     continue
                 except Exception as e:
-                    logger.error(f"{query}: FAILED - {str(e)}")
+                    failed_queries[query] = f"FAILED - {str(e)}"
+        logger.info("test_querying_in_connected_db_and_schema")
+        logger.info("Successful Queries:")
+        logger.info(successful_queries)
+        logger.info("Failed Queries:")
+        logger.info(failed_queries)
 
+
+if __name__ == "__main__":
+    # No function calls here
+    print("hello")
+    pass
