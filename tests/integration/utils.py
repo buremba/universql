@@ -83,7 +83,6 @@ def snowflake_connection() -> Generator:
     yield conn
     conn.close()
 
-
 def universql_connection(**properties) -> SnowflakeConnection:
     """Create a connection through UniversQL proxy."""
     connections = CONFIG_MANAGER["connections"]
@@ -137,6 +136,7 @@ def dynamic_universql_connection(**properties) -> SnowflakeConnection:
     thread.start()
 
     uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
+    # Add delay to ensure server starts
     return snowflake_connect(**uni_string)
 
 
@@ -213,11 +213,12 @@ def generate_select_statement_combos(table, schema = None, database = None):
 
     return select_statements
 
-def generate_usql_connection_params(account, user, password, database = None, schema = None):
+def generate_usql_connection_params(account, user, password, role, database = None, schema = None):
     params = {
         "account": account,
         "user": user,
         "password": password,
+        "role": role,
         "warehouse": "local()",
     }
     if database is not None:
