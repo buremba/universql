@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import typing
 from enum import Enum
 from string import Template
@@ -9,6 +10,7 @@ import duckdb
 import pyiceberg.table
 import snowflake
 import sqlglot
+from duckdb.duckdb import NotSupportedError
 from fakesnow import macros, info_schema
 from fakesnow.conn import FakeSnowflakeConnection
 from fakesnow.cursor import FakeSnowflakeCursor
@@ -99,7 +101,12 @@ class DuckDBCatalog(ICatalog):
             return None
         if table_exists[0] is None:
             return TableType.LOCAL
-        plan = self.duckdb.get_substrait_json(table_exists[0])
+
+        match = re.search(r'CREATE VIEW (?:["\w]+\.)?[\w.]+ AS SELECT \* FROM iceberg_scan\(\'(s3://[^\']+)\'\);', table_exists[0])
+        if match is not None:
+            return TableType.ICEBERG
+
+        raise NotSupportedError
 
     def register_locations(self, tables: Locations):
         raise Exception("Unsupported operation")

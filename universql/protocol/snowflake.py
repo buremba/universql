@@ -2,6 +2,7 @@ import logging
 import base64
 import os
 import signal
+import sys
 import threading
 from threading import Thread
 
@@ -347,7 +348,7 @@ def watch_tower(cache_directory, **kwargs):
 
 
 thread = Thread(target=watch_tower, kwargs=current_context)
-thread.daemon = False
+thread.daemon = True
 thread.start()
 
 

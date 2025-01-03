@@ -1,6 +1,35 @@
-import pytest
+from itertools import product
+
 
 from tests.integration.utils import execute_query, universql_connection, SIMPLE_QUERY, ALL_COLUMNS_QUERY
+
+def generate_name_variants(name, include_blank = False):
+    lowercase = name.lower()
+    uppercase = name.upper()
+    mixed_case = name.capitalize()
+    in_quotes = '"' + name.upper() + '"'
+    return [lowercase, uppercase, mixed_case, in_quotes]
+
+def generate_select_statement_combos(table, schema = None, database = None):
+    select_statements = []
+    table_variants = generate_name_variants(table)
+
+    if database is not None:
+        database_variants = generate_name_variants(database)
+        schema_variants = generate_name_variants(schema)
+        object_name_combos = product(database_variants, schema_variants, table_variants)
+        for db_name, schema_name, table_name in object_name_combos:
+            select_statements.append(f"SELECT * FROM {db_name}.{schema_name}.{table_name}")
+    else:
+        if schema is not None:
+            schema_variants = generate_name_variants(schema)
+            object_name_combos = product(schema_variants, table_variants)
+            for schema_name, table_name in object_name_combos:
+                select_statements.append(f"SELECT * FROM {schema_name}.{table_name}")
+        else:
+            for table_variant in table_variants:
+                select_statements.append(f"SELECT * FROM {table_variant}")
+    return select_statements
 
 
 class TestSelect:
@@ -25,6 +54,17 @@ class TestSelect:
             print(universql_result)
 
     def test_qualifiers(self):
-        with universql_connection(schema="public", warehouse="local()") as conn:
-            universql_result = execute_query(conn, 'select "col1" from "table1"')
-            print(universql_result)
+        database = "universql1"
+        # database = "UNIVERSQL1"
+        schema = "same_schema"
+        table = "dim_devices"
+
+        fully_qualified_queries = generate_select_statement_combos(table, schema, database)
+        no_db_queries = generate_select_statement_combos(table, schema)
+        no_schema_queries = generate_select_statement_combos(table)
+        all_queries = fully_qualified_queries + no_db_queries + no_schema_queries
+
+        with universql_connection(database=database, schema=schema) as conn:
+            for query in all_queries:
+                result = execute_query(conn, query)
+                print(result.to_pandas())

@@ -1,5 +1,6 @@
 import os
 import socketserver
+import sys
 import threading
 from contextlib import contextmanager
 from typing import Generator
@@ -84,12 +85,10 @@ def snowflake_connection() -> Generator:
     conn.close()
 
 
+@contextmanager
 def universql_connection(**properties) -> SnowflakeConnection:
     """Create a connection through UniversQL proxy."""
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
-    with open(CONNECTIONS_FILE, 'r') as file:
-        connections_content = file.read()
-        print(connections_content)
     connections = CONFIG_MANAGER["connections"]
     if SNOWFLAKE_CONNECTION_NAME not in connections:
         raise pytest.fail(f"Snowflake connection '{SNOWFLAKE_CONNECTION_NAME}' not found in config")
@@ -102,8 +101,12 @@ def universql_connection(**properties) -> SnowflakeConnection:
         runner = CliRunner()
         try:
             invoke = runner.invoke(snowflake,
-                                   ['--account', connection.get('account'), '--port', free_port, '--catalog',
-                                    'snowflake'], )
+                                   [
+                                       '--account', connection.get('account'),
+                                       '--port', free_port, '--catalog', 'snowflake',
+                                       # AWS_DEFAULT_PROFILE env can be used to pass AWS profile
+                                   ],
+                                   )
         except Exception as e:
             pytest.fail(e)
 
@@ -116,7 +119,11 @@ def universql_connection(**properties) -> SnowflakeConnection:
     # with runner.isolated_filesystem():
     uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
 
-    return snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
+    try:
+        connect = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
+        yield connect
+    finally:  # Force stop the thread
+        connect.close()
 
 
 def execute_query(conn, query: str) -> pyarrow.Table:
