@@ -4,6 +4,7 @@ import sys
 import threading
 from contextlib import contextmanager
 from typing import Generator
+import logging
 
 import pyarrow
 import pytest
@@ -13,6 +14,8 @@ from snowflake.connector.config_manager import CONFIG_MANAGER
 from snowflake.connector.constants import CONNECTIONS_FILE
 
 from universql.util import LOCALHOSTCOMPUTING_COM
+
+logger = logging.getLogger(__name__)
 
 # Configuration using separate connection strings for direct and proxy connections
 # export SNOWFLAKE_CONNECTION_STRING="account=xxx;user=xxx;password=xxx;warehouse=xxx;database=xxx;schema=xxx"
@@ -121,6 +124,45 @@ def universql_connection(**properties) -> SnowflakeConnection:
 
     try:
         connect = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
+        yield connect
+    finally:  # Force stop the thread
+        connect.close()
+
+@contextmanager
+def dynamic_universql_connection(**properties) -> SnowflakeConnection:
+    """Create a connection through UniversQL proxy."""
+    from universql.main import snowflake
+    with socketserver.TCPServer(("localhost", 0), None) as s:
+        free_port = s.server_address[1]
+
+    def start_universql():
+        runner = CliRunner()
+        try:
+            invoke = runner.invoke(snowflake,
+                                   [
+                                       '--account',
+                                         properties.get('account'),
+                                       '--port', 
+                                       free_port, 
+                                       '--catalog', 
+                                       'snowflake',
+                                   ],
+                                   )
+        except Exception as e:
+            pytest.fail(e)
+
+        if invoke.exit_code != 0:
+            pytest.fail("Unable to start Universql")
+
+    thread = threading.Thread(target=start_universql)
+    thread.daemon = True
+    thread.start()
+
+    # with runner.isolated_filesystem():
+    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
+
+    try:
+        connect = snowflake_connect(**uni_string)
         yield connect
     finally:  # Force stop the thread
         connect.close()
