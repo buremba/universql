@@ -94,44 +94,53 @@ def snowflake_connection() -> Generator:
 
 @contextmanager
 def universql_connection(**properties) -> SnowflakeConnection:
-    """Create a connection through UniversQL proxy."""
-    print(f"Reading {CONNECTIONS_FILE} with {properties}")
-    connections = CONFIG_MANAGER["connections"]
-    if SNOWFLAKE_CONNECTION_NAME not in connections:
-        raise pytest.fail(f"Snowflake connection '{SNOWFLAKE_CONNECTION_NAME}' not found in config")
-    connection = connections[SNOWFLAKE_CONNECTION_NAME]
-    from universql.main import snowflake
-    with socketserver.TCPServer(("localhost", 0), None) as s:
-        free_port = s.server_address[1]
-
-    def start_universql():
-        runner = CliRunner()
-        try:
-            invoke = runner.invoke(snowflake,
-                                   [
-                                       '--account', connection.get('account'),
-                                       '--port', free_port, '--catalog', 'snowflake',
-                                       # AWS_DEFAULT_PROFILE env can be used to pass AWS profile
-                                   ],
-                                   )
-        except Exception as e:
-            pytest.fail(e)
-
-        if invoke.exit_code != 0:
-            pytest.fail("Unable to start Universql")
-
-    thread = threading.Thread(target=start_universql)
-    thread.daemon = True
-    thread.start()
-    # with runner.isolated_filesystem():
-    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
-
+    snowflake_home = os.getenv("SNOWFLAKE_HOME")
     try:
-        connect = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
-        yield connect
-    finally:  # Force stop the thread
-        connect.close()
+        toml_file_location = properties.get("toml_file_location")
+        if toml_file_location is not None:
+            os.environ["SNOWFLAKE_HOME"] = toml_file_location
+        """Create a connection through UniversQL proxy."""
+        print(f"Reading {CONNECTIONS_FILE} with {properties}")
+        connections = CONFIG_MANAGER["connections"]
+        if SNOWFLAKE_CONNECTION_NAME not in connections and toml_file_location is not None:
+            raise pytest.fail(f"Snowflake connection '{SNOWFLAKE_CONNECTION_NAME}' not found in config")
+        connection = connections[SNOWFLAKE_CONNECTION_NAME]
+        from universql.main import snowflake
+        with socketserver.TCPServer(("localhost", 0), None) as s:
+            free_port = s.server_address[1]
 
+        def start_universql():
+            runner = CliRunner()
+            try:
+                invoke = runner.invoke(snowflake,
+                                    [
+                                        '--account', connection.get('account'),
+                                        '--port', free_port, '--catalog', 'snowflake',
+                                        # AWS_DEFAULT_PROFILE env can be used to pass AWS profile
+                                    ],
+                                    )
+            except Exception as e:
+                pytest.fail(e)
+
+            if invoke.exit_code != 0:
+                pytest.fail("Unable to start Universql")
+
+        thread = threading.Thread(target=start_universql)
+        thread.daemon = True
+        thread.start()
+        # with runner.isolated_filesystem():
+        uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
+
+        try:
+            connect = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
+            yield connect
+        finally:  # Force stop the thread
+            connect.close()
+    finally:
+        if snowflake_home is None:
+            del os.environ["SNOWFLAKE_HOME"]
+        else:
+            os.environ["SNOWFLAKE_HOME"] = snowflake_home
 @contextmanager
 def dynamic_universql_connection(**properties) -> SnowflakeConnection:
     """Create a connection through UniversQL proxy."""
@@ -264,7 +273,7 @@ def generate_usql_connection_params(account, user, password, role, database = No
 
     return params
 
-def generate_toml_file(connection_name, account, user, password, role, database = None, schema = None):
+def generate_toml_file(connection_name, file_location, account, user, password, role, database = None, schema = None):
 
     connection = {
         connection_name: {
@@ -272,13 +281,17 @@ def generate_toml_file(connection_name, account, user, password, role, database 
             "user": user,
             "password": password,
             "role": role,
-            "warehouse": "local()",
-            "database": database,
-            "schema": schema
+            "warehouse": "local()"
         },
     }
+
+    if database is not None:
+        connection[connection_name]["database"] = database
+    if schema is not None:
+        connection[connection_name]["schema"] = schema
+
     try:
-        with open('credentials/snowflake_integrations_connections.toml', 'w') as toml_file:
+        with open(file_location, 'w') as toml_file:
             toml.dump(connection, toml_file)
         logger.info(f"TOML file connections.toml generated successfully.")
     except Exception as e:
