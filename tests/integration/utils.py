@@ -11,6 +11,7 @@ from click.testing import CliRunner
 from snowflake.connector import connect as snowflake_connect, SnowflakeConnection
 from snowflake.connector.config_manager import CONFIG_MANAGER
 from snowflake.connector.constants import CONNECTIONS_FILE
+from itertools import product
 
 from universql.util import LOCALHOSTCOMPUTING_COM
 
@@ -125,6 +126,35 @@ def universql_connection(**properties) -> SnowflakeConnection:
     finally:  # Force stop the thread
         connect.close()
 
+@contextmanager
+def dynamic_universql_connection(**properties) -> SnowflakeConnection:
+    """Create a connection through UniversQL proxy."""
+    from universql.main import snowflake
+    with socketserver.TCPServer(("localhost", 0), None) as s:
+        free_port = s.server_address[1]
+
+    def start_universql():
+        runner = CliRunner()
+        try:
+            invoke = runner.invoke(snowflake,
+                               ['--account', properties.get('account'), '--port', free_port, '--catalog',
+                                'snowflake'], )
+        except Exception as e:
+            pytest.fail(e)
+
+        if invoke.exit_code != 0:
+            pytest.fail("Unable to start Universql")
+
+    thread = threading.Thread(target=start_universql)
+    thread.daemon = True
+    thread.start()
+
+    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
+    try:
+        connection = snowflake_connect(**uni_string)
+        yield connection
+    finally:
+        connection.close()
 
 def execute_query(conn, query: str) -> pyarrow.Table:
     cur = conn.cursor()
@@ -182,3 +212,48 @@ def cleanup_table(conn, table_name: str):
             cur.close()
         except Exception as e:
             print(f"Error during cleanup: {e}")
+
+def generate_name_variants(name, include_blank = False):
+    lowercase = name.lower()
+    uppercase = name.upper()
+    mixed_case = name.capitalize()
+    in_quotes = '"' + name.upper() + '"'
+    print([lowercase, uppercase, mixed_case, in_quotes])
+    return [lowercase, uppercase, mixed_case, in_quotes]
+
+def generate_select_statement_combos(table, schema = None, database = None):
+    select_statements = []
+    table_variants = generate_name_variants(table)
+
+    if database is not None:
+        database_variants = generate_name_variants(database)
+        schema_variants = generate_name_variants(schema)
+        object_name_combos = product(database_variants, schema_variants, table_variants)
+        for db_name, schema_name, table_name in object_name_combos:
+            select_statements.append(f"SELECT * FROM {db_name}.{schema_name}.{table_name}")
+    else:
+        if schema is not None:
+            schema_variants = generate_name_variants(schema)
+            object_name_combos = product(schema_variants, table_variants)
+            for schema_name, table_name in object_name_combos:
+                select_statements.append(f"SELECT * FROM {schema_name}.{table_name}")
+        else:
+            for table_variant in table_variants:
+                select_statements.append(f"SELECT * FROM {table_variant}")
+
+    return select_statements
+
+def generate_usql_connection_params(account, user, password, role, database = None, schema = None):
+    params = {
+        "account": account,
+        "user": user,
+        "password": password,
+        "role": role,
+        "warehouse": "local()",
+    }
+    if database is not None:
+        params["database"] = database
+    if schema is not None:
+        params["schema"] = schema
+
+    return params
