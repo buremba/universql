@@ -462,11 +462,11 @@ def parse_snowflake_account(account_identifier: str) -> SnowflakeAccount:
 
     return SnowflakeAccount(account, region, cloud)
 
-
 def full_qualifier(table: sqlglot.exp.Table, credentials: dict):
-    catalog = sqlglot.exp.Identifier(this=credentials.get('database'), quoted=True) \
+
+    catalog = sqlglot.exp.Identifier(this=credentials.get('database')) \
         if table.args.get('catalog') is None else table.args.get('catalog')
-    db = sqlglot.exp.Identifier(this=credentials.get('schema'), quoted=True) \
+    db = sqlglot.exp.Identifier(this=credentials.get('schema')) \
         if table.args.get('db') is None else table.args.get('db')
     new_table = sqlglot.exp.Table(catalog=catalog, db=db, this=table.this)
     return new_table
