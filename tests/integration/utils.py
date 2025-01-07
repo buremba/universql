@@ -12,6 +12,12 @@ from snowflake.connector import connect as snowflake_connect, SnowflakeConnectio
 from snowflake.connector.config_manager import CONFIG_MANAGER
 from snowflake.connector.constants import CONNECTIONS_FILE
 from itertools import product
+import toml
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 
 from universql.util import LOCALHOSTCOMPUTING_COM
 
@@ -257,3 +263,23 @@ def generate_usql_connection_params(account, user, password, role, database = No
         params["schema"] = schema
 
     return params
+
+def generate_toml_file(connection_name, account, user, password, role, database = None, schema = None):
+
+    connection = {
+        connection_name: {
+            "account": account,
+            "user": user,
+            "password": password,
+            "role": role,
+            "warehouse": "local()",
+            "database": database,
+            "schema": schema
+        },
+    }
+    try:
+        with open('credentials/snowflake_integrations_connections.toml', 'w') as toml_file:
+            toml.dump(connection, toml_file)
+        logger.info(f"TOML file connections.toml generated successfully.")
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
