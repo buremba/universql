@@ -1,11 +1,9 @@
 import pytest
-import snowflake.connector
 
-from tests.integration.utils import execute_query, dynamic_universql_connection, universql_connection, snowflake_connection, SIMPLE_QUERY, generate_select_statement_combos, generate_usql_connection_params
+from tests.integration.utils import execute_query, universql_connection, snowflake_connection, generate_select_statement_combos
 from dotenv import load_dotenv
 import os
 import logging
-import time
 from pprint import pp
 
 logger = logging.getLogger(__name__)
@@ -28,6 +26,11 @@ class TestObjectIdentifiers:
     BUCKET_NAME = os.getenv("BUCKET_NAME")
     TEST_WAREHOUSE = os.getenv("TEST_WAREHOUSE")
 
+
+    # requires the following:
+    # a connection's file ~/.snowflake/connections.toml
+    # a connection in that file called "integration_test_snowflake_direct" specifying a snowflake compute warehouse
+    # the connected user must access to the accountadmin role
     def test_setup(self):
         raw_query = f"""
             -- CREATE OBJECTS
@@ -108,6 +111,11 @@ class TestObjectIdentifiers:
                     error_message = error_message + "\n{query}"
                 raise Exception(error_message)
 
+
+  # requires the following:
+    # a connection's file ~/.snowflake/connections.toml
+    # a connection in that file called "integration_test_universql" specifying that the warehouse is local()
+    # the connected user must be the same as for test_setup
     def test_querying_in_connected_db_and_schema(self):
         connected_db = "universql1"
         connected_schema = "same_schema"
