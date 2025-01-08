@@ -1,7 +1,7 @@
 import pytest
 import snowflake.connector
 
-from tests.integration.utils import execute_query, dynamic_universql_connection, SIMPLE_QUERY, generate_select_statement_combos, generate_usql_connection_params, generate_toml_file
+from tests.integration.utils import execute_query, dynamic_universql_connection, SIMPLE_QUERY, generate_select_statement_combos, generate_usql_connection_params
 from dotenv import load_dotenv
 import os
 import logging
@@ -125,8 +125,6 @@ class TestObjectIdentifiers:
         connection_params = generate_usql_connection_params(self.ACCOUNT, self.TEST_USER, self.TEST_USER_PASSWORD, self.TEST_ROLE, database, schema)
 
         # create toml file
-        generate_toml_file('default', self.ACCOUNT, self.TEST_USER, self.TEST_USER_PASSWORD, self.TEST_ROLE, database, schema)
-
         with dynamic_universql_connection(**connection_params) as conn:
             for query in all_queries_no_duplicates:
                 logger.info(f"current counter: {counter}")

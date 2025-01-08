@@ -97,9 +97,10 @@ def universql_connection(**properties) -> SnowflakeConnection:
     """Create a connection through UniversQL proxy."""
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
     connections = CONFIG_MANAGER["connections"]
-    if SNOWFLAKE_CONNECTION_NAME not in connections:
-        raise pytest.fail(f"Snowflake connection '{SNOWFLAKE_CONNECTION_NAME}' not found in config")
-    connection = connections[SNOWFLAKE_CONNECTION_NAME]
+    snowflake_connection_name = properties.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
+    if snowflake_connection_name not in connections:
+        raise pytest.fail(f"Snowflake connection '{snowflake_connection_name}' not found in config")
+    connection = connections[snowflake_connection_name]
     from universql.main import snowflake
     with socketserver.TCPServer(("localhost", 0), None) as s:
         free_port = s.server_address[1]
@@ -127,7 +128,7 @@ def universql_connection(**properties) -> SnowflakeConnection:
     uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
 
     try:
-        connect = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
+        connect = snowflake_connect(connection_name=snowflake_connection_name, **uni_string)
         yield connect
     finally:  # Force stop the thread
         connect.close()
@@ -263,23 +264,3 @@ def generate_usql_connection_params(account, user, password, role, database = No
         params["schema"] = schema
 
     return params
-
-def generate_toml_file(connection_name, account, user, password, role, database = None, schema = None):
-
-    connection = {
-        connection_name: {
-            "account": account,
-            "user": user,
-            "password": password,
-            "role": role,
-            "warehouse": "local()",
-            "database": database,
-            "schema": schema
-        },
-    }
-    try:
-        with open('credentials/snowflake_integrations_connections.toml', 'w') as toml_file:
-            toml.dump(connection, toml_file)
-        logger.info(f"TOML file connections.toml generated successfully.")
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
