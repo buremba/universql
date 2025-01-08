@@ -397,11 +397,11 @@ def calculate_script_cost(duration_second, electricity_rate=0.15, pc_lifetime_ye
 pattern = r'(\w+)(?:\(([^)]*)\))'
 
 
-def parse_compute(value):
-    if value is not None:
-        matches = re.findall(pattern, value)
+def parse_compute(warehouse):
+    if warehouse is not None:
+        matches = re.findall(pattern, warehouse)
         if len(matches) == 0:
-            matches = (('local', ''), ('snowflake', f'warehouse={value}'))
+            matches = (('local', ''), ('snowflake', f'warehouse={warehouse}'))
     else:
         # try locally if warehouse is not provided
         matches = (('local', ''), )
@@ -412,8 +412,8 @@ def parse_compute(value):
         if args_str:
             for arg in args_str.split(','):
                 if '=' in arg:
-                    key, value = arg.split('=', 1)
-                    args[key.strip()] = value.strip()
+                    key, warehouse = arg.split('=', 1)
+                    args[key.strip()] = warehouse.strip()
                 else:
                     args[arg.strip()] = None  # Handle arguments without '='
         result.append({'name': func_name, 'args': args})
