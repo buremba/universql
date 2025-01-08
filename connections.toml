@@ -1,8 +1,0 @@
-[default]
-account = "WKPSRTU-ZKB28481"
-user = "data_generation_service_user"
-password = "4wr97G*FODS&3fveaksydfgkubas"
-role = "integrations_test_role"
-warehouse = "local()"
-database = "universql1"
-schema = "same_schema"
