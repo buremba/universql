@@ -1,7 +1,7 @@
 import pytest
 import snowflake.connector
 
-from tests.integration.utils import execute_query, dynamic_universql_connection, SIMPLE_QUERY, generate_select_statement_combos, generate_usql_connection_params
+from tests.integration.utils import execute_query, dynamic_universql_connection, universql_connection, snowflake_connection, SIMPLE_QUERY, generate_select_statement_combos, generate_usql_connection_params
 from dotenv import load_dotenv
 import os
 import logging
@@ -55,16 +55,16 @@ class TestObjectIdentifiers:
             BASE_LOCATION = 's3://{self.BUCKET_NAME}/tests/1/same_schema/dim_devices'
             AS select 1;
 
-            CREATE OR REPLACE ICEBERG TABLE universql1.different_schema.dim_devices
+            CREATE OR REPLACE ICEBERG TABLE universql1.different_schema.different_dim_devices
             external_volume = {self.EXTERNAL_VOLUME_NAME}
             catalog = 'SNOWFLAKE'
-            BASE_LOCATION = 's3://{self.BUCKET_NAME}/tests/1/different_schema/dim_devices'
+            BASE_LOCATION = 's3://{self.BUCKET_NAME}/tests/1/different_schema/different_dim_devices'
             AS select 1;
 
-            CREATE OR REPLACE ICEBERG TABLE universql2.another_schema.dim_devices
+            CREATE OR REPLACE ICEBERG TABLE universql2.another_schema.another_dim_devices
             external_volume = {self.EXTERNAL_VOLUME_NAME}
             catalog = 'SNOWFLAKE'
-            BASE_LOCATION = 's3://{self.BUCKET_NAME}/tests/2/another_schema/dim_devices'
+            BASE_LOCATION = 's3://{self.BUCKET_NAME}/tests/2/another_schema/another_dim_devices'
             AS select 1;
 
             CREATE OR REPLACE ROLE {self.TEST_ROLE};
@@ -76,57 +76,82 @@ class TestObjectIdentifiers:
             GRANT USAGE ON ALL SCHEMAS IN DATABASE universql1 TO ROLE {self.TEST_ROLE};
             GRANT USAGE ON ALL SCHEMAS IN DATABASE universql2 TO ROLE {self.TEST_ROLE};
             GRANT SELECT ON universql1.same_schema.dim_devices TO ROLE {self.TEST_ROLE};
-            GRANT SELECT ON universql1.different_schema.dim_devices TO ROLE {self.TEST_ROLE};
-            GRANT SELECT ON universql2.another_schema.dim_devices TO ROLE {self.TEST_ROLE};
+            GRANT SELECT ON universql1.different_schema.different_dim_devices TO ROLE {self.TEST_ROLE};
+            GRANT SELECT ON universql2.another_schema.another_dim_devices TO ROLE {self.TEST_ROLE};
             GRANT USAGE ON WAREHOUSE {self.TEST_WAREHOUSE} TO ROLE {self.TEST_ROLE};
             
             USE ROLE {self.TEST_ROLE};
             USE DATABASE universql1;
             SELECT * FROM universql1.same_schema.dim_devices;
-            SELECT * FROM universql1.different_schema.dim_devices;
-            SELECT * FROM universql2.another_schema.dim_devices;
+            SELECT * FROM universql1.different_schema.different_dim_devices;
+            SELECT * FROM universql2.another_schema.another_dim_devices;
         """
 
         queries = raw_query.split(";")
-        connection_params = generate_usql_connection_params(self.ACCOUNT, self.TEST_USER, self.TEST_USER_PASSWORD, 'ACCOUNTADMIN')
-        connection_params["warehouse"] = self.TEST_WAREHOUSE
-        snowflake_conn = snowflake.connector.connect(**connection_params)
-        cursor = snowflake_conn.cursor()
-        failed_queries = []
-        for query in queries:
-            try:
-                cursor.execute(query)
-                logger.info(query)
-            except Exception as e:
-                failed_queries.append(f"{query} | FAILED - {str(e)}")
-                logger.info(f"{query} | FAILED - {str(e)}")
-        if len(failed_queries) > 0:
-            error_message = "The following queries failed:"
-            for query in failed_queries:
-                error_message = error_message + "\n{query}"
-            raise Exception(error_message)
+        # connection_params = generate_usql_connection_params(self.ACCOUNT, self.TEST_USER, self.TEST_USER_PASSWORD, 'ACCOUNTADMIN')
+        # connection_params["warehouse"] = self.TEST_WAREHOUSE
+        connection_params = {}
+        connection_params["snowflake_connection_name"] = "integration_test_snowflake_direct"
+        with snowflake_connection(**connection_params) as conn:
+            cursor = conn.cursor()
+            failed_queries = []
+            for query in queries:
+                try:
+                    cursor.execute(query)
+                    logger.info(query)
+                except Exception as e:
+                    failed_queries.append(f"{query} | FAILED - {str(e)}")
+                    logger.info(f"{query} | FAILED - {str(e)}")
+            if len(failed_queries) > 0:
+                error_message = "The following queries failed:"
+                for query in failed_queries:
+                    error_message = error_message + "\n{query}"
+                raise Exception(error_message)
 
     def test_querying_in_connected_db_and_schema(self):
-        database = "universql1"
-        schema = "same_schema"
-        table = "dim_devices"
+        connected_db = "universql1"
+        connected_schema = "same_schema"
 
-        fully_qualified_queries = generate_select_statement_combos(table, schema, database)
-        no_db_queries = generate_select_statement_combos(table, schema)
-        no_schema_queries = generate_select_statement_combos(table)
-        all_queries = fully_qualified_queries + no_db_queries + no_schema_queries
-        all_queries_no_duplicates = sorted(list(set(all_queries)))
-        for query in all_queries_no_duplicates:
-            logger.info(f"{query}: TBE")
+        combos = [
+            {
+                "database": "universql1",
+                "schema": "same_schema",
+                "table": "dim_devices"
+            },
+            {
+                "database": "universql1",
+                "schema": "different_schema",
+                "table": "different_dim_devices"
+            },
+            {
+                "database": "universql2",
+                "schema": "another_schema",
+                "table": "another_dim_devices"
+            },
+        ]
+
+        select_statements = generate_select_statement_combos(combos, connected_db, connected_schema)
+        
+        
+        # no_db_queries = generate_select_statement_combos(table, schema)
+        # no_schema_queries = generate_select_statement_combos(table)
+        # all_queries = fully_qualified_queries + no_db_queries + no_schema_queries
+        # all_queries_no_duplicates = sorted(list(set(all_queries)))
+        # for query in select_statements:
+        #     logger.info(f"{query}: TBE")
         successful_queries = []
         failed_queries = []
         counter = 0
 
-        connection_params = generate_usql_connection_params(self.ACCOUNT, self.TEST_USER, self.TEST_USER_PASSWORD, self.TEST_ROLE, database, schema)
-
+        connection_params = {
+            "snowflake_connection_name": "integration_test_universql",
+            "database": connected_db,
+            "schema": connected_schema
+        }
+        
         # create toml file
-        with dynamic_universql_connection(**connection_params) as conn:
-            for query in all_queries_no_duplicates:
+        with universql_connection(**connection_params) as conn:
+            for query in select_statements:
                 logger.info(f"current counter: {counter}")
                 counter += 1
                 # if counter > 20:
@@ -147,14 +172,8 @@ class TestObjectIdentifiers:
         for query in successful_queries:
             logger.info(query)
         if len(failed_queries) > 0:
-            error_message = "The following queries failed:"
+            error_message = f"The following {len(failed_queries)} queries failed:"
             for query in failed_queries:
                 error_message = f"{error_message}\n{query}"
             logger.error(error_message)
             raise Exception(error_message)
-
-        # WARNING  snowflake.connector.vendored.urllib3.connectionpool:connectionpool.py:824 Retrying (Retry(total=0, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<snowflake.connector.vendored.urllib3.connection.HTTPSConnection object at 0x14d169670>: Failed to establish a new connection: [Errno 61] Connection refused')': /session/v1/login-request?request_id=b806a1b2-0462-4d76-a9c8-348981837587&databaseName=universql1&schemaName=same_schema&warehouse=local%28%29&roleName=general_purpose
-        # WARNING  🧵:snowflake.py:387 Failed to set signal handler for SIGINT: signal only works in main thread of the main interpreter
-        # WARNING  snowflake.connector.vendored.urllib3.connectionpool:connectionpool.py:824 Retrying (Retry(total=0, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<snowflake.connector.vendored.urllib3.connection.HTTPSConnection object at 0x14d147680>: Failed to establish a new connection: [Errno 61] Connection refused')': /session/v1/login-request?request_id=4171a507-63b3-4349-85d1-4a27a68650a1&databaseName=universql1&schemaName=same_schema&warehouse=local%28%29&roleName=general_purpose
-        # WARNING  snowflake.connector.vendored.urllib3.connectionpool:connectionpool.py:824 Retrying (Retry(total=0, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<snowflake.connector.vendored.urllib3.connection.HTTPSConnection object at 0x14d168890>: Failed to establish a new connection: [Errno 61] Connection refused')': /session/v1/login-request?request_id=ff44232e-b3a0-42f4-8a56-2d7f9d37747d&databaseName=universql1&schemaName=same_schema&warehouse=local%28%29&roleName=general_purpose
-        # keeps repeating

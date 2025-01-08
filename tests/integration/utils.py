@@ -85,20 +85,22 @@ ARRAY_CONSTRUCT(1, 2, 3, 4) AS sample_array,
 """
 
 
-@pytest.fixture(scope="session")
+@contextmanager
 def snowflake_connection(**properties) -> Generator:
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
-    conn = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **properties)
-    yield conn
-    conn.close()
-
+    snowflake_connection_name = _set_connection_name(properties)
+    conn = snowflake_connect(connection_name=snowflake_connection_name, **properties)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 @contextmanager
 def universql_connection(**properties) -> SnowflakeConnection:
     # https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect#connecting-using-the-connections-toml-file
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
     connections = CONFIG_MANAGER["connections"]
-    snowflake_connection_name = properties.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
+    snowflake_connection_name = _set_connection_name(properties)
     if snowflake_connection_name not in connections:
         raise pytest.fail(f"Snowflake connection '{snowflake_connection_name}' not found in config")
     connection = connections[snowflake_connection_name]
@@ -229,26 +231,42 @@ def generate_name_variants(name, include_blank = False):
     print([lowercase, uppercase, mixed_case, in_quotes])
     return [lowercase, uppercase, mixed_case, in_quotes]
 
-def generate_select_statement_combos(table, schema = None, database = None):
+def generate_select_statement_combos(sets_of_identifiers, connected_db = None, connected_schema = None):
     select_statements = []
-    table_variants = generate_name_variants(table)
-
-    if database is not None:
-        database_variants = generate_name_variants(database)
-        schema_variants = generate_name_variants(schema)
-        object_name_combos = product(database_variants, schema_variants, table_variants)
-        for db_name, schema_name, table_name in object_name_combos:
-            select_statements.append(f"SELECT * FROM {db_name}.{schema_name}.{table_name}")
-    else:
+    for set in sets_of_identifiers:
+        set_of_select_statements = []
+        database = set.get("database")
+        schema = set.get("schema")
+        table = set.get("table")
+        if table is not None:
+            table_variants = generate_name_variants(table)
+            if database == connected_db and schema == connected_schema:
+                for table_variant in table_variants:
+                    set_of_select_statements.append(f"SELECT * FROM {table_variant}")
+        else:
+            raise Exception("No table name provided for a select stametent combo.")
+        
         if schema is not None:
             schema_variants = generate_name_variants(schema)
-            object_name_combos = product(schema_variants, table_variants)
-            for schema_name, table_name in object_name_combos:
-                select_statements.append(f"SELECT * FROM {schema_name}.{table_name}")
+            if database == connected_db:
+                object_name_combos = product(schema_variants, table_variants)
+                for schema_name, table_name in object_name_combos:
+                    set_of_select_statements.append(f"SELECT * FROM {schema_name}.{table_name}")
         else:
-            for table_variant in table_variants:
-                select_statements.append(f"SELECT * FROM {table_variant}")
-
+            if database is not None:
+                raise Exception("You must provide a schema name if you provide a database name.")
+        
+        if database is not None:
+            database_variants = generate_name_variants(database)
+            object_name_combos = product(database_variants, schema_variants, table_variants)
+            for db_name, schema_name, table_name in object_name_combos:
+                set_of_select_statements.append(f"SELECT * FROM {db_name}.{schema_name}.{table_name}")
+        select_statements = select_statements + set_of_select_statements
+        logger.info(f"database: {database}, schema: {schema}, table: {table}")
+        for statement in set_of_select_statements:
+            logger.info(statement)
+        # logger.info(f"database: {database}, schema: {schema}, table: {table}")
+            
     return select_statements
 
 def generate_usql_connection_params(account, user, password, role, database = None, schema = None):
@@ -265,3 +283,8 @@ def generate_usql_connection_params(account, user, password, role, database = No
         params["schema"] = schema
 
     return params
+
+def _set_connection_name(connection_dict = {}):
+    snowflake_connection_name = connection_dict.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
+    logger.info(f"Using the {snowflake_connection_name} connection")
+    return snowflake_connection_name
