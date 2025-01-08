@@ -35,7 +35,6 @@ def measure_all(cur, query):
 def tt(max_iteration):
     connection = snowflake.connector.connect(connection_name="ryan_snowflake",
                                              port='8084', host='localhostcomputing.com',
-                                             warehouse='local()',
                                              database='test',
                                              # host='4ho74nvv4nyxhqxmcxrnpiid2m0bpcet.lambda-url.us-east-1.on.aws',
                                              )

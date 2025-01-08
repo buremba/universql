@@ -85,6 +85,7 @@ def snowflake_connection(**properties) -> Generator:
     yield conn
     conn.close()
 
+server_cache = {}
 
 @contextmanager
 def universql_connection(**properties) -> SnowflakeConnection:
@@ -94,36 +95,45 @@ def universql_connection(**properties) -> SnowflakeConnection:
     if SNOWFLAKE_CONNECTION_NAME not in connections:
         raise pytest.fail(f"Snowflake connection '{SNOWFLAKE_CONNECTION_NAME}' not found in config")
     connection = connections[SNOWFLAKE_CONNECTION_NAME]
-    from universql.main import snowflake
-    with socketserver.TCPServer(("localhost", 0), None) as s:
-        free_port = s.server_address[1]
+    account = connection.get('account')
 
-    def start_universql():
-        runner = CliRunner()
-        try:
-            invoke = runner.invoke(snowflake,
-                                   [
-                                       '--account', connection.get('account'),
-                                       '--port', free_port, '--catalog', 'snowflake',
-                                       # AWS_DEFAULT_PROFILE env can be used to pass AWS profile
-                                   ],
-                                   )
-        except Exception as e:
-            pytest.fail(e)
+    if account in server_cache:
+        uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": server_cache[account]} | properties
+    else:
+        from universql.main import snowflake
+        with socketserver.TCPServer(("localhost", 0), None) as s:
+            free_port = s.server_address[1]
+        print(f"Reusing existing server running on port {free_port} for account {account}")
 
-        if invoke.exit_code != 0:
-            pytest.fail("Unable to start Universql")
+        def start_universql():
+            runner = CliRunner()
+            try:
+                invoke = runner.invoke(snowflake,
+                                       [
+                                           '--account', account,
+                                           '--port', free_port, '--catalog', 'snowflake',
+                                           # AWS_DEFAULT_PROFILE env can be used to pass AWS profile
+                                       ],
+                                       )
+            except Exception as e:
+                pytest.fail(e)
 
-    thread = threading.Thread(target=start_universql)
-    thread.daemon = True
-    thread.start()
+            if invoke.exit_code != 0:
+                pytest.fail("Unable to start Universql")
+
+
+        print(f"Starting running on port {free_port} for account {account}")
+        thread = threading.Thread(target=start_universql)
+        thread.daemon = True
+        thread.start()
+        server_cache[account] = free_port
     # with runner.isolated_filesystem():
-    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
+        uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
 
     try:
         connect = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
         yield connect
-    finally:  # Force stop the thread
+    finally:
         connect.close()
 
 
