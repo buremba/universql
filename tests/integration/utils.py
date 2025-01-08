@@ -79,8 +79,9 @@ ARRAY_CONSTRUCT(1, 2, 3, 4) AS sample_array,
 
 
 @pytest.fixture(scope="session")
-def snowflake_connection() -> Generator:
-    conn = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME)
+def snowflake_connection(**properties) -> Generator:
+    print(f"Reading {CONNECTIONS_FILE} with {properties}")
+    conn = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **properties)
     yield conn
     conn.close()
 
