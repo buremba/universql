@@ -57,6 +57,9 @@ class SnowflakeCatalog(ICatalog):
         # lazily create
         self._cursor = None
 
+    def clear_cache(self):
+        self._cursor = None
+
     def cursor(self, create_if_not_exists=True):
         if self._cursor is not None or not create_if_not_exists:
             return self._cursor

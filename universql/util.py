@@ -403,7 +403,8 @@ def parse_compute(value):
         if len(matches) == 0:
             matches = (('local', ''), ('snowflake', f'warehouse={value}'))
     else:
-        matches = (('local', ''), ('snowflake', ''))
+        # try locally if warehouse is not provided
+        matches = (('local', ''), )
 
     result = []
     for func_name, args_str in matches:

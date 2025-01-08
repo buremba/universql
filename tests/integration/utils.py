@@ -86,15 +86,16 @@ ARRAY_CONSTRUCT(1, 2, 3, 4) AS sample_array,
 
 
 @pytest.fixture(scope="session")
-def snowflake_connection() -> Generator:
-    conn = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME)
+def snowflake_connection(**properties) -> Generator:
+    print(f"Reading {CONNECTIONS_FILE} with {properties}")
+    conn = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **properties)
     yield conn
     conn.close()
 
 
 @contextmanager
 def universql_connection(**properties) -> SnowflakeConnection:
-    """Create a connection through UniversQL proxy."""
+    # https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect#connecting-using-the-connections-toml-file
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
     connections = CONFIG_MANAGER["connections"]
     snowflake_connection_name = properties.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)

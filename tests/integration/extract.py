@@ -1,9 +1,10 @@
 from itertools import product
 
+import pytest
 
 from tests.integration.utils import execute_query, universql_connection, SIMPLE_QUERY, ALL_COLUMNS_QUERY
 
-def generate_name_variants(name, include_blank = False):
+def generate_name_variants(name):
     lowercase = name.lower()
     uppercase = name.upper()
     mixed_case = name.capitalize()
@@ -34,19 +35,37 @@ def generate_select_statement_combos(table, schema = None, database = None):
 
 class TestSelect:
     def test_simple_select(self):
-        with universql_connection(warehouse="local()") as conn:
+        with universql_connection() as conn:
             universql_result = execute_query(conn, SIMPLE_QUERY)
             print(universql_result)
 
     def test_from_stage(self):
-        with universql_connection(warehouse="local()") as conn:
+        with universql_connection() as conn:
             universql_result = execute_query(conn, "select count(*) from @stage/iceberg_stage")
             print(universql_result)
 
     def test_complex_select(self):
-        with universql_connection(warehouse="local()") as conn:
+        with universql_connection() as conn:
             universql_result = execute_query(conn, ALL_COLUMNS_QUERY)
             print(universql_result)
+
+    def test_switch_schema(self):
+        with universql_connection() as conn:
+            execute_query(conn, "USE DATABASE snowflake")
+            universql_result = execute_query(conn, "SHOW SCHEMAS")
+            assert universql_result.num_rows > 0, f"The query did not return any rows!"
+
+            execute_query(conn, "USE SCHEMA snowflake.account_usage")
+            universql_result = execute_query(conn, "SHOW SCHEMAS")
+            assert universql_result.num_rows > 0, f"The query did not return any rows!"
+
+            execute_query(conn, "USE snowflake")
+            universql_result = execute_query(conn, "SHOW SCHEMAS")
+            assert universql_result.num_rows > 0, f"The query did not return any rows!"
+
+            execute_query(conn, "USE snowflake.account_usage")
+            universql_result = execute_query(conn, "SHOW SCHEMAS")
+            assert universql_result.num_rows > 0, f"The query did not return any rows!"
 
     def test_in_schema(self):
         with universql_connection(schema="public", warehouse="local()") as conn:

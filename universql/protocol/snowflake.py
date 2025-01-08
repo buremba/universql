@@ -5,6 +5,7 @@ import signal
 import sys
 import threading
 from threading import Thread
+from traceback import print_exc
 
 from typing import Any
 from uuid import uuid4
@@ -194,9 +195,15 @@ def get_columns_for_sf_compat(schema: Schema) -> list[dict[str, Any]]:
     return columns
 
 
+@app.post("/queries/v1/abort-request")
+async def abort_request(request: Request) -> JSONResponse:
+    return JSONResponse(
+        {"data": {}, "success": True})
+
 @app.post("/queries/v1/query-request")
 async def query_request(request: Request) -> JSONResponse:
     query_id = str(uuid4())
+    query = None
     try:
         session = session_from_request(sessions, request)
         body = await unpack_request_body(request)
@@ -253,8 +260,20 @@ async def query_request(request: Request) -> JSONResponse:
             raise Exception(f"Format {format} is not supported")
         return JSONResponse({"data": data, "success": True})
     except QueryError as e:
-        # print_exc( limit=1)  # we print exec here because the connector + webservice combo doesn't always do a good job of
+        # print_exc(limit=1)
         return JSONResponse({"id": query_id, "success": False, "message": e.message, "data": {"sqlState": e.sql_state}})
+    except snowflake.connector.DatabaseError as e:
+        print_exc(limit=1)
+        return JSONResponse({"id": query_id, "success": False,
+                             "message": f"Error running query on Snowflake: {e.message}",
+                             "data": {"sqlState": e.sql_state}})
+    except Exception as e:
+        if query is not None:
+            logger.exception(f"Error processing query: {query}")
+        else:
+            logger.exception(f"Error processing query request", e)
+        print_exc(limit=1)
+        return JSONResponse({"id": query_id, "success": False, "message": "Unable to run the query due to a system error. Please create issue on https://github.com/buremba/universql/issues", "data": {"sqlState": "0000"}})
 
 
 @app.get("/jupyterlite/new")
@@ -411,3 +430,8 @@ async def startup_event():
     click.secho(print_dict_as_markdown_table(connections, footer_message=(
         "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
         "For application support, see https://github.com/buremba/universql",)))
+
+# app.mount("/", marimo.create_asgi_app()
+#     .with_app(path="/notebooks", root="/Users/bkabak/Code/universql/resources/snowflake_redshift_usage/2.IngestCost.py")
+#     # .with_dynamic_directory(path="/notebooks", directory="/Users/bkabak/Code/universql/resources/snowflake_redshift_usage")
+#           .build())
