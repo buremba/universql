@@ -1,9 +1,10 @@
 from itertools import product
 
+import pytest
 
 from tests.integration.utils import execute_query, universql_connection, SIMPLE_QUERY, ALL_COLUMNS_QUERY
 
-def generate_name_variants(name, include_blank = False):
+def generate_name_variants(name):
     lowercase = name.lower()
     uppercase = name.upper()
     mixed_case = name.capitalize()
@@ -47,6 +48,24 @@ class TestSelect:
         with universql_connection(warehouse="local()") as conn:
             universql_result = execute_query(conn, ALL_COLUMNS_QUERY)
             print(universql_result)
+
+    def test_switch_schema(self):
+        with universql_connection(warehouse="local()") as conn:
+            execute_query(conn, "USE DATABASE snowflake")
+            universql_result = execute_query(conn, "SHOW SCHEMAS")
+            assert universql_result.num_rows > 0, f"The query did not return any rows!"
+
+            execute_query(conn, "USE SCHEMA snowflake.account_usage")
+            universql_result = execute_query(conn, "SHOW SCHEMAS")
+            assert universql_result.num_rows > 0, f"The query did not return any rows!"
+
+            execute_query(conn, "USE snowflake")
+            universql_result = execute_query(conn, "SHOW SCHEMAS")
+            assert universql_result.num_rows > 0, f"The query did not return any rows!"
+
+            execute_query(conn, "USE snowflake.account_usage")
+            universql_result = execute_query(conn, "SHOW SCHEMAS")
+            assert universql_result.num_rows > 0, f"The query did not return any rows!"
 
     def test_in_schema(self):
         with universql_connection(schema="public", warehouse="local()") as conn:

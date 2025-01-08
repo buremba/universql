@@ -19,7 +19,7 @@ from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
-    Var, Literal, IcebergProperty, Copy, Delete, Merge
+    Var, Literal, IcebergProperty, Copy, Delete, Merge, Use
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.lake.cloud import s3, gcs, in_lambda
@@ -146,9 +146,13 @@ class DuckDBExecutor(Executor):
             return f"Run locally on DuckDB: {cost}"
 
     def supports(self, ast: sqlglot.exp.Expression) -> bool:
-        return isinstance(ast, Select) or isinstance(ast, Insert) or isinstance(ast, Create) or isinstance(ast,
-                                                                                                           Copy) or isinstance(
-            ast, Delete) or isinstance(ast, Merge)
+        return (isinstance(ast, Select) or
+                isinstance(ast, Insert) or
+                isinstance(ast, Create) or
+                isinstance(ast, Copy) or
+                isinstance(ast, Delete) or
+                isinstance(ast, Use) or
+                isinstance(ast, Merge))
 
     def execute_raw(self, raw_query: str) -> None:
         try:
@@ -162,7 +166,7 @@ class DuckDBExecutor(Executor):
         except snowflake.connector.ProgrammingError as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.msg}")
 
-    def _register_db(self, db_name):
+    def _register_db_sql(self, db_name):
         if self.catalog.context.get('motherduck_token') is not None:
             return f"CREATE DATABASE IF NOT EXISTS {sqlglot.exp.parse_identifier(db_name).sql()}"
         else:
@@ -173,7 +177,14 @@ class DuckDBExecutor(Executor):
                 duckdb_path = ':memory:'
             return f'ATTACH IF NOT EXISTS \'{duckdb_path}\' AS {sqlglot.exp.parse_identifier(db_name).sql()}'
 
-    def _sync_catalog(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
+    def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
+        self._sync_catalog(locations)
+        final_ast = (simplify(ast)
+                     .transform(self.fix_snowflake_to_duckdb_types))
+
+        return final_ast
+
+    def _sync_catalog(self, locations: Tables):
         default_database = self.catalog.credentials.get('database')
         default_schema = self.catalog.credentials.get('schema')
         schemas = set((table.catalog or default_database,
@@ -189,7 +200,7 @@ class DuckDBExecutor(Executor):
             schemas.add((default_database, default_schema))
 
         databases_sql = [
-            f"{self._register_db(database)};" +
+            f"{self._register_db_sql(database)};" +
             info_schema.creation_sql(sqlglot.exp.parse_identifier(database).sql()) +
             macros.creation_sql(sqlglot.exp.parse_identifier(database).sql())
             for
@@ -212,11 +223,6 @@ class DuckDBExecutor(Executor):
                 self.catalog.duckdb.execute(views_sql)
             except duckdb.Error as e:
                 raise QueryError(f"Unable to sync DuckDB catalog. {e.args}")
-
-        final_ast = (simplify(ast)
-                     .transform(self.fix_snowflake_to_duckdb_types))
-
-        return final_ast
 
     def _get_property(self, ast: sqlglot.exp.Create, name: str):
         if "properties" not in ast.args:
@@ -250,7 +256,7 @@ class DuckDBExecutor(Executor):
                 if ast.kind == 'TABLE':
                     is_replace = ast.args.get('replace')
                     if_exists = ast.args.get('exists')
-                    final_query = self._sync_catalog(ast, tables | {destination_table: None})
+                    final_query = self._sync_and_transform_query(ast, tables | {destination_table: None})
 
                     if is_iceberg:
                         if final_query.expression is not None:
@@ -319,7 +325,7 @@ class DuckDBExecutor(Executor):
                             raise QueryError(
                                 "DuckDB can't create native Snowflake tables, please use Iceberg or External tables")
                 elif ast.kind == 'VIEW':
-                    duckdb_query = self._sync_catalog(ast, tables).sql(dialect="duckdb")
+                    duckdb_query = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb")
                     self.execute_raw(duckdb_query)
 
                     if not is_temp:
@@ -332,19 +338,37 @@ class DuckDBExecutor(Executor):
                         iceberg_table = self.catalog.iceberg_catalog.load_table((namespace, full_table))
                     except NoSuchTableError as e:
                         raise QueryError(f"Error accessing catalog {e.args}")
-                    self.execute_raw(self._sync_catalog(ast.expression, tables).sql(dialect="duckdb"))
+                    self.execute_raw(self._sync_and_transform_query(ast.expression, tables).sql(dialect="duckdb"))
                     table = self.get_as_table()
                     iceberg_table.append(table)
                 elif table_type.LOCAL:
-                    self.execute_raw(self._sync_catalog(ast, tables).sql(dialect="duckdb"))
+                    self.execute_raw(self._sync_and_transform_query(ast, tables).sql(dialect="duckdb"))
                 else:
                     raise QueryError("Unable to determine table type")
 
         elif isinstance(ast, Drop):
             delete_table = ast.this
             self.catalog.iceberg_catalog.drop_table(delete_table.sql())
+        elif isinstance(ast, Use):
+            kind = ast.args['kind']
+            if kind is None or kind.this == 'SCHEMA':
+                if len(ast.this.parts) == 2:
+                    self.catalog.credentials['schema'] = ast.this.parts[-1].sql(dialect="snowflake")
+                    self.catalog.credentials['database'] = ast.this.parts[-2].sql(dialect="snowflake")
+                elif len(ast.this.parts) == 1:
+                    self.catalog.credentials['database'] = ast.this.parts[-1].sql(dialect="snowflake")
+                else:
+                    raise QueryError("Unable to parse USE statement: Unknown kind")
+            elif kind.this == 'DATABASE':
+                self.catalog.credentials['database'] = ast.this.sql(dialect="snowflake")
+            else:
+                raise QueryError("Unable to parse USE statement: Unknown kind")
+            if self.catalog.credentials['database'] is not None:
+                self._sync_catalog({})
+            self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
+            self.catalog.base_catalog.clear_cache()
         else:
-            sql = self._sync_catalog(ast, tables).sql(dialect="duckdb", pretty=True)
+            sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql)
 
         return None

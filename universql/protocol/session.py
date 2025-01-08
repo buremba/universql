@@ -11,7 +11,7 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import NoSuchTableError, TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier, DDL, Query
+from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Show
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
@@ -165,6 +165,8 @@ class UniverSQLSession:
                 else:
                     tables = []
                     must_run_on_catalog = True
+            elif isinstance(ast, Use):
+                tables = []
             else:
                 tables = self._find_tables(ast)
             tables_list = [table[0] for table in tables]

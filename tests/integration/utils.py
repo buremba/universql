@@ -87,7 +87,7 @@ def snowflake_connection() -> Generator:
 
 @contextmanager
 def universql_connection(**properties) -> SnowflakeConnection:
-    """Create a connection through UniversQL proxy."""
+    # https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect#connecting-using-the-connections-toml-file
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
     connections = CONFIG_MANAGER["connections"]
     if SNOWFLAKE_CONNECTION_NAME not in connections:
