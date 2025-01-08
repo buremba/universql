@@ -31,4 +31,4 @@ jobs:
           SNOWFLAKE_CONNECTIONS_BASE64: ${{ secrets.SNOWFLAKE_CONNECTIONS_BASE64 }}
         run: |
           export SNOWFLAKE_CONNECTIONS=$(printf '%s' "$SNOWFLAKE_CONNECTIONS_BASE64" | base64 -d | tr '\r' '\n')
-          poetry run pytest tests/integration/*
+          poetry run pytest tests/integration/* --log-cli-level=DEBUG
