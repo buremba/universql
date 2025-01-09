@@ -1,6 +1,11 @@
 # [DRAFT] Transformers
 
-You can inject modules into Universql at start time, by passing `--module-paths ./my_transformers`.
+You can inject modules into Universql at start time, by passing `--module-paths ./my_transformers` or via:
+
+```bash
+> poetry add "universql[custom_transformers]"
+> universql snowflake myaccount.aws.us-east-1 --module-paths custom_transformers
+```
 
 Here is the abstract class for transformer:
 
