@@ -3,8 +3,10 @@ import socketserver
 import sys
 import threading
 from contextlib import contextmanager
+from traceback import print_exc
 from typing import Generator
 
+import click
 import pyarrow
 import pytest
 from click.testing import CliRunner
@@ -25,9 +27,10 @@ from universql.util import LOCALHOSTCOMPUTING_COM
 # export SNOWFLAKE_CONNECTION_STRING="account=xxx;user=xxx;password=xxx;warehouse=xxx;database=xxx;schema=xxx"
 # export UNIVERSQL_CONNECTION_STRING="warehouse=xxx"
 SNOWFLAKE_CONNECTION_NAME = os.getenv("SNOWFLAKE_CONNECTION_NAME") or "default"
+logging.getLogger("snowflake.connector").setLevel(logging.INFO)
 
 # Allow Universql to start
-os.environ["MAX_CON_RETRY_ATTEMPTS"] = "100"
+os.environ["MAX_CON_RETRY_ATTEMPTS"] = "15"
 
 SIMPLE_QUERY = """
 SELECT 1 as test
@@ -84,6 +87,7 @@ ARRAY_CONSTRUCT(1, 2, 3, 4) AS sample_array,
 -- [1.1,2.2,3]::VECTOR(FLOAT,3) AS sample_vector
 """
 
+server_cache = {}
 
 @contextmanager
 def snowflake_connection(**properties) -> Generator:
@@ -100,41 +104,47 @@ def universql_connection(**properties) -> SnowflakeConnection:
     # https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect#connecting-using-the-connections-toml-file
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
     connections = CONFIG_MANAGER["connections"]
-    snowflake_connection_name = _set_connection_name(properties)
+    snowflake_connection_name = connections.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
+    logger.info(f"Using the {snowflake_connection_name} connection")
     if snowflake_connection_name not in connections:
         raise pytest.fail(f"Snowflake connection '{snowflake_connection_name}' not found in config")
-    connection = connections[snowflake_connection_name]
-    from universql.main import snowflake
-    with socketserver.TCPServer(("localhost", 0), None) as s:
-        free_port = s.server_address[1]
+    connection = connections[SNOWFLAKE_CONNECTION_NAME]
+    account = connection.get('account')
+    if account in server_cache:
+        uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": server_cache[account]} | properties
+    else:
+        from universql.main import snowflake
+        with socketserver.TCPServer(("localhost", 0), None) as s:
+            free_port = s.server_address[1]
+        print(f"Reusing existing server running on port {free_port} for account {account}")
 
-    def start_universql():
-        runner = CliRunner()
-        try:
+        def start_universql():
+            runner = CliRunner()
             invoke = runner.invoke(snowflake,
                                    [
-                                       '--account', connection.get('account'),
+                                       '--account', account,
                                        '--port', free_port, '--catalog', 'snowflake',
                                        # AWS_DEFAULT_PROFILE env can be used to pass AWS profile
                                    ],
+                                   catch_exceptions=False
                                    )
-        except Exception as e:
-            pytest.fail(e)
+            if invoke.exit_code != 0:
+                raise Exception("Unable to start Universql")
 
-        if invoke.exit_code != 0:
-            pytest.fail("Unable to start Universql")
+        print(f"Starting running on port {free_port} for account {account}")
+        thread = threading.Thread(target=start_universql)
+        thread.daemon = True
+        thread.start()
+        server_cache[account] = free_port
+        uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
 
-    thread = threading.Thread(target=start_universql)
-    thread.daemon = True
-    thread.start()
-    # with runner.isolated_filesystem():
-    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
-
+    connect = None
     try:
         connect = snowflake_connect(connection_name=snowflake_connection_name, **uni_string)
         yield connect
-    finally:  # Force stop the thread
-        connect.close()
+    finally:
+        if connect is not None:
+            connect.close()
 
 def execute_query(conn, query: str) -> pyarrow.Table:
     cur = conn.cursor()
@@ -253,8 +263,3 @@ def generate_usql_connection_params(account, user, password, role, database = No
         params["schema"] = schema
 
     return params
-
-def _set_connection_name(connection_dict = {}):
-    snowflake_connection_name = connection_dict.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
-    logger.info(f"Using the {snowflake_connection_name} connection")
-    return snowflake_connection_name
