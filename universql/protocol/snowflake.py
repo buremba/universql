@@ -2,7 +2,6 @@ import logging
 import base64
 import os
 import signal
-import sys
 import threading
 from threading import Thread
 from traceback import print_exc
@@ -17,6 +16,7 @@ import yaml
 
 from fastapi import FastAPI
 from pyarrow import Schema
+from snowflake.connector import DatabaseError
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, HTMLResponse
@@ -29,8 +29,6 @@ from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
 from universql.protocol.session import UniverSQLSession
 
-logging.getLogger().setLevel(logging.INFO)
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("🧵")
 
 app = FastAPI()
@@ -262,8 +260,8 @@ async def query_request(request: Request) -> JSONResponse:
     except QueryError as e:
         # print_exc(limit=1)
         return JSONResponse({"id": query_id, "success": False, "message": e.message, "data": {"sqlState": e.sql_state}})
-    except snowflake.connector.DatabaseError as e:
-        print_exc(limit=1)
+    except DatabaseError as e:
+        print_exc(limit=10)
         return JSONResponse({"id": query_id, "success": False,
                              "message": f"Error running query on Snowflake: {e.message}",
                              "data": {"sqlState": e.sql_state}})
@@ -401,10 +399,11 @@ async def startup_event():
     params = {k: v for k, v in context.items() if
               v is not None and k not in ["host", "port"]}
     click.secho(yaml.dump(params).strip())
-    try:
-        signal.signal(signal.SIGINT, harakiri)
-    except Exception as e:
-        logger.warning("Failed to set signal handler for SIGINT: %s", str(e))
+    if threading.current_thread() is threading.main_thread():
+        try:
+            signal.signal(signal.SIGINT, harakiri)
+        except Exception as e:
+            logger.warning("Failed to set signal handler for SIGINT: %s", str(e))
     host = context.get('host')
     tunnel = context.get('tunnel')
     port = context.get('port')
