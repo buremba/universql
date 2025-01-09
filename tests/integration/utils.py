@@ -11,6 +11,13 @@ from click.testing import CliRunner
 from snowflake.connector import connect as snowflake_connect, SnowflakeConnection
 from snowflake.connector.config_manager import CONFIG_MANAGER
 from snowflake.connector.constants import CONNECTIONS_FILE
+from itertools import product
+import toml
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 
 from universql.util import LOCALHOSTCOMPUTING_COM
 
@@ -78,64 +85,56 @@ ARRAY_CONSTRUCT(1, 2, 3, 4) AS sample_array,
 """
 
 
-@pytest.fixture(scope="session")
+@contextmanager
 def snowflake_connection(**properties) -> Generator:
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
-    conn = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **properties)
-    yield conn
-    conn.close()
-
-server_cache = {}
+    snowflake_connection_name = _set_connection_name(properties)
+    conn = snowflake_connect(connection_name=snowflake_connection_name, **properties)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 @contextmanager
 def universql_connection(**properties) -> SnowflakeConnection:
     # https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect#connecting-using-the-connections-toml-file
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
     connections = CONFIG_MANAGER["connections"]
-    if SNOWFLAKE_CONNECTION_NAME not in connections:
-        raise pytest.fail(f"Snowflake connection '{SNOWFLAKE_CONNECTION_NAME}' not found in config")
-    connection = connections[SNOWFLAKE_CONNECTION_NAME]
-    account = connection.get('account')
+    snowflake_connection_name = _set_connection_name(properties)
+    if snowflake_connection_name not in connections:
+        raise pytest.fail(f"Snowflake connection '{snowflake_connection_name}' not found in config")
+    connection = connections[snowflake_connection_name]
+    from universql.main import snowflake
+    with socketserver.TCPServer(("localhost", 0), None) as s:
+        free_port = s.server_address[1]
 
-    if account in server_cache:
-        uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": server_cache[account]} | properties
-    else:
-        from universql.main import snowflake
-        with socketserver.TCPServer(("localhost", 0), None) as s:
-            free_port = s.server_address[1]
-        print(f"Reusing existing server running on port {free_port} for account {account}")
+    def start_universql():
+        runner = CliRunner()
+        try:
+            invoke = runner.invoke(snowflake,
+                                   [
+                                       '--account', connection.get('account'),
+                                       '--port', free_port, '--catalog', 'snowflake',
+                                       # AWS_DEFAULT_PROFILE env can be used to pass AWS profile
+                                   ],
+                                   )
+        except Exception as e:
+            pytest.fail(e)
 
-        def start_universql():
-            runner = CliRunner()
-            try:
-                invoke = runner.invoke(snowflake,
-                                       [
-                                           '--account', account,
-                                           '--port', free_port, '--catalog', 'snowflake',
-                                           # AWS_DEFAULT_PROFILE env can be used to pass AWS profile
-                                       ],
-                                       )
-            except Exception as e:
-                pytest.fail(e)
+        if invoke.exit_code != 0:
+            pytest.fail("Unable to start Universql")
 
-            if invoke.exit_code != 0:
-                pytest.fail("Unable to start Universql")
-
-
-        print(f"Starting running on port {free_port} for account {account}")
-        thread = threading.Thread(target=start_universql)
-        thread.daemon = True
-        thread.start()
-        server_cache[account] = free_port
+    thread = threading.Thread(target=start_universql)
+    thread.daemon = True
+    thread.start()
     # with runner.isolated_filesystem():
-        uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
+    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
 
     try:
-        connect = snowflake_connect(connection_name=SNOWFLAKE_CONNECTION_NAME, **uni_string)
+        connect = snowflake_connect(connection_name=snowflake_connection_name, **uni_string)
         yield connect
-    finally:
+    finally:  # Force stop the thread
         connect.close()
-
 
 def execute_query(conn, query: str) -> pyarrow.Table:
     cur = conn.cursor()
@@ -193,3 +192,69 @@ def cleanup_table(conn, table_name: str):
             cur.close()
         except Exception as e:
             print(f"Error during cleanup: {e}")
+
+def generate_name_variants(name, include_blank = False):
+    lowercase = name.lower()
+    uppercase = name.upper()
+    mixed_case = name.capitalize()
+    in_quotes = '"' + name.upper() + '"'
+    print([lowercase, uppercase, mixed_case, in_quotes])
+    return [lowercase, uppercase, mixed_case, in_quotes]
+
+def generate_select_statement_combos(sets_of_identifiers, connected_db = None, connected_schema = None):
+    select_statements = []
+    for set in sets_of_identifiers:
+        set_of_select_statements = []
+        database = set.get("database")
+        schema = set.get("schema")
+        table = set.get("table")
+        if table is not None:
+            table_variants = generate_name_variants(table)
+            if database == connected_db and schema == connected_schema:
+                for table_variant in table_variants:
+                    set_of_select_statements.append(f"SELECT * FROM {table_variant}")
+        else:
+            raise Exception("No table name provided for a select stametent combo.")
+        
+        if schema is not None:
+            schema_variants = generate_name_variants(schema)
+            if database == connected_db:
+                object_name_combos = product(schema_variants, table_variants)
+                for schema_name, table_name in object_name_combos:
+                    set_of_select_statements.append(f"SELECT * FROM {schema_name}.{table_name}")
+        else:
+            if database is not None:
+                raise Exception("You must provide a schema name if you provide a database name.")
+        
+        if database is not None:
+            database_variants = generate_name_variants(database)
+            object_name_combos = product(database_variants, schema_variants, table_variants)
+            for db_name, schema_name, table_name in object_name_combos:
+                set_of_select_statements.append(f"SELECT * FROM {db_name}.{schema_name}.{table_name}")
+        select_statements = select_statements + set_of_select_statements
+        logger.info(f"database: {database}, schema: {schema}, table: {table}")
+        for statement in set_of_select_statements:
+            logger.info(statement)
+        # logger.info(f"database: {database}, schema: {schema}, table: {table}")
+            
+    return select_statements
+
+def generate_usql_connection_params(account, user, password, role, database = None, schema = None):
+    params = {
+        "account": account,
+        "user": user,
+        "password": password,
+        "role": role,
+        "warehouse": "local()",
+    }
+    if database is not None:
+        params["database"] = database
+    if schema is not None:
+        params["schema"] = schema
+
+    return params
+
+def _set_connection_name(connection_dict = {}):
+    snowflake_connection_name = connection_dict.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
+    logger.info(f"Using the {snowflake_connection_name} connection")
+    return snowflake_connection_name

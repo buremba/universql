@@ -15,7 +15,7 @@ from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Show
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
-    prepend_to_lines, parse_compute, QueryError, fill_qualifier
+    prepend_to_lines, parse_compute, QueryError, full_qualifier
 from universql.warehouse import Executor, Tables, ICatalog
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
@@ -153,7 +153,7 @@ class UniverSQLSession:
                         cte_aliases.add(cte.alias)
             if isinstance(expression, sqlglot.exp.Table) and isinstance(expression.this, Identifier):
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
-                    yield fill_qualifier(expression, self.credentials), cte_aliases
+                    yield full_qualifier(expression, self.credentials), cte_aliases
 
     def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
         if (ast is not None and alternative_executor.supports(ast) and
@@ -208,7 +208,7 @@ class UniverSQLSession:
         namespace = self.iceberg_catalog.properties.get('namespace')
 
         for table in tables:
-            full_qualifier_ = fill_qualifier(table, self.credentials)
+            full_qualifier_ = full_qualifier(table, self.credentials)
             native_executor_exists = full_qualifier_ in alternative_catalog.get_table_paths([full_qualifier_])
             if native_executor_exists:
                 continue

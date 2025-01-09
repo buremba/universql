@@ -110,3 +110,5 @@ venv/*
 .venv/*
 .db/*
 .env
+universql.metadata.sqlite
+credentials/
