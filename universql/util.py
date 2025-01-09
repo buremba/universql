@@ -232,19 +232,7 @@ parameters = [
 #               {"name": "CLIENT_STAGE_ARRAY_BINDING_THRESHOLD", "value": 65280}]
 
 
-def session_from_request(self, request):
-    """
-    Get a request's relevant session
-    """
-    auth = request.headers.get('Authorization')
-    if not auth:
-        raise HTTPException(status_code=401, detail='No Authorization header')
-    if not auth.startswith('Snowflake Token="'):
-        raise HTTPException(status_code=401, detail='Invalid Authorization header')
-    token = auth[17:-1]
-    if token not in self.sessions:
-        raise HTTPException(status_code=401, detail='Invalid Authorization header')
-    return self.sessions[token]
+
 
 
 @dataclass
@@ -296,7 +284,6 @@ def session_from_request(sessions: List[str], request: Request):
                             detail="User must login again to access the service. Maybe server restarted? Restarting Universql aborts all the concurrent sessions.")
     return sessions[token]
 
-
 def pprint_secs(secs):
     """Format seconds in a human readable form."""
     now = time.time()
@@ -318,9 +305,9 @@ def get_friendly_time_since(start_time, performance_counter):
                                  suppress=["days"], format="%0.3f")
 
 
-def prepend_to_lines(input_string, prepend_string=" ", vertical_string='------'):
-    if len(input_string) > 2500:
-        input_string = input_string[0:2500] + '[striped due to max 2500 character limit]'
+def prepend_to_lines(input_string, prepend_string=" ", vertical_string='------', max = 2500):
+    if len(input_string) > max:
+        input_string = input_string[0:max] + '[striped due to max 2500 character limit]'
     lines = input_string.split('\n')
     modified_lines = [prepend_string + line for line in lines]
     modified_string = '\n'.join(modified_lines)

@@ -217,8 +217,7 @@ class DuckDBExecutor(Executor):
         views_sql = ";\n".join(databases_sql + schemas_sql + setup_query + views_sql)
 
         if views_sql != "":
-            logger.info(
-                f"[{self.catalog.session_id}] DuckDB environment is setting up:\n{views_sql}")
+            logger.debug(f"[{self.catalog.session_id}] DuckDB environment is setting up:\n{prepend_to_lines(views_sql, max=1000)}")
             try:
                 self.catalog.duckdb.execute(views_sql)
             except duckdb.Error as e:
