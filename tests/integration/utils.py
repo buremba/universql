@@ -104,8 +104,7 @@ def universql_connection(**properties) -> SnowflakeConnection:
     # https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect#connecting-using-the-connections-toml-file
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
     connections = CONFIG_MANAGER["connections"]
-    snowflake_connection_name = connections.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
-    logger.info(f"Using the {snowflake_connection_name} connection")
+    snowflake_connection_name = _set_connection_name(properties)
     if snowflake_connection_name not in connections:
         raise pytest.fail(f"Snowflake connection '{snowflake_connection_name}' not found in config")
     connection = connections[SNOWFLAKE_CONNECTION_NAME]
@@ -249,17 +248,7 @@ def generate_select_statement_combos(sets_of_identifiers, connected_db = None, c
             
     return select_statements
 
-def generate_usql_connection_params(account, user, password, role, database = None, schema = None):
-    params = {
-        "account": account,
-        "user": user,
-        "password": password,
-        "role": role,
-        "warehouse": "local()",
-    }
-    if database is not None:
-        params["database"] = database
-    if schema is not None:
-        params["schema"] = schema
-
-    return params
+def _set_connection_name(connection_dict = {}):
+    snowflake_connection_name = connection_dict.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
+    logger.info(f"Using the {snowflake_connection_name} connection")
+    return snowflake_connection_name
