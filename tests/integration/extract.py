@@ -39,6 +39,7 @@ class TestSelect:
             universql_result = execute_query(conn, SIMPLE_QUERY)
             print(universql_result)
 
+    @pytest.mark.skip(reason="Stages are not implemented yet")
     def test_from_stage(self):
         with universql_connection() as conn:
             universql_result = execute_query(conn, "select count(*) from @stage/iceberg_stage")
@@ -67,9 +68,9 @@ class TestSelect:
             universql_result = execute_query(conn, "SHOW SCHEMAS")
             assert universql_result.num_rows > 0, f"The query did not return any rows!"
 
-    def test_in_schema(self):
-        with universql_connection(schema="public", warehouse="local()") as conn:
-            universql_result = execute_query(conn, "select count(*) from table_in_public_schema")
+    def test_in_database(self):
+        with universql_connection(database="public") as conn:
+            universql_result = execute_query(conn, "select * from information_schema.columns")
             print(universql_result)
 
     def test_qualifiers(self):

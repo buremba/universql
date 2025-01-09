@@ -1,4 +1,4 @@
-name: Release
+name: Test
 
 on:
   push:
@@ -30,6 +30,5 @@ jobs:
         env:
           SNOWFLAKE_CONNECTIONS_BASE64: ${{ secrets.SNOWFLAKE_CONNECTIONS_BASE64 }}
         run: |
-          rm /home/runner/.config/snowflake/connections.toml
-          export SNOWFLAKE_CONNECTIONS=$(echo $SNOWFLAKE_CONNECTIONS_BASE64 | base64 --decode)
-          poetry run pytest tests/integration/*
+          export SNOWFLAKE_CONNECTIONS=$(printf '%s' "$SNOWFLAKE_CONNECTIONS_BASE64" | base64 -d | tr '\r' '\n')
+          poetry run pytest tests/integration/* --log-cli-level=DEBUG

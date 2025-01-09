@@ -18,7 +18,8 @@ from pyiceberg.typedef import IcebergBaseModel
 from snowflake.connector import NotSupportedError, DatabaseError
 from snowflake.connector.constants import FIELD_TYPES, FieldType
 from sqlglot.expressions import Literal, Var, Property, IcebergProperty, Properties, ColumnDef, DataType, \
-    Schema, TransientProperty, TemporaryProperty, Select, Column, Alias, Anonymous, parse_identifier, Subquery
+    Schema, TransientProperty, TemporaryProperty, Select, Column, Alias, Anonymous, parse_identifier, Subquery, Show, \
+    Use
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
@@ -119,7 +120,8 @@ class SnowflakeCatalog(ICatalog):
         volume_location = cursor.fetchall()
 
         # Find the active storage location name
-        active_storage_name = next((item[3] for item in volume_location if item[1] == 'ACTIVE' and item[0] == 'STORAGE_LOCATIONS'), None)
+        active_storage_name = next(
+            (item[3] for item in volume_location if item[1] == 'ACTIVE' and item[0] == 'STORAGE_LOCATIONS'), None)
 
         # Extract the STORAGE_BASE_URL from the corresponding storage location
         storage_base_url = None
@@ -275,8 +277,7 @@ class SnowflakeExecutor(Executor):
             return 'TEXT'
         return snowflake_type.name
 
-    def execute_raw(self, compiled_sql: str) -> None:
-        run_on_warehouse = self.catalog.compute.get('warehouse') is not None
+    def execute_raw(self, compiled_sql: str, run_on_warehouse=None) -> None:
         try:
             emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
             logger.info(f"[{self.catalog.session_id}] Running on Snowflake.. {emoji} \n {compiled_sql}")
@@ -290,7 +291,7 @@ class SnowflakeExecutor(Executor):
         compiled_sql = (ast
                         # .transform(self.default_create_table_as_iceberg)
                         .sql(dialect="snowflake", pretty=True))
-        self.execute_raw(compiled_sql)
+        self.execute_raw(compiled_sql, run_on_warehouse=not isinstance(ast, Show) and not isinstance(ast, Use))
         return None
 
     def get_query_log(self, total_duration) -> str:
