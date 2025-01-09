@@ -136,36 +136,6 @@ def universql_connection(**properties) -> SnowflakeConnection:
     finally:  # Force stop the thread
         connect.close()
 
-@contextmanager
-def dynamic_universql_connection(**properties) -> SnowflakeConnection:
-    """Create a connection through UniversQL proxy."""
-    from universql.main import snowflake
-    with socketserver.TCPServer(("localhost", 0), None) as s:
-        free_port = s.server_address[1]
-
-    def start_universql():
-        runner = CliRunner()
-        try:
-            invoke = runner.invoke(snowflake,
-                               ['--account', properties.get('account'), '--port', free_port, '--catalog',
-                                'snowflake'], )
-        except Exception as e:
-            pytest.fail(e)
-
-        if invoke.exit_code != 0:
-            pytest.fail("Unable to start Universql")
-
-    thread = threading.Thread(target=start_universql)
-    thread.daemon = True
-    thread.start()
-
-    uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": free_port} | properties
-    try:
-        connection = snowflake_connect(**uni_string)
-        yield connection
-    finally:
-        connection.close()
-
 def execute_query(conn, query: str) -> pyarrow.Table:
     cur = conn.cursor()
     try:
