@@ -4,7 +4,6 @@ import time
 import typing
 from typing import List
 from uuid import uuid4
-import ast
 
 import pyarrow as pa
 import pyiceberg.table
@@ -26,6 +25,7 @@ from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
 from universql.protocol.utils import get_field_for_snowflake
 from pprint import pp
+from .snowflake_stages import get_stage_info, convert_file_properties
 
 MAX_LIMIT = 10000
 
@@ -122,80 +122,18 @@ class SnowflakeCatalog(ICatalog):
         files_info = []
         if len(files) == 0:
             return {}
-        for file in files:
-            if file.get("type") == 'STAGE':
-                raw_stage_data = self.get_stage_info(file)
-                file_properties = self.convert_file_properties(raw_stage_data)
-            # if isinstance()
-        
+        try:
+            cursor = self.cursor()
+            for file in files:
+                if file.get("type") == 'STAGE':
+                    raw_stage_data = get_stage_info(file, cursor)
+                    # file_properties = convert_file_properties(raw_stage_data)
+                # if isinstance()
+        finally:
+            cursor.close()
             print("WE GOT SOME GOD DAMN FILES")
 
-    def convert_file_properties_to_duckdb(self, file_properties):
-        for property, property_value in file_properties:
-            pass
-        return {}
 
-    def get_stage_info(self, file):
-        cursor = self.cursor()
-        cursor.execute(f"DESCRIBE STAGE {file["stage_name"]}")
-        stage_info = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
-
-        filtered_stage_info = {}
-
-        for row in stage_info:
-            column_name = row[1]
-            value = self.format_stage_value(row)
-            filtered_stage_info[column_name] = value
-        return filtered_stage_info
-
-    def format_stage_value(self, row):
-        def _format_snowflake_type(value, data_type):
-            if data_type == 'String':
-                return self._escape_backslashes(value)
-            elif data_type == 'Boolean':
-                return True if row[2] == 'true' else False
-            elif data_type == 'Integer':
-                return int(value)
-            
-        data_type = row[2]
-        value = row[3]
-
-        if value == '':
-            return None
-        
-        # will fail if a list item contain ", " within it
-        # because SF does not use quotes around strings for list types
-        elif data_type == 'List':
-            formatted_value = self._escape_backslashes( value[1:len(value)-1])
-            return formatted_value.split(", ")
-        elif value[0] == '[':
-            raw_array = ast.literal_eval(value)
-            formatted_array = []
-            for value in raw_array:
-                formatted_array.append(_format_snowflake_type(value, data_type))
-            return formatted_array
-        else:
-            return _format_snowflake_type(value, data_type)
-
-    def _format_stage_properties(stage_row):
-        return {
-            "property": stage_row["property"],
-            "value": stage_row["property"]
-        }
-    
-    def _escape_backslashes(self, str):
-        return str.replace('\\\\', '\\')
-
-    def get_stage_name(self, file: sqlglot.exp.Table):
-        full_string = file.this.name
-        in_quotes = False
-        for i, char in enumerate(full_string):
-            if char == '"':
-                in_quotes = not in_quotes
-            elif char == '/' and not in_quotes:
-                return full_string[1:i]
-        return full_string[1:i]
 
     def get_volume_lake_path(self, volume: str) -> str:
         cursor = self.cursor()
@@ -220,57 +158,7 @@ class SnowflakeCatalog(ICatalog):
             raise QueryError(f"Unable to find storage location for volume {volume}.")
 
         return storage_base_url
-    # def find_table_location(self, database: str, schema: str, table_name: str, lazy_check: bool = True) -> str:
-    #     table_location = self.databases.get(database, {}).get(schema, {}).get(table_name)
-    #     if table_location is None:
-    #         if lazy_check:
-    #             self.load_database_schema(database, schema)
-    #             return self.find_table_location(database, schema, table_name, lazy_check=False)
-    #         else:
-    #             raise Exception(f"Table {table_name} not found in {database}.{schema}")
-    #     return table_location
-    # def load_external_volumes_for_tables(self, tables: pd.DataFrame) -> pd.DataFrame:
-    #     volumes = tables["external_volume_name"].unique()
-    #
-    #     volume_mapping = {}
-    #     for volume in volumes:
-    #         volume_location = pd.read_sql("DESC EXTERNAL VOLUME identifier(%s)", self.connection, params=[volume])
-    #         active_storage = duckdb.sql("""select property_value from volume_location
-    #                     where parent_property = 'STORAGE_LOCATIONS' and property = 'ACTIVE'
-    #                    """).fetchall()[0][0]
-    #         all_properties = duckdb.execute("""select property_value from volume_location
-    #                 where parent_property = 'STORAGE_LOCATIONS' and property like 'STORAGE_LOCATION_%'""").fetchall()
-    #         for properties in all_properties:
-    #             loads = json.loads(properties[0])
-    #             if loads.get('NAME') == active_storage:
-    #                 volume_mapping[volume] = loads
-    #                 break
-    #     return volume_mapping
-
-    # def load_database_schema(self, database: str, schema: str):
-    #     tables = self.load_iceberg_tables(database, schema)
-    #     external_volumes = self.load_external_volumes_for_tables(tables)
-    #
-    #     tables["external_location"] = tables.apply(
-    #         lambda x: (external_volumes[x["external_volume_name"]].get('STORAGE_BASE_URL')
-    #                    + x["base_location"]), axis=1)
-    #     if database not in self.databases:
-    #         self.databases[database] = {}
-    #
-    #     self.databases[database][schema] = dict(zip(tables.name, tables.external_location))
-
-    # def load_iceberg_tables(self, database: str, schema: str, after: Optional[str] = None) -> pd.DataFrame:
-    #     query = "SHOW ICEBERG TABLES IN SCHEMA IDENTIFIER(%s) LIMIT %s", [database + '.' + schema, MAX_LIMIT]
-    #     if after is not None:
-    #         query[0] += " AFTER %s"
-    #         query[1].append(after)
-    #     tables = pd.read_sql(query[0], self.connection, params=query[1])
-    #     if len(tables.index) >= MAX_LIMIT:
-    #         after = tables.iloc[-1, :]["name"]
-    #         return tables + self.load_iceberg_tables(database, schema, after=after)
-    #     else:
-    #         return tables
-
+    
 
 class SnowflakeExecutor(Executor):
 

@@ -20,6 +20,7 @@ from universql.warehouse import Executor, Tables, ICatalog
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
+from universql.warehouse.snowflake_stages import get_stage_name
 from pprint import pp
 
 logging.basicConfig(level=logging.INFO)
@@ -175,7 +176,7 @@ class UniverSQLSession:
                         'file_qualifier': full_qualifier(file_node, self.credentials),
                         'type': 'STAGE',
                         'source_catalog': 'SNOWFLAKE',
-                        'stage_name': self.catalog.get_stage_name(file_node)
+                        'stage_name': get_stage_name(file_node)
                     })
                     match = True
 
