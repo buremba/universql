@@ -4,6 +4,7 @@ import time
 import typing
 from typing import List
 from uuid import uuid4
+import ast
 
 import pyarrow as pa
 import pyiceberg.table
@@ -24,6 +25,7 @@ from sqlglot.expressions import Literal, Var, Property, IcebergProperty, Propert
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
 from universql.protocol.utils import get_field_for_snowflake
+from pprint import pp
 
 MAX_LIMIT = 10000
 
@@ -77,6 +79,8 @@ class SnowflakeCatalog(ICatalog):
         for location in tables.values():
             queries.append(location.sql(dialect='snowflake'))
         final_query = '\n'.join(queries)
+        print("final_query INCOMING")
+        pp(final_query)
         if final_query:
             logger.info(f"[{self.session_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
             try:
@@ -112,6 +116,85 @@ class SnowflakeCatalog(ICatalog):
         except DatabaseError as e:
             err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: \n {e.msg} \n{final_query}"
             raise QueryError(err_message, e.sqlstate)
+        
+    def get_file_info(self, files):
+        files_info = []
+        if len(files) == 0:
+            return {}
+        for file in files:
+            if file.get("type") == 'STAGE':
+                raw_stage_data = self.get_stage_info(file)
+                file_properties = self.convert_file_properties(raw_stage_data)
+            # if isinstance()
+        
+            print("WE GOT SOME GOD DAMN FILES")
+
+    def convert_file_properties_to_duckdb(self, file_properties):
+        for property, property_value in file_properties:
+            pass
+        return {}
+
+    def get_stage_info(self, file):
+        cursor = self.cursor()
+        cursor.execute(f"DESCRIBE STAGE {file["stage_name"]}")
+        stage_info = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+
+        filtered_stage_info = {}
+
+        for row in stage_info:
+            column_name = row[1]
+            value = self.format_stage_value(row)
+            filtered_stage_info[column_name] = value
+        return filtered_stage_info
+
+    def format_stage_value(self, row):
+        def _format_snowflake_type(value, data_type):
+            if data_type == 'String':
+                return self._escape_backslashes(value)
+            elif data_type == 'Boolean':
+                return True if row[2] == 'true' else False
+            elif data_type == 'Integer':
+                return int(value)
+            
+        data_type = row[2]
+        value = row[3]
+
+        if value == '':
+            return None
+        
+        # will fail if a list item contain ", " within it
+        # because SF does not use quotes around strings for list types
+        elif data_type == 'List':
+            formatted_value = self._escape_backslashes( value[1:len(value)-1])
+            return formatted_value.split(", ")
+        elif value[0] == '[':
+            raw_array = ast.literal_eval(value)
+            formatted_array = []
+            for value in raw_array:
+                formatted_array.append(_format_snowflake_type(value, data_type))
+            return formatted_array
+        else:
+            return _format_snowflake_type(value, data_type)
+
+    def _format_stage_properties(stage_row):
+        return {
+            "property": stage_row["property"],
+            "value": stage_row["property"]
+        }
+    
+    def _escape_backslashes(self, str):
+        return str.replace('\\\\', '\\')
+
+    def get_stage_name(self, file: sqlglot.exp.Table):
+        full_string = file.this.name
+        in_quotes = False
+        for i, char in enumerate(full_string):
+            if char == '"':
+                in_quotes = not in_quotes
+            elif char == '/' and not in_quotes:
+                return full_string[1:i]
+        return full_string[1:i]
 
     def get_volume_lake_path(self, volume: str) -> str:
         cursor = self.cursor()

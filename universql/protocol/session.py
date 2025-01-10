@@ -22,6 +22,7 @@ from universql.warehouse import Executor, Tables, ICatalog
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
+from pprint import pp
 
 logger = logging.getLogger("💡")
 
@@ -30,6 +31,8 @@ COMPUTES = {"duckdb": DuckDBCatalog, "local": DuckDBCatalog, "bigquery": BigQuer
 
 class UniverSQLSession:
     def __init__(self, context, session_id, credentials: dict, session_parameters: dict):
+        print("context INCOMING")
+        pp(context)
         self.context = context
         self.credentials = credentials
         self.session_parameters = [{"name": item[0], "value": item[1]} for item in session_parameters.items()]
@@ -163,9 +166,39 @@ class UniverSQLSession:
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
                     yield full_qualifier(expression, self.credentials), cte_aliases
 
+    def _find_files(self, ast: sqlglot.exp.Expression):
+        # Ensure the root node is a Copy node
+        if isinstance(ast, sqlglot.exp.Copy) == False:
+            return None
+        
+        # Access the files property
+        file_nodes = ast.args.get("files", [])
+        files = []
+
+        for file_node in file_nodes:
+            match = False
+            if isinstance(file_node, sqlglot.exp.Table) and isinstance(self.catalog, SnowflakeCatalog):
+                if file_node.this.name[0] == '@':
+                    files.append({
+                        'file_qualifier': full_qualifier(file_node, self.credentials),
+                        'type': 'STAGE',
+                        'source_catalog': 'SNOWFLAKE',
+                        'stage_name': self.catalog.get_stage_name(file_node)
+                    })
+                    match = True
+
+            if isinstance(file_node, sqlglot.exp.Var):
+                print("Ingesting data directly from files is not yet supported.")
+                match = True
+
+            if match != True:
+                print("Unknown node type in files:", file_node)
+
+        return files
     def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
         if ast is not None and alternative_executor != self.catalog_executor:
             must_run_on_catalog = False
+            files_list = None
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
                     tables = self._find_tables(ast.expression) if ast.expression is not None else []
@@ -176,19 +209,29 @@ class UniverSQLSession:
                 tables = []
             else:
                 tables = self._find_tables(ast)
+                files_list = self._find_files(ast)
             tables_list = [table[0] for table in tables]
             must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables_list, ast)
             if not must_run_on_catalog:
                 op_name = alternative_executor.__class__.__name__
-                with sentry_sdk.start_span(op=op_name, name="Get table paths"):
-                    locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
-                with sentry_sdk.start_span(op=op_name, name="Execute query"):
-                    new_locations = alternative_executor.execute(ast, locations)
-                if new_locations is not None:
-                    with sentry_sdk.start_span(op=op_name, name="Register new locations"):
-                        self.catalog.register_locations(new_locations)
-                return alternative_executor
+                if files_list is not None:
+                    with sentry_sdk.start_span(op=op_name, name="Get file info"):
+                        file_data = self.catalog.get_file_info(files_list)
 
+                with sentry_sdk.start_span(op=op_name, name="Get table paths"):
+                    table_locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
+
+                with sentry_sdk.start_span(op=op_name, name="Execute query"):
+                    new_table_locations = alternative_executor.execute(ast, table_locations)
+
+                if new_table_locations is not None:
+                    with sentry_sdk.start_span(op=op_name, name="Register new locations"):
+                        print("new_table_locations INCOMING")
+                        pp(new_table_locations)
+                        self.catalog.register_locations(new_table_locations)
+
+                return alternative_executor
+            print("mustn't")
         with sentry_sdk.start_span(name="Execute query on Snowflake"):
             last_executor = self.catalog_executor
             if ast is None:
@@ -212,6 +255,9 @@ class UniverSQLSession:
             self.metadata_db.close()
             if os.path.exists(self.metadata_db.name):
                 os.remove(self.metadata_db.name)
+
+    def get_file_paths_and_credentials_from_catalog(self, alternative_catalog: ICatalog, files_list):
+        return alternative_catalog.get_file_paths(files_list)
 
     def get_table_paths_from_catalog(self, alternative_catalog: ICatalog, tables: list[sqlglot.exp.Table]) -> Tables:
         not_existed = []

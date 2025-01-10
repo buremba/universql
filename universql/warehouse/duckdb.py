@@ -21,6 +21,7 @@ from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
     Var, Literal, IcebergProperty, Use, ColumnDef, DataType
 from sqlglot.optimizer.simplify import simplify
+from pprint import pp
 
 from universql.lake.cloud import s3, gcs, in_lambda
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
@@ -108,6 +109,11 @@ class DuckDBCatalog(ICatalog):
             return TableType.ICEBERG
 
         raise NotSupportedError
+    
+    def _get_file_location(self, file):
+        database = file.parts[0]
+        schema = file.parts[1]
+        table_name = file.parts[2].quoted   
 
     def register_locations(self, tables: Locations):
         raise Exception("Unsupported operation")
@@ -363,6 +369,10 @@ class DuckDBExecutor(Executor):
             self.catalog.base_catalog.clear_cache()
         else:
             sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
+            print("ast INCOMING")
+            pp(ast)
+            print("sql INCOMING")
+            print(sql)
             self.execute_raw(sql)
 
         return None
