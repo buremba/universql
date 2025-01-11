@@ -125,10 +125,13 @@ class SnowflakeCatalog(ICatalog):
         try:
             cursor = self.cursor()
             for file in files:
+                print("file INCOMING")
+                pp(file)
                 if file.get("type") == 'STAGE':
                     stage_info = get_stage_info(file, cursor)
-                    stage_info["FILE_METADATA"] = file
+                    stage_info["METADATA"] = stage_info["METADATA"] | file
                     copy_data[file["stage_name"]] = stage_info
+                    get_stage_info(file, cursor)
         finally:
             cursor.close()
             return copy_data

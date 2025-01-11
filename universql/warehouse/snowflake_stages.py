@@ -99,7 +99,7 @@ def get_stage_name(file: sqlglot.exp.Table):
 
 PROPERTY_MAPPINGS = {
     "TYPE": {
-        "duckdb_property_name": "type",
+        "duckdb_property_name": "file_type",
         "duckdb_property_type": "METADATA" 
     },
     "RECORD_DELIMITER": {
