@@ -18,8 +18,6 @@ def get_stage_info(file, cursor):
             "snowflake_property_type": data_type
         }
 
-
-
     duckdb_data = convert_to_duckdb_properties(stage_info_dict)
 
     return duckdb_data
@@ -34,6 +32,11 @@ def convert_to_duckdb_properties(copy_properties):
             metadata[duckdb_property_name] = property_values["duckdb_property_value"]
         else:
             all_converted_properties = all_converted_properties | converted_properties
+    first_url = metadata["URL"][0]
+    if first_url.startswith("s3:"):
+        metadata["storage_provider"] = "Amazon S3"
+    else:
+        raise Exception("Universql currently only supports Amazon S3 for stages locations.")
     all_converted_properties["METADATA"] = metadata    
     return all_converted_properties
 
