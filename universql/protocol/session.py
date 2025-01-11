@@ -188,6 +188,10 @@ class UniverSQLSession:
                 print("Unknown node type in files:", file_node)
 
         return files
+    
+    def _get_file_credentials():
+        pass
+
     def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
         if (ast is not None and alternative_executor.supports(ast) and
                 alternative_executor != self.catalog_executor):
