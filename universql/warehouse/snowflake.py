@@ -119,21 +119,24 @@ class SnowflakeCatalog(ICatalog):
             raise QueryError(err_message, e.sqlstate)
         
     def get_file_info(self, files):
-        files_info = []
+        copy_data = []
+
         if len(files) == 0:
             return {}
         try:
             cursor = self.cursor()
             for file in files:
                 if file.get("type") == 'STAGE':
-                    raw_stage_data = get_stage_info(file, cursor)
-                    # file_properties = convert_file_properties(raw_stage_data)
-                # if isinstance()
+                    print("IT IS A STAGE")
+                    stage_data = {file["stage_name"]: get_stage_info(file, cursor)}
+                    copy_data.append({file["stage_name"]: get_stage_info(file, cursor)})
+                    print("stage_data INCOMING")
+                    pp(stage_data)
         finally:
             cursor.close()
-            print("WE GOT SOME GOD DAMN FILES")
-
-
+            print("copy_data INCOMING")
+            pp(copy_data)
+            return copy_data
 
     def get_volume_lake_path(self, volume: str) -> str:
         cursor = self.cursor()
@@ -257,7 +260,7 @@ class SnowflakeExecutor(Executor):
             message = f"{e.sfqid}: {e.msg} \n{compiled_sql}"
             raise QueryError(message, e.sqlstate)
 
-    def execute(self, ast: sqlglot.exp.Expression, locations: Tables) -> \
+    def execute(self, ast: sqlglot.exp.Expression, locations: Tables, file_data = None) -> \
             typing.Optional[typing.Dict[sqlglot.exp.Table, str]]:
         compiled_sql = (ast
                         # .transform(self.default_create_table_as_iceberg)

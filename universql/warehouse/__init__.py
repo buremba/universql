@@ -55,7 +55,7 @@ class Executor(ABC, typing.Generic[T]):
         pass
 
     @abstractmethod
-    def execute(self, ast: sqlglot.exp.Expression, locations: Tables) -> \
+    def execute(self, ast: sqlglot.exp.Expression, locations: Tables, file_data = None) -> \
             typing.Optional[Locations]:
         pass
 

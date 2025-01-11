@@ -238,7 +238,7 @@ class DuckDBExecutor(Executor):
                                                                 Var) and expression.this.this.casefold() == name.casefold()),
             None)
 
-    def execute(self, ast: sqlglot.exp.Expression, tables: Tables) -> typing.Optional[Locations]:
+    def execute(self, ast: sqlglot.exp.Expression, tables: Tables, file_data = None) -> typing.Optional[Locations]:
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this
@@ -372,12 +372,14 @@ class DuckDBExecutor(Executor):
                 self._sync_catalog({})
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             self.catalog.base_catalog.clear_cache()
+        elif isinstance(ast, Copy):
+            print("COPY INCOMING")
+            print("file_data INCOMING")
+            pp(file_data)
+            sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
+            self.execute_raw(sql)
         else:
             sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
-            print("ast INCOMING")
-            pp(ast)
-            print("sql INCOMING")
-            print(sql)
             self.execute_raw(sql)
 
         return None

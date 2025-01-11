@@ -36,7 +36,7 @@ class BigQueryIcebergExecutor(Executor):
         self.query = self.client.query(raw_query, location="europe-west2", project="jinjat-demo",
                                        job_config=config)
 
-    def execute(self, ast: sqlglot.exp.Expression, locations: typing.Dict[sqlglot.exp.Table, str]) -> None:
+    def execute(self, ast: sqlglot.exp.Expression, locations: typing.Dict[sqlglot.exp.Table, str], file_data = None) -> None:
         sql = ast.transform(self.replace_full_reference_as_table).sql(dialect="bigquery")
 
         definitions = {'___'.join([part.sql() for part in table.parts]):
