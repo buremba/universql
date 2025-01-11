@@ -118,7 +118,7 @@ class SnowflakeCatalog(ICatalog):
             raise QueryError(err_message, e.sqlstate)
         
     def get_file_info(self, files):
-        copy_data = []
+        copy_data = {}
 
         if len(files) == 0:
             return {}
@@ -126,15 +126,9 @@ class SnowflakeCatalog(ICatalog):
             cursor = self.cursor()
             for file in files:
                 if file.get("type") == 'STAGE':
-                    print("IT IS A STAGE")
-                    stage_data = {file["stage_name"]: get_stage_info(file, cursor)}
-                    copy_data.append({file["stage_name"]: get_stage_info(file, cursor)})
-                    print("stage_data INCOMING")
-                    pp(stage_data)
+                    copy_data[file["stage_name"]] = get_stage_info(file, cursor)
         finally:
             cursor.close()
-            print("copy_data INCOMING")
-            pp(copy_data)
             return copy_data
 
     def get_volume_lake_path(self, volume: str) -> str:
