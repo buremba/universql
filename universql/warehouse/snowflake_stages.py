@@ -3,6 +3,8 @@ import sqlglot
 from pprint import pp
 
 def get_stage_info(file, cursor):
+    if file.get("type") != "STAGE" and file.get("source_catalog") != "SNOWFLAKE":
+        raise Exception("There was an issue processing your file data.")
     cursor.execute(f"DESCRIBE STAGE {file["stage_name"]}")
     stage_info = cursor.fetchall()
     stage_info_dict = {}
@@ -16,14 +18,24 @@ def get_stage_info(file, cursor):
             "snowflake_property_type": data_type
         }
 
+
+
     duckdb_data = convert_to_duckdb_properties(stage_info_dict)
+
     return duckdb_data
 
 def convert_to_duckdb_properties(copy_properties):
-    converted_properties = {}
+    all_converted_properties = {}
+    metadata = {}
     for snowflake_property_name, snowflake_property_info in copy_properties.items():
-        converted_properties = converted_properties | convert_properties(snowflake_property_name, snowflake_property_info)
-    return converted_properties
+        converted_properties = convert_properties(snowflake_property_name, snowflake_property_info)
+        duckdb_property_name, property_values = next(iter(converted_properties.items()))
+        if property_values["duckdb_property_type"] == 'METADATA':
+            metadata[duckdb_property_name] = property_values["duckdb_property_value"]
+        else:
+            all_converted_properties = all_converted_properties | converted_properties
+    all_converted_properties["METADATA"] = metadata    
+    return all_converted_properties
 
 def convert_properties(snowflake_property_name, snowflake_property_info):
     duckdb_property_info = PROPERTY_MAPPINGS[snowflake_property_name]
@@ -207,8 +219,8 @@ PROPERTY_MAPPINGS = {
         "duckdb_property_type": None
     },
     "URL": {
-        "duckdb_property_name": None,
-        "duckdb_property_type": None
+        "duckdb_property_name": "URL",
+        "duckdb_property_type": "METADATA"
     },
     "STORAGE_INTEGRATION": {
         "duckdb_property_name": None,

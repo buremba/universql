@@ -232,6 +232,8 @@ class DuckDBExecutor(Executor):
             None)
 
     def execute(self, ast: sqlglot.exp.Expression, tables: Tables, file_data = None) -> typing.Optional[Locations]:
+        print("ast INCOMING")
+        pp(ast)
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this
@@ -368,6 +370,9 @@ class DuckDBExecutor(Executor):
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             self.catalog.base_catalog.clear_cache()
         elif isinstance(ast, Copy):
+            print("ast INCOMING")
+            pp(ast)
+            # aws_role = file_data[0]
             print("COPY INCOMING")
             print("file_data INCOMING")
             pp(file_data)
