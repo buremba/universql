@@ -75,7 +75,7 @@ def _format_value_for_duckdb(snowflake_property_name, data):
     elif duckdb_type == 'METADATA':
         if snowflake_property_name == 'URL':
             return ast.literal_eval(snowflake_value)
-        elif snowflake_property_name in ["TYPE", "AWS_ROLE"]:
+        elif snowflake_property_name in ["TYPE", "AWS_ROLE", "AWS_EXTERNAL_ID"]:
             return snowflake_value
         else:
             return "NO MATCH"
@@ -231,8 +231,8 @@ PROPERTY_MAPPINGS = {
         "duckdb_property_type": "METADATA"
     },
     "AWS_EXTERNAL_ID": {
-        "duckdb_property_name": None,
-        "duckdb_property_type": None
+        "duckdb_property_name": "AWS_EXTERNAL_ID",
+        "duckdb_property_type": "METADATA"
     },
     "SNOWFLAKE_IAM_USER": {
         "duckdb_property_name": None,
