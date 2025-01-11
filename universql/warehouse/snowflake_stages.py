@@ -3,8 +3,6 @@ import sqlglot
 from pprint import pp
 
 def get_stage_info(file, cursor):
-    print("get_stage_info's file INCOMING")
-    pp(file)
     cursor.execute(f"DESCRIBE STAGE {file["stage_name"]}")
     stage_info = cursor.fetchall()
     stage_info_dict = {}
@@ -19,15 +17,11 @@ def get_stage_info(file, cursor):
         }
 
     duckdb_data = convert_to_duckdb_properties(stage_info_dict)
-    print(111111)
     return duckdb_data
 
 def convert_to_duckdb_properties(copy_properties):
     converted_properties = {}
-    counter = 0
     for snowflake_property_name, snowflake_property_info in copy_properties.items():
-        print(f"counter is {counter}")
-        counter += 1
         converted_properties = converted_properties | convert_properties(snowflake_property_name, snowflake_property_info)
     return converted_properties
 
@@ -46,10 +40,6 @@ def convert_properties(snowflake_property_name, snowflake_property_info):
     return {duckdb_property_name: properties}
 
 def _format_value_for_duckdb(snowflake_property_name, data):
-    print("_format_value_for_duckdb's snowflake_property_name INCOMING")
-    pp(snowflake_property_name)    
-    print("_format_value_for_duckdb's data INCOMING")
-    pp(data)    
     snowflake_type = data["snowflake_property_type"]
     duckdb_type = data["duckdb_property_type"]
     snowflake_value = data["snowflake_property_value"]
