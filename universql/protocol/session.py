@@ -200,6 +200,7 @@ class UniverSQLSession:
         if ast is not None and alternative_executor != self.catalog_executor:
             must_run_on_catalog = False
             files_list = None
+            processed_file_data = None
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
                     tables = self._find_tables(ast.expression) if ast.expression is not None else []
@@ -217,22 +218,19 @@ class UniverSQLSession:
                 op_name = alternative_executor.__class__.__name__
                 if files_list is not None:
                     with sentry_sdk.start_span(op=op_name, name="Get file info"):
-                        file_data = self.catalog.get_file_info(files_list)
+                        processed_file_data = self.catalog.get_file_info(files_list)
 
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
                     table_locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
 
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
-                    new_table_locations = alternative_executor.execute(ast, table_locations)
+                    new_table_locations = alternative_executor.execute(ast, table_locations, processed_file_data)
 
                 if new_table_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
-                        print("new_table_locations INCOMING")
-                        pp(new_table_locations)
                         self.catalog.register_locations(new_table_locations)
 
                 return alternative_executor
-            print("mustn't")
         with sentry_sdk.start_span(name="Execute query on Snowflake"):
             last_executor = self.catalog_executor
             if ast is None:

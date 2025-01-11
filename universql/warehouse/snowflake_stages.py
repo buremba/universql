@@ -3,12 +3,13 @@ import sqlglot
 from pprint import pp
 
 def get_stage_info(file, cursor):
+    print("get_stage_info's file INCOMING")
+    pp(file)
     cursor.execute(f"DESCRIBE STAGE {file["stage_name"]}")
     stage_info = cursor.fetchall()
     stage_info_dict = {}
 
     for row in stage_info:
-        # if row[0] != 
         column_name = row[1]
         data_type = row[2]
         value = row[3]
@@ -18,26 +19,37 @@ def get_stage_info(file, cursor):
         }
 
     duckdb_data = convert_to_duckdb_properties(stage_info_dict)
+    print(111111)
     return duckdb_data
 
 def convert_to_duckdb_properties(copy_properties):
     converted_properties = {}
+    counter = 0
     for snowflake_property_name, snowflake_property_info in copy_properties.items():
+        print(f"counter is {counter}")
+        counter += 1
         converted_properties = converted_properties | convert_properties(snowflake_property_name, snowflake_property_info)
     return converted_properties
 
 def convert_properties(snowflake_property_name, snowflake_property_info):
     duckdb_property_info = PROPERTY_MAPPINGS[snowflake_property_name]
-    properties = duckdb_property_info | snowflake_property_info
-    # return properties_raw
-    if properties["duckdb_property_name"] is not None:
+    duckdb_property_name = duckdb_property_info["duckdb_property_name"]
+    duckdb_property_type = duckdb_property_info["duckdb_property_type"]
+    properties = {
+        "duckdb_property_type": duckdb_property_type
+    } | snowflake_property_info | {"snowflake_property_name": snowflake_property_name}
+    if duckdb_property_name is not None:
         value = _format_value_for_duckdb(snowflake_property_name, properties)
         properties["duckdb_property_value"] = value
     else:
         properties["duckdb_property_value"] = None
-    return {snowflake_property_name: properties}
-        
+    return {duckdb_property_name: properties}
+
 def _format_value_for_duckdb(snowflake_property_name, data):
+    print("_format_value_for_duckdb's snowflake_property_name INCOMING")
+    pp(snowflake_property_name)    
+    print("_format_value_for_duckdb's data INCOMING")
+    pp(data)    
     snowflake_type = data["snowflake_property_type"]
     duckdb_type = data["duckdb_property_type"]
     snowflake_value = data["snowflake_property_value"]
