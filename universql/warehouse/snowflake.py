@@ -25,7 +25,7 @@ from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
 from universql.protocol.utils import get_field_for_snowflake
 from pprint import pp
-from .snowflake_stages import get_stage_info, convert_file_properties
+from .snowflake_stages import get_stage_info
 
 MAX_LIMIT = 10000
 

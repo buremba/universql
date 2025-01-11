@@ -1,60 +1,77 @@
 import ast
 import sqlglot
-
-def convert_file_properties(file_properties):
-    for property, property_value in file_properties:
-        pass
-    return {}
+from pprint import pp
 
 def get_stage_info(file, cursor):
     cursor.execute(f"DESCRIBE STAGE {file["stage_name"]}")
     stage_info = cursor.fetchall()
-
-    filtered_stage_info = {}
+    stage_info_dict = {}
 
     for row in stage_info:
+        # if row[0] != 
         column_name = row[1]
-        value = _format_stage_value(row)
-        filtered_stage_info[column_name] = value
-    return filtered_stage_info
+        data_type = row[2]
+        value = row[3]
+        stage_info_dict[column_name] = {
+            "snowflake_property_value": value,
+            "snowflake_property_type": data_type
+        }
 
-def _format_stage_value(row):
-    def _format_snowflake_type(value, data_type):
-        if data_type == 'String':
-            return _escape_backslashes(value)
-        elif data_type == 'Boolean':
-            return True if row[2] == 'true' else False
-        elif data_type == 'Integer':
-            return int(value)
-        
-    data_type = row[2]
-    value = row[3]
+    duckdb_data = convert_to_duckdb_properties(stage_info_dict)
+    return duckdb_data
 
-    if value == '':
-        return None
-    
-    # will fail if a list item contain ", " within it
-    # because SF does not use quotes around strings for list types
-    elif data_type == 'List':
-        formatted_value = _escape_backslashes( value[1:len(value)-1])
-        return formatted_value.split(", ")
-    elif value[0] == '[':
-        raw_array = ast.literal_eval(value)
-        formatted_array = []
-        for value in raw_array:
-            formatted_array.append(_format_snowflake_type(value, data_type))
-        return formatted_array
+def convert_to_duckdb_properties(copy_properties):
+    converted_properties = {}
+    for snowflake_property_name, snowflake_property_info in copy_properties.items():
+        converted_properties = converted_properties | convert_properties(snowflake_property_name, snowflake_property_info)
+    return converted_properties
+
+def convert_properties(snowflake_property_name, snowflake_property_info):
+    duckdb_property_info = PROPERTY_MAPPINGS[snowflake_property_name]
+    properties = duckdb_property_info | snowflake_property_info
+    # return properties_raw
+    if properties["duckdb_property_name"] is not None:
+        value = _format_value_for_duckdb(snowflake_property_name, properties)
+        properties["duckdb_property_value"] = value
     else:
-        return _format_snowflake_type(value, data_type)
-
-def _format_stage_properties(stage_row):
-    return {
-        "property": stage_row["property"],
-        "value": stage_row["property"]
-    }
-
-def _escape_backslashes(str):
-    return str.replace('\\\\', '\\')
+        properties["duckdb_property_value"] = None
+    return {snowflake_property_name: properties}
+        
+def _format_value_for_duckdb(snowflake_property_name, data):
+    snowflake_type = data["snowflake_property_type"]
+    duckdb_type = data["duckdb_property_type"]
+    snowflake_value = data["snowflake_property_value"]
+    if snowflake_type == 'String' and duckdb_type == 'VARCHAR':
+        return _format_string_for_duckdb(snowflake_value)
+    elif snowflake_type == "Boolean" and duckdb_type == 'BOOL':
+        return snowflake_value.lower()
+    elif snowflake_type == 'Integer' and duckdb_type == 'BIGINT':
+        return snowflake_value
+    elif snowflake_type == 'List' and duckdb_type == 'VARCHAR[]':
+        new_list = []
+        for string in snowflake_value[1:len(snowflake_value)-1].split(","):
+            new_list.append(_format_string_for_duckdb(string))
+        return new_list
+    elif snowflake_type == 'String' and duckdb_type == 'BOOL':
+        if snowflake_property_name == 'ON_ERROR':
+            if snowflake_value == 'CONTINUE':
+                return 'TRUE'
+            else:
+                return 'FALSE'
+    elif duckdb_type == 'METADATA':
+        if snowflake_property_name == 'URL':
+            return ast.literal_eval(snowflake_value)
+        elif snowflake_property_name in ["TYPE", "AWS_ROLE"]:
+            return snowflake_value
+        else:
+            return "NO MATCH"
+    else:
+        return "NO MATCH"
+        
+def _format_string_for_duckdb(str):
+    remove_snowflake_escape_characters = str.replace('\\\\', '\\')
+    add_duckdb_escape_characters = remove_snowflake_escape_characters.replace("'", "''")
+    return f"'{add_duckdb_escape_characters}'"
 
 def get_stage_name(file: sqlglot.exp.Table):
     full_string = file.this.name
@@ -66,32 +83,155 @@ def get_stage_name(file: sqlglot.exp.Table):
             return full_string[1:i]
     return full_string[1:i]
 
-
-
-SNOWFLAKE_TO_DUCKDB_MAPPING = {
-    "TYPE": "type",
-    "RECORD_DELIMITER": 'new_line',
-    "FIELD_DELIMITER": "delimiter",
-    "FILE_EXTENSION": "file_extension",
-    "SKIP_HEADER": "skip",
-    "PARSE_HEADER": "header",
-    "DATE_FORMAT": "dateformat",
-    "TIME_FORMAT": None,
-    "TIMESTAMP_FORMAT": "timestampformat",
-    "BINARY_FORMAT": None,
-    "ESCAPE": "escape",
-    "ESCAPE_UNENCLOSED_FIELD": None,
-    "TRIM_SPACE": "trim_space",
-    "FIELD_OPTIONALLY_ENCLOSED_BY": "quote",
-    "NULL_IF": "nullstr",
-    "COMPRESSION": "compression",
-    "ERROR_ON_COLUMN_COUNT_MISMATCH": "null_padding",
-    "VALIDATE_UTF8": None,
-    "SKIP_BLANK_LINES": None,
-    "REPLACE_INVALID_CHARACTERS": None,
-    "EMPTY_FIELD_AS_NULL": None,
-    "SKIP_BYTE_ORDER_MARK": "skip_byte_order_mark",
-    "ENCODING": None
+PROPERTY_MAPPINGS = {
+    "TYPE": {
+        "duckdb_property_name": "type",
+        "duckdb_property_type": "METADATA" 
+    },
+    "RECORD_DELIMITER": {
+        "duckdb_property_name": 'new_line',
+        "duckdb_property_type": "VARCHAR" 
+    },
+    "FIELD_DELIMITER": {
+        "duckdb_property_name": "delimiter",
+        "duckdb_property_type": "VARCHAR" 
+    },
+    "FILE_EXTENSION": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "SKIP_HEADER": {
+        "duckdb_property_name": "skip",
+        "duckdb_property_type": "BIGINT" 
+    },
+    "PARSE_HEADER": {
+        "duckdb_property_name": "header",
+        "duckdb_property_type": "BOOL" 
+    },
+    "DATE_FORMAT": {
+        "duckdb_property_name": "dateformat",
+        "duckdb_property_type": "VARCHAR" 
+    },
+    "TIME_FORMAT": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "TIMESTAMP_FORMAT": {
+        "duckdb_property_name": "timestampformat",
+        "duckdb_property_type": "VARCHAR" 
+    },
+    "BINARY_FORMAT": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "ESCAPE": {
+        "duckdb_property_name": "escape",
+        "duckdb_property_type": "VARCHAR" 
+    },
+    "ESCAPE_UNENCLOSED_FIELD": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "TRIM_SPACE": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "FIELD_OPTIONALLY_ENCLOSED_BY": {
+        "duckdb_property_name": "quote",
+        "duckdb_property_type": "VARCHAR" 
+    },
+    "NULL_IF": {
+        "duckdb_property_name": "nullstr",
+        "duckdb_property_type": "VARCHAR[]"
+    },
+    "COMPRESSION": {
+        "duckdb_property_name": "compression",
+        "duckdb_property_type": "VARCHAR" 
+    },
+    "ERROR_ON_COLUMN_COUNT_MISMATCH": {
+        "duckdb_property_name": "null_padding",
+        "duckdb_property_type": "BOOL" 
+    },
+    "VALIDATE_UTF8": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "SKIP_BLANK_LINES": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "REPLACE_INVALID_CHARACTERS": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "EMPTY_FIELD_AS_NULL": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "SKIP_BYTE_ORDER_MARK": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "ENCODING": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    },
+    "ON_ERROR": {
+        "duckdb_property_name": "ignore_errors",
+        "duckdb_property_type": "BOOL"
+    },
+    "SIZE_LIMIT": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "PURGE": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "RETURN_FAILED_ONLY": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "ENFORCE_LENGTH": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "TRUNCATECOLUMNS": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "FORCE": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "URL": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "STORAGE_INTEGRATION": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "AWS_ROLE": {
+        "duckdb_property_name": "AWS_ROLE",
+        "duckdb_property_type": "METADATA"
+    },
+    "AWS_EXTERNAL_ID": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "SNOWFLAKE_IAM_USER": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "ENABLE": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "AUTO_REFRESH": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    }
 }
 
     # def convert_stage_params()
