@@ -469,8 +469,7 @@ def full_qualifier(table: sqlglot.exp.Table, credentials: dict):
     new_table = sqlglot.exp.Table(catalog=catalog, db=db, this=table.this)
     return new_table
 
-def get_secrets_from_credentials_file(aws_role_arn):
-    
+def get_profile_for_credentials(aws_role_arn):
     # Get credentials file location and read TOML file
     creds_file = get_credentials_file_location()
     try:
@@ -496,21 +495,50 @@ def get_secrets_from_credentials_file(aws_role_arn):
             "Please make sure you have this role_arn in your credentials file or have a default profile configured."
             "You can set the environment variable AWS_SHARED_CREDENTIALS_FILE to a different credentials file location."
         )
-    
-    return _find_credentials_in_file(target_profile, config, creds_file)
 
-def _find_credentials_in_file(profile_name, config, creds_file, visited=None):
+def get_profile_for_role(aws_role_arn):
+    
+    # Get credentials file location and read TOML file
+    creds_file = get_credentials_file_location()
+    try:
+        config = configparser.ConfigParser()
+        config.read(creds_file)
+    except Exception as e:
+        raise Exception(f"Failed to read credentials file: {str(e)}")
+    
+    # Find which profile has our target role_arn
+    target_profile = None
+    for profile_name, profile_data in config.items():
+        if profile_data.get('role_arn') == aws_role_arn:
+            target_profile = profile_name
+            break
+    
+    if not target_profile:
+        if not target_profile:
+            # Try default profile if target role not found
+            if config.has_section('default'):
+                return _find_profile_with_credentials('default', config, creds_file)
+        raise Exception(
+            f"We were unable to find credentials for {aws_role_arn} in {creds_file}."
+            "Please make sure you have this role_arn in your credentials file or have a default profile configured."
+            "You can set the environment variable AWS_SHARED_CREDENTIALS_FILE to a different credentials file location."
+        )
+    
+    return _find_profile_with_credentials(target_profile, config, creds_file)
+
+def _find_profile_with_credentials(profile_name, config, creds_file, visited=None):
     """
-    Recursive function to find credentials either directly in a profile
-    or by following source_profile references.
+    Recursive function to find the appropriate profile to use, following source_profile references if needed.
     
     Args:
         profile_name: Name of profile to check
-        config: Configuration dictionary from TOML file
+        config: Configuration dictionary from config file
         creds_file: Path to credentials file
         visited: Set of profiles already checked (prevents infinite loops)
+    
+    Returns:
+        str: The name of the profile to use with boto3.Session
     """
-
     credentials_not_found_message = f"""The profile {profile_name} cannot be found in your credentials file located at {creds_file}.
     Please update your credentials and try again."""
 
@@ -530,20 +558,15 @@ def _find_credentials_in_file(profile_name, config, creds_file, visited=None):
     if not config.has_section(profile_name):
         raise Exception(credentials_not_found_message)
     
-    # Case 1: Profile has credentials directly
-    if config.has_option(profile_name, 'aws_access_key_id') and config.has_option(profile_name, 'aws_secret_access_key'):
-        return {
-            'profile': profile_name,
-            'access_key': config.get(profile_name, 'aws_access_key_id'),
-            'secret_key': config.get(profile_name, 'aws_secret_access_key')
-        }
-    
-    # Case 2: Profile references another profile for credentials
+    # If profile has source_profile, return that instead
     if config.has_option(profile_name, 'source_profile'):
-        return _find_credentials_in_file(profile['source_profile'], config, creds_file, visited)
+        source_profile = config.get(profile_name, 'source_profile')
+        if not config.has_section(source_profile):
+            raise Exception(f"Source profile {source_profile} referenced by {profile_name} does not exist")
+        return source_profile
     
-    # Case 3: No credentials found
-    raise Exception(credentials_not_found_message)
+    # Otherwise return the profile itself
+    return profile_name
 
 def get_credentials_file_location():
     # Check for environment variable
@@ -563,3 +586,4 @@ def get_credentials_file_location():
         "Universql is unable to determine your credentials file location."
         "Please set the environment variable AWS_SHARED_CREDENTIALS_FILE to your credentials file location and try again."
     )
+
