@@ -15,7 +15,7 @@ from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Show
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
-    prepend_to_lines, parse_compute, QueryError, full_qualifier
+    prepend_to_lines, parse_compute, QueryError, full_qualifier, get_secrets_from_credentials_file
 from universql.warehouse import Executor, Tables, ICatalog
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
@@ -31,8 +31,6 @@ COMPUTES = {"duckdb": DuckDBCatalog, "local": DuckDBCatalog, "bigquery": BigQuer
 
 class UniverSQLSession:
     def __init__(self, context, session_id, credentials: dict, session_parameters: dict):
-        print("context INCOMING")
-        pp(context)
         self.context = context
         self.credentials = credentials
         self.session_parameters = [{"name": item[0], "value": item[1]} for item in session_parameters.items()]
@@ -216,6 +214,13 @@ class UniverSQLSession:
                 if files_list is not None:
                     with sentry_sdk.start_span(op=op_name, name="Get file info"):
                         processed_file_data = self.catalog.get_file_info(files_list)
+                        for file_name, file_config in processed_file_data.items():
+                            metadata = file_config["METADATA"]
+                            if metadata["storage_provider"] != "Amazon S3":
+                                raise Exception("Universql currently only supports Amazon S3 stages.")
+                            aws_role = metadata["AWS_ROLE"]
+                            secrets = get_secrets_from_credentials_file(aws_role)
+                            metadata.update(secrets)
 
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
                     table_locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
