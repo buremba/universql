@@ -5,6 +5,7 @@ import typing
 from enum import Enum
 from string import Template
 from typing import List
+import boto3
 
 import duckdb
 import pyiceberg.table
@@ -372,10 +373,18 @@ class DuckDBExecutor(Executor):
         elif isinstance(ast, Copy):
             print("ast INCOMING")
             pp(ast)
-            # aws_role = file_data[0]
-            print("COPY INCOMING")
             print("file_data INCOMING")
             pp(file_data)
+            # aws_role = file_data[0]
+            for file_name, file_config in file_data.items():
+                urls = file_config["METADATA"]["URL"]
+                try:
+                    region = get_region(urls[0], file_config["METADATA"]["storage_provider"])
+                    print("region INCOMING")
+                    print(region)
+                except Exception as e:
+                    print(f"There was a problem accessing data for {file_name}:\n{e}")
+
             sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql)
         else:
@@ -411,3 +420,10 @@ class DuckDBExecutor(Executor):
     def get_iceberg_read(location: pyiceberg.table.Table) -> str:
         return sqlglot.exp.func("iceberg_scan",
                                 sqlglot.exp.Literal.string(location.metadata_location)).sql()
+
+def get_region(url, storage_provider):
+    if storage_provider == 'Amazon S3':
+        bucket_name = url[5:].split("/")[0]
+        s3 = boto3.client('s3')
+        region_dict = s3.get_bucket_location(Bucket=bucket_name)
+        return region_dict.get('LocationConstraint') or 'us-east-1'
