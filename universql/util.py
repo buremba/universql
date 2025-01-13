@@ -492,7 +492,7 @@ def get_profile_for_credentials(aws_role_arn):
         if not target_profile:
             # Try default profile if target role not found
             if config.has_section('default'):
-                return _find_credentials_in_file('default', config, creds_file)
+                return _find_profile_with_credentials('default', config, creds_file)
         raise Exception(
             f"We were unable to find credentials for {aws_role_arn} in {creds_file}."
             "Please make sure you have this role_arn in your credentials file or have a default profile configured."
@@ -590,3 +590,19 @@ def get_credentials_file_location():
         "Please set the environment variable AWS_SHARED_CREDENTIALS_FILE to your credentials file location and try again."
     )
 
+def get_role_credentials(profile_name):
+    """
+    Gets credentials directly from the profile
+    """
+    session = boto3.Session(profile_name=profile_name)
+    credentials = session.get_credentials()
+    
+    print(f"Credential type: {type(credentials)}")
+    credentials = session.get_credentials().get_frozen_credentials()
+    print(f"Access key starts with: {credentials.access_key[:4]}")
+    
+    return {
+        'AccessKeyId': credentials.access_key,
+        'SecretAccessKey': credentials.secret_key,
+        'SessionToken': credentials.token if hasattr(credentials, 'token') else None
+    }
