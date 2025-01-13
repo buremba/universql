@@ -14,12 +14,13 @@ class TestCreate:
             AS {SIMPLE_QUERY}
             """)
             universql_result = execute_query(conn, f"SELECT * FROM test_iceberg_table LIMIT 1")
-            print(universql_result)
+            assert universql_result.num_rows == 1
 
     def test_create_temp_table(self):
         with universql_connection(warehouse=None) as conn:
             execute_query(conn, f"CREATE TEMP TABLE test_table AS {SIMPLE_QUERY}")
-            execute_query(conn, "SELECT * FROM TEST_TABLE")
+            universql_result = execute_query(conn, "SELECT * FROM TEST_TABLE")
+            assert universql_result.num_rows == 1
 
     @pytest.mark.skip(reason="not implemented")
     def test_create_stage(self):

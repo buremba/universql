@@ -10,7 +10,7 @@ import pyiceberg.table
 import sentry_sdk
 import sqlglot
 from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
-from pyiceberg.exceptions import NoSuchTableError, TableAlreadyExistsError, NoSuchNamespaceError
+from pyiceberg.exceptions import TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
 from sqlglot.expressions import Create, Identifier, DDL, Query, Use
@@ -69,7 +69,8 @@ class UniverSQLSession:
             catalog_props[TYPE] = "glue"
             catalog = load_catalog(catalog_name, **catalog_props)
         else:
-            database_path = Template(self.context.get('database_path') or f"_{self.session_id}_universql_session").substitute(
+            database_path = Template(
+                self.context.get('database_path') or f"_{self.session_id}_universql_session").substitute(
                 {"session_id": self.session_id}) + ".sqlite"
             catalog_name = "duckdb"
             self.metadata_db = tempfile.NamedTemporaryFile(delete=False, suffix=database_path)
@@ -219,7 +220,7 @@ class UniverSQLSession:
         for table in tables:
             full_qualifier_ = full_qualifier(table, self.credentials)
             table_path = alternative_catalog.get_table_paths([full_qualifier_]).get(full_qualifier_, False)
-            if table_path is not False:
+            if table_path is None or isinstance(table_path, pyarrow.Table):
                 continue
             # try:
             #     namespace = self.iceberg_catalog.properties.get('namespace')
