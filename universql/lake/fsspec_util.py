@@ -67,6 +67,8 @@ first_free = None
 def get_friendly_disk_usage(storage: str, debug=False) -> str:
     global last_free
     global first_free
+    if not os.path.exists(storage):
+        return ''
     usage = psutil.disk_usage(storage)
     if first_free is None:
         first_free = usage.free
