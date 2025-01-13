@@ -22,9 +22,6 @@ class BigQueryIcebergExecutor(Executor):
         self.query = self.result = None
         self.client = bigquery.Client()
 
-    def supports(self, ast: sqlglot.exp.Expression) -> bool:
-        return ast is Select or ast is Insert
-
     @staticmethod
     def replace_full_reference_as_table(expression: sqlglot.exp.Expression) -> sqlglot.exp.Expression:
         if isinstance(expression, sqlglot.exp.Table):

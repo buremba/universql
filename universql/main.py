@@ -17,8 +17,6 @@ from universql.agent.cloudflared import start_cloudflared
 from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, LOCALHOSTCOMPUTING_COM, \
     DEFAULTS
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)s %(name)s %(levelname)-6s %(message)s',
-                    datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger("🏠")
 
 
@@ -132,12 +130,16 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, metrics_p
                 key_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['key']))
                 key_file.flush()
 
-                uvicorn.run("universql.protocol.snowflake:app",
-                            host=host, port=port,
-                            ssl_keyfile=ssl_keyfile or key_file.name,
-                            ssl_certfile=ssl_certfile or cert_file.name,
-                            reload=False,
-                            use_colors=True)
+                try:
+                    uvicorn.run("universql.protocol.snowflake:app",
+                                host=host, port=port,
+                                ssl_keyfile=ssl_keyfile or key_file.name,
+                                ssl_certfile=ssl_certfile or cert_file.name,
+                                reload=False,
+                                use_colors=True)
+                except Exception as e:
+                    logger.critical("Unable to start the server", exc_info=e)
+                    raise e
     else:
         uvicorn.run("universql.protocol.snowflake:app",
                     host=host, port=port,

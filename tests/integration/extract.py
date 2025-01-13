@@ -1,6 +1,7 @@
 from itertools import product
 
 import pytest
+from snowflake.connector import ProgrammingError
 
 from tests.integration.utils import execute_query, universql_connection, SIMPLE_QUERY, ALL_COLUMNS_QUERY
 
@@ -68,23 +69,14 @@ class TestSelect:
             universql_result = execute_query(conn, "SHOW SCHEMAS")
             assert universql_result.num_rows > 0, f"The query did not return any rows!"
 
-    def test_in_database(self):
-        with universql_connection(database="public") as conn:
-            universql_result = execute_query(conn, "select * from information_schema.columns")
-            print(universql_result)
+    def test_success_after_failure(self):
+        with universql_connection(warehouse=None) as conn:
+            with pytest.raises(ProgrammingError):
+                execute_query(conn, "select * from not_exists")
+            result = execute_query(conn, "select 1")
+            assert result.num_rows == 1
 
-    def test_qualifiers(self):
-        database = "universql1"
-        # database = "UNIVERSQL1"
-        schema = "same_schema"
-        table = "dim_devices"
-
-        fully_qualified_queries = generate_select_statement_combos(table, schema, database)
-        no_db_queries = generate_select_statement_combos(table, schema)
-        no_schema_queries = generate_select_statement_combos(table)
-        all_queries = fully_qualified_queries + no_db_queries + no_schema_queries
-
-        with universql_connection(database=database, schema=schema) as conn:
-            for query in all_queries:
-                result = execute_query(conn, query)
-                print(result.to_pandas())
+    def test_union(self):
+        with universql_connection(warehouse=None) as conn:
+            result = execute_query(conn, "select 1 union all select 2")
+            assert result.num_rows == 2

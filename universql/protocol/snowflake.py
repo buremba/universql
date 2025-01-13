@@ -266,11 +266,11 @@ async def query_request(request: Request) -> JSONResponse:
                              "message": f"Error running query on Snowflake: {e.message}",
                              "data": {"sqlState": e.sql_state}})
     except Exception as e:
+        print_exc(limit=1)
         if query is not None:
             logger.exception(f"Error processing query: {query}")
         else:
             logger.exception(f"Error processing query request", e)
-        print_exc(limit=1)
         return JSONResponse({"id": query_id, "success": False, "message": "Unable to run the query due to a system error. Please create issue on https://github.com/buremba/universql/issues", "data": {"sqlState": "0000"}})
 
 

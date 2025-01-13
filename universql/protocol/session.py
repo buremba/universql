@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 import time
 from string import Template
 from urllib.parse import urlparse, parse_qs
@@ -11,7 +13,7 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import NoSuchTableError, TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Show
+from sqlglot.expressions import Create, Identifier, DDL, Query, Use
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
@@ -21,7 +23,6 @@ from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("💡")
 
 COMPUTES = {"duckdb": DuckDBCatalog, "local": DuckDBCatalog, "bigquery": BigQueryCatalog, "snowflake": SnowflakeCatalog}
@@ -34,8 +35,11 @@ class UniverSQLSession:
         self.session_parameters = [{"name": item[0], "value": item[1]} for item in session_parameters.items()]
         self.session_id = session_id
         self.compute_plan = parse_compute(self.credentials.get("warehouse"))
-        first_catalog_compute = next(filter(lambda x: x.get("name") == 'snowflake', self.compute_plan), {}).get('args')
-        self.iceberg_catalog = self._create_iceberg_catalog()
+
+        snowflake_computes = filter(lambda x: x.get("name") == 'snowflake', self.compute_plan)
+        first_catalog_compute = next(snowflake_computes, {}).get('args')
+        self.allowed_to_run_compute_on_catalog = first_catalog_compute is not None
+        self.iceberg_catalog = self._get_iceberg_catalog()
         self.catalog = SnowflakeCatalog(context, self.session_id, self.credentials, first_catalog_compute or {},
                                         self.iceberg_catalog)
         self.catalog_executor = self.catalog.executor()
@@ -43,8 +47,9 @@ class UniverSQLSession:
 
         self.last_executor_cursor = None
         self.processing = False
+        self.metadata_db = None
 
-    def _create_iceberg_catalog(self):
+    def _get_iceberg_catalog(self):
         iceberg_catalog = self.context.get('universql_catalog')
 
         catalog_props = {
@@ -62,23 +67,22 @@ class UniverSQLSession:
             catalog_props |= {k: v[0] if len(v) == 1 else v for k, v in query_params.items()}
             catalog_props['namespace'] = parsed.hostname
             catalog_props[TYPE] = "glue"
+            catalog = load_catalog(catalog_name, **catalog_props)
         else:
-            catalog_name = None
-            # catalog_props |= {
-            #     # pass duck conn
-            #     PY_CATALOG_IMPL: "universql.warehouse.duckdb.DuckDBIcebergCatalog",
-            #     "uri": "duckdb:///:memory:",
-            # }
-            database_path = Template(self.context.get('database_path') or "universql").substitute(
-                {"session_id": self.credentials.get('account')})
+            database_path = Template(self.context.get('database_path') or f"_{self.session_id}_universql_session").substitute(
+                {"session_id": self.session_id}) + ".sqlite"
+            catalog_name = "duckdb"
+            self.metadata_db = tempfile.NamedTemporaryFile(delete=False, suffix=database_path)
 
             catalog_props |= {
                 # pass duck conn
                 PY_CATALOG_IMPL: "pyiceberg.catalog.sql.SqlCatalog",
-                "uri": f"sqlite:///{database_path}.metadata.sqlite",
-                "namespace": "main"
+                "uri": f"sqlite:///{self.metadata_db.name}",
+                "namespace": "main",
             }
-        return load_catalog(catalog_name, **catalog_props)
+            catalog = load_catalog(catalog_name, **catalog_props)
+            catalog.create_namespace_if_not_exists("main")
+        return catalog
 
     def _must_run_on_catalog(self, tables, ast):
         queries_that_doesnt_need_warehouse = ["show"]
@@ -92,6 +96,9 @@ class UniverSQLSession:
                     or len(table.parts) > 2 and isinstance(table.parts[-3].this, str)
                     and table.parts[-3].this.lower() == "snowflake"):
                 logger.info(f"[{self.session_id}] Skipping local execution, found {table.sql()}")
+                if not self.allowed_to_run_compute_on_catalog:
+                    raise QueryError(
+                        f"Set warehouse (SET WAREHOUSE warehouse_name) to query {table.sql()}. Can't run the query outside of Snowflake")
                 return True
         return False
 
@@ -156,8 +163,7 @@ class UniverSQLSession:
                     yield full_qualifier(expression, self.credentials), cte_aliases
 
     def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
-        if (ast is not None and alternative_executor.supports(ast) and
-                alternative_executor != self.catalog_executor):
+        if ast is not None and alternative_executor != self.catalog_executor:
             must_run_on_catalog = False
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
@@ -201,28 +207,33 @@ class UniverSQLSession:
 
     def close(self):
         self.catalog_executor.close()
+        if self.metadata_db is not None:
+            self.metadata_db.close()
+            if os.path.exists(self.metadata_db.name):
+                os.remove(self.metadata_db.name)
 
     def get_table_paths_from_catalog(self, alternative_catalog: ICatalog, tables: list[sqlglot.exp.Table]) -> Tables:
         not_existed = []
         cached_tables = {}
-        namespace = self.iceberg_catalog.properties.get('namespace')
 
         for table in tables:
             full_qualifier_ = full_qualifier(table, self.credentials)
-            native_executor_exists = full_qualifier_ in alternative_catalog.get_table_paths([full_qualifier_])
-            if native_executor_exists:
+            table_path = alternative_catalog.get_table_paths([full_qualifier_]).get(full_qualifier_, False)
+            if table_path is not False:
                 continue
-            try:
-                table_ref = table.sql(dialect="snowflake")
-                logger.info(f"Looking up table {table_ref} in namespace {namespace}")
-                iceberg_table = self.iceberg_catalog.load_table((namespace, table_ref))
-                cached_tables[table] = iceberg_table
-            except NoSuchTableError:
-                not_existed.append(table)
+            # try:
+            #     namespace = self.iceberg_catalog.properties.get('namespace')
+            #     table_ref = table.sql(dialect="snowflake")
+            #     logger.info(f"Looking up table {table_ref} in namespace {namespace}")
+            #     iceberg_table = self.iceberg_catalog.load_table((namespace, table_ref))
+            #     cached_tables[table] = iceberg_table
+            # except NoSuchTableError:
+            not_existed.append(table)
 
         locations = self.catalog.get_table_paths(not_existed)
         for table_ast, table in locations.items():
             if isinstance(table, pyiceberg.table.Table):
+                namespace = self.iceberg_catalog.properties.get('namespace')
                 table_name = table_ast.sql(dialect="snowflake")
                 try:
                     iceberg_table = self.iceberg_catalog.register_table((namespace, table_name),

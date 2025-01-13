@@ -1,6 +1,7 @@
 import datetime
 import gzip
 import json
+import logging
 import os
 import re
 import time
@@ -15,6 +16,8 @@ import sqlglot
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)s %(name)s %(levelname)-6s %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S')
 
 class Compute(Enum):
     LOCAL = "local"

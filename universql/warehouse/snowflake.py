@@ -27,7 +27,6 @@ from universql.protocol.utils import get_field_for_snowflake
 
 MAX_LIMIT = 10000
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("❄️")
 
 logging.getLogger('snowflake.connector').setLevel(logging.WARNING)
@@ -75,8 +74,8 @@ class SnowflakeCatalog(ICatalog):
     def register_locations(self, tables: Locations):
         start_time = time.perf_counter()
         queries = []
-        for table, location in tables.items():
-            queries.append(table.sql(dialect='snowflake'))
+        for location in tables.values():
+            queries.append(location.sql(dialect='snowflake'))
         final_query = '\n'.join(queries)
         if final_query:
             logger.info(f"[{self.session_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
@@ -193,75 +192,6 @@ class SnowflakeExecutor(Executor):
 
     def __init__(self, catalog: SnowflakeCatalog):
         super().__init__(catalog)
-
-    def supports(self, ast: sqlglot.exp.Expression) -> bool:
-        return True
-
-    def default_create_table_as_iceberg(self, expression: sqlglot.exp.Expression):
-        prefix = self.catalog.iceberg_catalog.properties.get("location")
-
-        if isinstance(expression, sqlglot.exp.Create):
-            if expression.kind == 'TABLE':
-                properties = expression.args.get('properties') or Properties()
-                is_transient = TransientProperty() in properties.expressions
-                is_temp = TemporaryProperty() in properties.expressions
-                is_iceberg = IcebergProperty() in properties.expressions
-                if is_transient or len(properties.expressions) == 0:
-                    properties__set = Properties()
-                    external_volume = Property(this=Var(this='EXTERNAL_VOLUME'),
-                                               value=Literal.string(
-                                                   self.catalog.context.get('snowflake_iceberg_volume')))
-                    snowflake_catalog = self.catalog.iceberg_catalog or "snowflake"
-                    catalog = Property(this=Var(this='CATALOG'), value=Literal.string(snowflake_catalog))
-                    if snowflake_catalog == 'snowflake':
-                        base_location = Property(this=Var(this='BASE_LOCATION'),
-                                                 value=Literal.string(location.metadata_location[len(prefix):]))
-                    elif snowflake_catalog == 'glue':
-                        base_location = Property(this=Var(this='CATALOG_TABLE_NAME'),
-                                                 value=Literal.string(expression.this.sql()))
-                    create_table_props = [IcebergProperty(), external_volume, catalog, base_location]
-                    properties__set.set('expressions', create_table_props)
-
-                    metadata_query = expression.expression.sql(dialect="snowflake")
-                    try:
-                        self.catalog.cursor().describe(metadata_query)
-                    except Exception as e:
-                        logger.error(f"Unable fetching schema for metadata query {e.args} \n" + metadata_query)
-                        return expression
-                    columns = [(column.name, FIELD_TYPES[column.type_code]) for column in
-                               self.catalog.cursor().description]
-                    unsupported_columns = [(column[0], column[1].name) for column in columns if column[1].name not in (
-                        'BOOLEAN', 'TIME', 'BINARY', 'TIMESTAMP_TZ', 'TIMESTAMP_NTZ', 'TIMESTAMP_LTZ', 'TIMESTAMP',
-                        'DATE', 'FIXED',
-                        'TEXT', 'REAL')]
-                    if len(unsupported_columns) > 0:
-                        logger.error(
-                            f"Unsupported columns {unsupported_columns} in {expression.expression.sql(dialect='snowflake')}")
-                        return expression
-
-                    column_definitions = [ColumnDef(
-                        this=sqlglot.exp.parse_identifier(column[0]),
-                        kind=DataType.build(self._convert_snowflake_to_iceberg_type(column[1]), dialect="snowflake"))
-                        for
-                        column in
-                        columns]
-                    schema = Schema()
-                    schema.set('this', expression.this)
-                    schema.set('expressions', column_definitions)
-                    expression.set('this', schema)
-                    select = Select().from_(Subquery(this=expression.expression))
-                    for column in columns:
-                        col_ast = Column(this=parse_identifier(column[0]))
-                        if column[1].name in ('ARRAY', 'OBJECT'):
-                            alias = Alias(this=Anonymous(this="to_variant", expressions=[col_ast]),
-                                          alias=parse_identifier(column[0]))
-                            select = select.select(alias)
-                        else:
-                            select = select.select(col_ast)
-
-                    expression.set('expression', select)
-                    expression.set('properties', properties__set)
-        return expression
 
     def _convert_snowflake_to_iceberg_type(self, snowflake_type: FieldType) -> str:
         if snowflake_type.name == 'TIMESTAMP_LTZ':

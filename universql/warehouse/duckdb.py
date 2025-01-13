@@ -18,16 +18,15 @@ from pyiceberg.catalog import Catalog
 from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
-from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
-    Var, Literal, IcebergProperty, Copy, Delete, Merge, Use
-
-from universql.warehouse import ICatalog, Executor, Locations, Tables
-from universql.lake.cloud import s3, gcs, in_lambda
-from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
-from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
+from sqlglot.expressions import Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
+    Var, Literal, IcebergProperty, Use, ColumnDef, DataType
 from sqlglot.optimizer.simplify import simplify
 
-logging.basicConfig(level=logging.INFO)
+from universql.lake.cloud import s3, gcs, in_lambda
+from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
+from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
+from universql.warehouse import ICatalog, Executor, Locations, Tables
+
 logger = logging.getLogger("🐥")
 
 
@@ -38,7 +37,8 @@ class TableType(Enum):
 
 class DuckDBCatalog(ICatalog):
 
-    def __init__(self, context: dict, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog, base_catalog: ICatalog):
+    def __init__(self, context: dict, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog,
+                 base_catalog: ICatalog):
         super().__init__(context, session_id, credentials, compute, iceberg_catalog, base_catalog)
         duck_config = {
             'max_memory': context.get('max_memory'),
@@ -102,7 +102,8 @@ class DuckDBCatalog(ICatalog):
         if table_exists[0] is None:
             return TableType.LOCAL
 
-        match = re.search(r'CREATE VIEW (?:["\w]+\.)?[\w.]+ AS SELECT \* FROM iceberg_scan\(\'(s3://[^\']+)\'\);', table_exists[0])
+        match = re.search(r'CREATE VIEW (?:["\w]+\.)?[\w.]+ AS SELECT \* FROM iceberg_scan\(\'(s3://[^\']+)\'\);',
+                          table_exists[0])
         if match is not None:
             return TableType.ICEBERG
 
@@ -144,15 +145,6 @@ class DuckDBExecutor(Executor):
         else:
             cost = calculate_script_cost(total_duration)
             return f"Run locally on DuckDB: {cost}"
-
-    def supports(self, ast: sqlglot.exp.Expression) -> bool:
-        return (isinstance(ast, Select) or
-                isinstance(ast, Insert) or
-                isinstance(ast, Create) or
-                isinstance(ast, Copy) or
-                isinstance(ast, Delete) or
-                isinstance(ast, Use) or
-                isinstance(ast, Merge))
 
     def execute_raw(self, raw_query: str) -> None:
         try:
@@ -217,7 +209,8 @@ class DuckDBExecutor(Executor):
         views_sql = ";\n".join(databases_sql + schemas_sql + setup_query + views_sql)
 
         if views_sql != "":
-            logger.debug(f"[{self.catalog.session_id}] DuckDB environment is setting up:\n{prepend_to_lines(views_sql, max=1000)}")
+            logger.debug(
+                f"[{self.catalog.session_id}] DuckDB environment is setting up:\n{prepend_to_lines(views_sql, max=1000)}")
             try:
                 self.catalog.duckdb.execute(views_sql)
             except duckdb.Error as e:
@@ -246,8 +239,6 @@ class DuckDBExecutor(Executor):
             full_table = destination_table.sql()
 
             if isinstance(ast, Create):
-                namespace = self.catalog.iceberg_catalog.properties.get('namespace')
-                raw_table = destination_table.parts[-1].sql()
                 properties = ast.args.get('properties') or Properties()
                 is_temp = TemporaryProperty() in properties.expressions
                 is_iceberg = IcebergProperty() in properties.expressions
@@ -258,12 +249,14 @@ class DuckDBExecutor(Executor):
                     final_query = self._sync_and_transform_query(ast, tables | {destination_table: None})
 
                     if is_iceberg:
+                        iceberg_catalog = self.catalog.iceberg_catalog
+                        namespace = iceberg_catalog.properties.get('namespace')
+                        database_location = iceberg_catalog.properties.get(LOCATION)
                         if final_query.expression is not None:
                             self.execute_raw(final_query.expression.sql(dialect="duckdb"))
                             arrow_table = self.get_as_table()
                         else:
                             arrow_table = None
-                        database_location = self.catalog.iceberg_catalog.properties.get(LOCATION)
                         base_location = self._get_property(ast, 'base_location')
 
                         if database_location is not None:
@@ -277,38 +270,40 @@ class DuckDBExecutor(Executor):
                         else:
                             table_location = None
                         if if_exists:
-                            create_iceberg_table = self.catalog.iceberg_catalog.create_table_if_not_exists(
+                            create_iceberg_table = iceberg_catalog.create_table_if_not_exists(
                                 (namespace, full_table),
                                 arrow_table.schema,
                                 location=table_location)
                         else:
                             if is_replace:
                                 try:
-                                    self.catalog.iceberg_catalog.drop_table((namespace, full_table))
+                                    iceberg_catalog.drop_table((namespace, full_table))
                                 except NoSuchTableError:
                                     pass
-                            create_iceberg_table = self.catalog.iceberg_catalog.create_table((namespace, full_table),
-                                                                                             arrow_table.schema,
-                                                                                             location=table_location)
+                            create_iceberg_table = iceberg_catalog.create_table(
+                                (namespace, full_table),
+                                arrow_table.schema,
+                                location=table_location)
                         create_iceberg_table.overwrite(arrow_table)
                         if not create_iceberg_table.metadata_location.startswith(table_location):
                             raise QueryError("Unable to determine location")
                         metadata_file_path = create_iceberg_table.metadata_location[len(table_location):].strip('/')
                         catalog = self._get_property(ast, 'catalog')
 
-                        if catalog is not None and catalog.lower() != 'snowflake':
+                        if catalog is not None:
                             ast.set('expression', None)
                             properties = ast.args.get('properties') or Properties()
 
-                            # adds column definitions to DDL
-                            # column_definitions = [ColumnDef(
-                            #     this=sqlglot.exp.parse_identifier(column.name),
-                            #     kind=DataType.build(str(column.field_type)))
-                            #     for column in create_iceberg_table.metadata.schema().columns]
-                            # schema = Schema()
-                            # schema.set('this', ast.this)
-                            # schema.set('expressions', column_definitions)
-                            # ast.set('this', schema)
+                            if catalog.lower() == 'snowflake':
+                                # adds column definitions to DDL
+                                column_definitions = [ColumnDef(
+                                    this=sqlglot.exp.parse_identifier(column.name),
+                                    kind=DataType.build(str(column.field_type)))
+                                    for column in create_iceberg_table.metadata.schema().columns]
+                                schema = Schema()
+                                schema.set('this', ast.this)
+                                schema.set('expressions', column_definitions)
+                                ast.set('this', schema)
                             properties.expressions.append(
                                 Property(this=Var(this='METADATA_FILE_PATH'), value=Literal.string(metadata_file_path)))
                             return {destination_table: ast}

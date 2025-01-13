@@ -107,7 +107,7 @@ def universql_connection(**properties) -> SnowflakeConnection:
     snowflake_connection_name = _set_connection_name(properties)
     if snowflake_connection_name not in connections:
         raise pytest.fail(f"Snowflake connection '{snowflake_connection_name}' not found in config")
-    connection = connections[SNOWFLAKE_CONNECTION_NAME]
+    connection = connections[snowflake_connection_name]
     account = connection.get('account')
     if account in server_cache:
         uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": server_cache[account]} | properties

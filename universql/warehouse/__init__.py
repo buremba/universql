@@ -51,10 +51,6 @@ class Executor(ABC, typing.Generic[T]):
         self.catalog = catalog
 
     @abstractmethod
-    def supports(self, ast: sqlglot.exp.Expression) -> bool:
-        pass
-
-    @abstractmethod
     def execute(self, ast: sqlglot.exp.Expression, locations: Tables) -> \
             typing.Optional[Locations]:
         pass
