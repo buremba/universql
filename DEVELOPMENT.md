@@ -1,11 +1,18 @@
 # [DRAFT] Transformers
 
+If you would like to enable custom logic inside Universql,  to support transition in between different dialects or just 
+```bash
+> poetry add "universql[rewrite_create_table_as_iceberg]"
+> universql snowflake myaccount.aws.us-east-1 --module-paths rewrite_create_table_as_iceberg
+```
+
+universql snowflake --module-paths rewrite_create_table_as_iceberg
+
+Then, implement your custom logic later on if you would like.
+
 You can inject modules into Universql at start time, by passing `--module-paths ./my_transformers` or via:
 
-```bash
-> poetry add "universql[custom_transformers]"
-> universql snowflake myaccount.aws.us-east-1 --module-paths custom_transformers
-```
+
 
 Here is the abstract class for transformer:
 
