@@ -117,24 +117,44 @@ class SnowflakeCatalog(ICatalog):
             err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: \n {e.msg} \n{final_query}"
             raise QueryError(err_message, e.sqlstate)
         
-    def get_file_info(self, files):
+    def get_file_info(self, files, ast):
         copy_data = {}
+
 
         if len(files) == 0:
             return {}
         try:
+            copy_params = self._extract_copy_params(ast)
+            file_format_params = copy_params.get("FILE_FORMAT")
             cursor = self.cursor()
             for file in files:
-                print("file INCOMING")
-                pp(file)
                 if file.get("type") == 'STAGE':
-                    stage_info = get_stage_info(file, cursor)
+                    stage_info = get_stage_info(file, file_format_params, cursor)
                     stage_info["METADATA"] = stage_info["METADATA"] | file
                     copy_data[file["stage_name"]] = stage_info
-                    get_stage_info(file, cursor)
         finally:
             cursor.close()
             return copy_data
+        
+    def _extract_copy_params(self, ast):
+        params = {}
+        for param in ast.args.get('params', []):
+            param_name = param.args['this'].args['this']
+            
+            # Handle single expression case
+            if 'expression' in param.args:
+                expr = param.args['expression']
+                params[param_name] = expr.args['this'].args['this']
+                
+            # Handle multiple expressions case
+            elif 'expressions' in param.args:
+                params[param_name] = {}
+                for expr in param.args['expressions']:
+                    property_name = expr.args['this'].args['this']
+                    property_value = expr.args['value'].args['this']
+                    params[param_name][property_name] = property_value
+                    
+        return params
 
     def get_volume_lake_path(self, volume: str) -> str:
         cursor = self.cursor()

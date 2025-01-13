@@ -500,7 +500,6 @@ def get_profile_for_credentials(aws_role_arn):
         )
 
 def get_profile_for_role(aws_role_arn):
-    
     # Get credentials file location and read TOML file
     creds_file = get_credentials_file_location()
     try:

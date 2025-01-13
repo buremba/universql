@@ -220,7 +220,7 @@ class UniverSQLSession:
                 op_name = alternative_executor.__class__.__name__
                 if files_list is not None:
                     with sentry_sdk.start_span(op=op_name, name="Get file info"):
-                        processed_file_data = self.catalog.get_file_info(files_list)
+                        processed_file_data = self.catalog.get_file_info(files_list, ast)
                         for file_name, file_config in processed_file_data.items():
                             metadata = file_config["METADATA"]
                             if metadata["storage_provider"] != "Amazon S3":
@@ -264,8 +264,8 @@ class UniverSQLSession:
             if os.path.exists(self.metadata_db.name):
                 os.remove(self.metadata_db.name)
 
-    def get_file_paths_and_credentials_from_catalog(self, alternative_catalog: ICatalog, files_list):
-        return alternative_catalog.get_file_paths(files_list)
+    # def get_file_paths_and_credentials_from_catalog(self, alternative_catalog: ICatalog, files_list):
+    #     return alternative_catalog.get_file_paths(files_list)
 
     def get_table_paths_from_catalog(self, alternative_catalog: ICatalog, tables: list[sqlglot.exp.Table]) -> Tables:
         not_existed = []
