@@ -188,20 +188,6 @@ def compare_results(snowflake_result: pyarrow.Table, universql_result: pyarrow.T
 
     print("Results match perfectly!")
 
-
-@contextmanager
-def cleanup_table(conn, table_name: str):
-    """Context manager to ensure table cleanup after tests."""
-    try:
-        yield
-    finally:
-        try:
-            cur = conn.cursor()
-            cur.execute(f"DROP TABLE IF EXISTS {table_name}")
-            cur.close()
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
-
 def generate_name_variants(name, include_blank = False):
     lowercase = name.lower()
     uppercase = name.upper()
@@ -223,7 +209,7 @@ def generate_select_statement_combos(sets_of_identifiers, connected_db = None, c
                 for table_variant in table_variants:
                     set_of_select_statements.append(f"SELECT * FROM {table_variant}")
         else:
-            raise Exception("No table name provided for a select stametent combo.")
+            raise Exception("No table name provided for a select statement combo.")
         
         if schema is not None:
             schema_variants = generate_name_variants(schema)
