@@ -12,6 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Tuple
 from pprint import pp
+import boto3
 
 import humanize
 import psutil
