@@ -2,17 +2,25 @@ import ast
 import sqlglot
 from pprint import pp
 
-def get_stage_info(file, cursor):
+def get_stage_info(file, file_format_params, cursor):
     if file.get("type") != "STAGE" and file.get("source_catalog") != "SNOWFLAKE":
         raise Exception("There was an issue processing your file data.")
+    if file_format_params is None:
+        file_format_params = {}
     cursor.execute(f"DESCRIBE STAGE {file["stage_name"]}")
     stage_info = cursor.fetchall()
     stage_info_dict = {}
 
+    file_format_overrides = None
+    if file_format_params is not None:
+        file_format_overrides = file_format_params.keys()
     for row in stage_info:
+        print("row in stage_info INCOMING")
+        pp(row)
         column_name = row[1]
         data_type = row[2]
-        value = row[3]
+        # checks to see if the parameter is overriden.  If yes, it replaces the value with the overriden value.
+        value = file_format_params.get(column_name, row[3])
         stage_info_dict[column_name] = {
             "snowflake_property_value": value,
             "snowflake_property_type": data_type
@@ -30,6 +38,8 @@ def convert_to_duckdb_properties(copy_properties):
         duckdb_property_name, property_values = next(iter(converted_properties.items()))
         if property_values["duckdb_property_type"] == 'METADATA':
             metadata[duckdb_property_name] = property_values["duckdb_property_value"]
+        elif property_values["duckdb_property_type"] is None:
+            continue
         else:
             all_converted_properties = all_converted_properties | converted_properties
     first_url = metadata["URL"][0]

@@ -24,7 +24,7 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.lake.cloud import s3, gcs, in_lambda
-from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
+from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier, get_role_credentials
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from sqlglot.optimizer.simplify import simplify
 from pprint import pp
@@ -240,8 +240,6 @@ class DuckDBExecutor(Executor):
             None)
 
     def execute(self, ast: sqlglot.exp.Expression, tables: Tables, file_data = None) -> typing.Optional[Locations]:
-        print("ast INCOMING")
-        pp(ast)
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this
@@ -376,6 +374,9 @@ class DuckDBExecutor(Executor):
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             self.catalog.base_catalog.clear_cache()
         elif isinstance(ast, Copy):
+            target_table = full_qualifier(ast.this, self.catalog.credentials)
+            print("target_table INCOMING")
+            pp(target_table)
             print("ast INCOMING")
             pp(ast)
             print("file_data INCOMING")
