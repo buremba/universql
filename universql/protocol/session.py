@@ -165,6 +165,7 @@ class UniverSQLSession:
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
                     yield full_qualifier(expression, self.credentials), cte_aliases
 
+    # INCOMING ADJUSTMENT
     def _find_files(self, ast: sqlglot.exp.Expression):
         # Ensure the root node is a Copy node
         if isinstance(ast, sqlglot.exp.Copy) == False:
