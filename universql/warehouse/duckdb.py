@@ -419,7 +419,6 @@ class DuckDBExecutor(Executor):
                 return sqlglot.exp.DataType.build("TIMESTAMPTZ")
             if expression.this.value in ["VARIANT"]:
                 return sqlglot.exp.DataType.build("JSON")
-
         return expression
 
     @staticmethod

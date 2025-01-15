@@ -11,12 +11,10 @@ def get_stage_info(file, file_format_params, cursor):
     stage_info = cursor.fetchall()
     stage_info_dict = {}
 
-    file_format_overrides = None
-    if file_format_params is not None:
-        file_format_overrides = file_format_params.keys()
+    # file_format_overrides = None
+    # if file_format_params is not None:
+    #     file_format_overrides = file_format_params.keys()
     for row in stage_info:
-        print("row in stage_info INCOMING")
-        pp(row)
         column_name = row[1]
         data_type = row[2]
         # checks to see if the parameter is overriden.  If yes, it replaces the value with the overriden value.
@@ -25,7 +23,6 @@ def get_stage_info(file, file_format_params, cursor):
             "snowflake_property_value": value,
             "snowflake_property_type": data_type
         }
-
     duckdb_data = convert_to_duckdb_properties(stage_info_dict)
 
     return duckdb_data
@@ -33,6 +30,7 @@ def get_stage_info(file, file_format_params, cursor):
 def convert_to_duckdb_properties(copy_properties):
     all_converted_properties = {}
     metadata = {}
+
     for snowflake_property_name, snowflake_property_info in copy_properties.items():
         converted_properties = convert_properties(snowflake_property_name, snowflake_property_info)
         duckdb_property_name, property_values = next(iter(converted_properties.items()))
@@ -51,7 +49,11 @@ def convert_to_duckdb_properties(copy_properties):
     return all_converted_properties
 
 def convert_properties(snowflake_property_name, snowflake_property_info):
-    duckdb_property_info = PROPERTY_MAPPINGS[snowflake_property_name]
+    no_match = {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None 
+    }
+    duckdb_property_info = PROPERTY_MAPPINGS.get(snowflake_property_name, no_match)
     duckdb_property_name = duckdb_property_info["duckdb_property_name"]
     duckdb_property_type = duckdb_property_info["duckdb_property_type"]
     properties = {
