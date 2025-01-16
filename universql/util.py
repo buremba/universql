@@ -1,5 +1,6 @@
 import datetime
 import gzip
+import importlib
 import json
 import logging
 import os
@@ -391,10 +392,10 @@ def parse_compute(warehouse):
     if warehouse is not None:
         matches = re.findall(pattern, warehouse)
         if len(matches) == 0:
-            matches = (('local', ''), ('snowflake', f'warehouse={warehouse}'))
+            matches = (('duckdb', ''), ('snowflake', f'warehouse={warehouse}'))
     else:
         # try locally if warehouse is not provided
-        matches = (('local', ''), )
+        matches = (('duckdb', ''), )
 
     result = []
     for func_name, args_str in matches:
@@ -461,3 +462,24 @@ def full_qualifier(table: sqlglot.exp.Table, credentials: dict):
         if table.args.get('db') is None else table.args.get('db')
     new_table = sqlglot.exp.Table(catalog=catalog, db=db, this=table.this)
     return new_table
+
+
+
+MODULES = [
+    "universql.warehouse.duckdb",
+    "universql.warehouse.bigquery",
+    "universql.warehouse.snowflake",
+    "universql.warehouse.snowflake",
+]
+
+def load_catalogs():
+    """
+    Import a predefined list of modules.
+    """
+    for module_path in MODULES:
+        try:
+            __import__(module_path)
+        except Exception as e:
+            print(f"Failed to load {module_path}: {e}")
+
+

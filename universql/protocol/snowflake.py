@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 import click
+import marimo
 import pyarrow as pa
 import sentry_sdk
 import yaml
@@ -48,6 +49,16 @@ sentry_sdk.init(
 sessions = {}
 query_results = {}
 
+# load all modules
+for module in [
+    "universql.warehouse.duckdb",
+    "universql.warehouse.bigquery",
+    "universql.warehouse.snowflake",
+    "universql.warehouse.redshift",
+    "universql.plugins.snowflake",
+]:
+    __import__(module)
+
 context = click.get_current_context(silent=True)
 if context is None:
     # set log level
@@ -60,7 +71,6 @@ if context is None:
     logger.info(f"Context is {current_context}")
 else:
     current_context = context.params
-
 
 @app.post("/session/v1/login-request")
 async def login_request(request: Request) -> JSONResponse:
@@ -108,7 +118,7 @@ async def login_request(request: Request) -> JSONResponse:
             "data":
                 {
                     "token": token,
-                    # TODO: figure out how to generate safe token
+                    # TODO: figure out how to generate safer token
                     "masterToken": token,
                     "parameters": parameters,
                     "sessionInfo": {f'{k}Name': v for k, v in credentials.items()},
@@ -263,14 +273,15 @@ async def query_request(request: Request) -> JSONResponse:
     except DatabaseError as e:
         print_exc(limit=10)
         return JSONResponse({"id": query_id, "success": False,
-                             "message": f"Error running query on Snowflake: {e.message}",
-                             "data": {"sqlState": e.sql_state}})
+                             "message": f"Error running query on Snowflake: {e.raw_msg}",
+                             "data": {"sqlState": e.sqlstate}})
     except Exception as e:
-        print_exc(limit=1)
-        if query is not None:
-            logger.exception(f"Error processing query: {query}")
-        else:
-            logger.exception(f"Error processing query request", e)
+        if not isinstance(e, HTTPException):
+            print_exc(limit=1)
+            if query is not None:
+                logger.exception(f"Error processing query: {query}")
+            else:
+                logger.exception(f"Error processing query request", e)
         return JSONResponse({"id": query_id, "success": False, "message": "Unable to run the query due to a system error. Please create issue on https://github.com/buremba/universql/issues", "data": {"sqlState": "0000"}})
 
 
@@ -430,7 +441,7 @@ async def startup_event():
         "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
         "For application support, see https://github.com/buremba/universql",)))
 
-# app.mount("/", marimo.create_asgi_app()
-#     .with_app(path="/notebooks", root="/Users/bkabak/Code/universql/resources/snowflake_redshift_usage/2.IngestCost.py")
-#     # .with_dynamic_directory(path="/notebooks", directory="/Users/bkabak/Code/universql/resources/snowflake_redshift_usage")
-#           .build())
+app.mount("/", marimo.create_asgi_app(include_code=False)
+    .with_app(path="/notebooks", root="/Users/bkabak/Downloads/notebook (1).py")
+    # .with_dynamic_directory(path="/notebooks", directory="/Users/bkabak/Code/universql/resources/snowflake_redshift_usage")
+          .build())

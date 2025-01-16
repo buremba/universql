@@ -19,9 +19,9 @@ from sqlglot.expressions import Column
 from sqlglot.optimizer import build_scope
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, s3
-from universql.util import QueryError
+from universql.util import QueryError, load_computes
 
-
+computes = load_computes()
 # def get_iceberg_table_from_data_lake(metadata_file_path: str, cache_directory):
 #     from_metadata = StaticTable.from_metadata(metadata_file_path, {
 #         PY_IO_IMPL: "universql.lake.cloud.iceberg",
