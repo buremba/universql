@@ -15,7 +15,7 @@ TARGET_DIRECTORY = Path('../universql_files_for_claude')  # Set your target dire
 
 # File extensions to copy, optional, set to None if not needed
 EXTENSIONS = {'.py', '.yaml', '.toml', '.txt', '.md', '.gitignore', '.gitattributes'}
-ADDITIONAL_IGNORE = {'tests'}
+ADDITIONAL_IGNORE = {'tests', 'agent', 'ssl', 'resources', 'lake', 'streamlit', 'README.md', 'pyproject.toml', 'Dockerfile', 'LICENSE', 'DEVELOPMENT.md', 'examples'}
 
 def is_system_directory(path: Path) -> bool:
     """Check if path is a protected system directory"""
