@@ -593,11 +593,8 @@ def get_role_credentials(profile_name):
     Gets credentials directly from the profile
     """
     session = boto3.Session(profile_name=profile_name)
-    credentials = session.get_credentials()
     
-    print(f"Credential type: {type(credentials)}")
     credentials = session.get_credentials().get_frozen_credentials()
-    print(f"Access key starts with: {credentials.access_key[:4]}")
     
     return {
         'AccessKeyId': credentials.access_key,
