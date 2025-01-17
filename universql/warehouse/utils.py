@@ -153,8 +153,8 @@ def _format_string_for_duckdb(str):
     if str == 'NONE':
         return ""
     remove_snowflake_escape_characters = str.replace('\\\\', '\\')
-    add_duckdb_escape_characters = remove_snowflake_escape_characters.replace("'", "''")
-    return f"{add_duckdb_escape_characters}"
+    # add_duckdb_escape_characters = remove_snowflake_escape_characters.replace("'", "''")
+    return f"{remove_snowflake_escape_characters}"
 
 def get_stage_name(file: sqlglot.exp.Table):
     full_string = file.this.name
