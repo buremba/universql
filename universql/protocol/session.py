@@ -216,8 +216,6 @@ class UniverSQLSession:
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
                     tables = self._find_tables(ast.expression) if ast.expression is not None else []
-                    print("tables INCOMING")
-                    pp(tables)
                 else:
                     tables = []
                     must_run_on_catalog = True
@@ -232,11 +230,7 @@ class UniverSQLSession:
                 op_name = alternative_executor.__class__.__name__
                 if files_list is not None:
                     with sentry_sdk.start_span(op=op_name, name="Get file info"):
-                        pp(f"ast INCOMING")
-                        pp(ast)
                         processed_file_data = self.catalog.get_file_info(files_list, ast)
-                        pp("processed_file_data INCOMING")
-                        pp(processed_file_data)
                         for file_name, file_config in processed_file_data.items():
                             metadata = file_config["METADATA"]
                             if metadata["storage_provider"] != "Amazon S3":

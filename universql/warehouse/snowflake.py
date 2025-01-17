@@ -25,7 +25,7 @@ from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
 from universql.protocol.utils import get_field_for_snowflake
 from pprint import pp
-from .snowflake_stages import get_stage_info
+from .utils import get_stage_info
 
 MAX_LIMIT = 10000
 
@@ -129,19 +129,13 @@ class SnowflakeCatalog(ICatalog):
             return {}
         try:
             copy_params = self._extract_copy_params(ast)
-            print("copy_params INCOMING")
-            pp(copy_params)
             file_format_params = copy_params.get("FILE_FORMAT")
-            print("file_format_params INCOMING")
-            pp(file_format_params)
             cursor = self.cursor()
             for file in files:
                 print("file in files INCOMING")
                 pp(file)
                 if file.get("type") == 'STAGE':
                     stage_info = get_stage_info(file, file_format_params, cursor)
-                    print("stage_info after get_stage_info INCOMING")
-                    pp(stage_info)
                     stage_info["METADATA"] = stage_info["METADATA"] | file
                     copy_data[file["stage_name"]] = stage_info
         finally:

@@ -581,8 +581,6 @@ def get_credentials_file_location():
     operating_system = platform.system()
     credentials_file_location = DEFAULT_CREDENTIALS_LOCATIONS.get(operating_system)
     if credentials_file_location is not None:
-        print("credentials_file_location INCOMING")
-        pp(os.path.expandvars(os.path.expanduser(credentials_file_location)))
         return os.path.expandvars(os.path.expanduser(credentials_file_location))
     
     raise Exception(

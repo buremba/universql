@@ -1,6 +1,58 @@
 import ast
 import sqlglot
 from pprint import pp
+from sqlglot.expressions import Literal, CopyParameter, Var
+
+DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'Parquet']
+
+    
+def transform_copy(expression, file_data):
+    print("expression INCOMING")
+    pp(expression)
+    if not expression.args.get('files'):
+        return expression
+        
+    files = expression.args['files']
+    new_files = []
+    copy_params = []
+    for table in files:
+        if isinstance(table, sqlglot.exp.Table) and str(table.this).startswith('@'):
+            stage_name = get_stage_name(table)
+            stage_file_data = file_data.get(stage_name)
+            metadata = stage_file_data["METADATA"]
+            file_type = metadata["file_type"]
+            if file_type not in DUCKDB_SUPPORTED_FILE_TYPES:
+                raise Exception(f"DuckDB currently does not support reading from {file_type} files.")
+            url = metadata["URL"][0]
+            full_path = url + get_file_path(table)
+            
+            # Create new function node for read_csv with the S3 path
+            new_files.append(Literal.string(full_path))
+            if copy_params == []:
+                copy_params = convert_copy_params(stage_file_data)
+                existing_params = expression.args.get('params', [])
+                # remove existing CopyParameter from params
+                filtered_params = [p for p in existing_params if not isinstance(p, sqlglot.exp.CopyParameter)]            
+                expression.args['params'] = copy_params + filtered_params
+        else:
+            new_files.append(table)
+            
+    expression.args['files'] = new_files
+    return expression
+
+def convert_copy_params(params):
+    copy_params = []
+    for property_name, property_info in params.items():
+        if property_name == "METADATA":
+            continue
+        copy_params.append(
+            CopyParameter(
+                this=Var(this=property_name),
+                expression=Literal.string(property_info["duckdb_property_value"]) if isinstance(property_info["duckdb_property_value"], str) 
+                    else Literal(this=property_info["duckdb_property_value"], is_string=False)
+            )
+        )    
+    return copy_params
 
 def get_stage_info(file, file_format_params, cursor):
     if file.get("type") != "STAGE" and file.get("source_catalog") != "SNOWFLAKE":
@@ -53,7 +105,7 @@ def convert_properties(snowflake_property_name, snowflake_property_info):
         "duckdb_property_name": None,
         "duckdb_property_type": None 
     }
-    duckdb_property_info = PROPERTY_MAPPINGS.get(snowflake_property_name, no_match)
+    duckdb_property_info = SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS.get(snowflake_property_name, no_match)
     duckdb_property_name = duckdb_property_info["duckdb_property_name"]
     duckdb_property_type = duckdb_property_info["duckdb_property_type"]
     properties = {
@@ -98,9 +150,11 @@ def _format_value_for_duckdb(snowflake_property_name, data):
         return "NO MATCH"
         
 def _format_string_for_duckdb(str):
+    if str == 'NONE':
+        return ""
     remove_snowflake_escape_characters = str.replace('\\\\', '\\')
     add_duckdb_escape_characters = remove_snowflake_escape_characters.replace("'", "''")
-    return f"'{add_duckdb_escape_characters}'"
+    return f"{add_duckdb_escape_characters}"
 
 def get_stage_name(file: sqlglot.exp.Table):
     full_string = file.this.name
@@ -112,7 +166,17 @@ def get_stage_name(file: sqlglot.exp.Table):
             return full_string[1:i]
     return full_string[1:i]
 
-PROPERTY_MAPPINGS = {
+def get_file_path(file: sqlglot.exp.Table):
+    full_string = file.this.name
+    in_quotes = False
+    for i, char in enumerate(full_string):
+        if char == '"':
+            in_quotes = not in_quotes
+        elif char == '/' and not in_quotes:
+            return full_string[i + 1:]
+    return ""
+
+SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
     "TYPE": {
         "duckdb_property_name": "file_type",
         "duckdb_property_type": "METADATA" 

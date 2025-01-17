@@ -23,6 +23,7 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
     Var, Literal, IcebergProperty, Copy, Delete, Merge, Use, DataType
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
+from universql.warehouse.utils import get_stage_name, transform_copy
 from universql.lake.cloud import s3, gcs, in_lambda
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier, get_role_credentials
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
@@ -33,6 +34,8 @@ from universql.lake.cloud import s3, gcs, in_lambda
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
 from universql.warehouse import ICatalog, Executor, Locations, Tables
+
+from functools import partial
 
 logger = logging.getLogger("🐥")
 
@@ -158,11 +161,14 @@ class DuckDBExecutor(Executor):
             cost = calculate_script_cost(total_duration)
             return f"Run locally on DuckDB: {cost}"
 
-    def execute_raw(self, raw_query: str) -> None:
+    def execute_raw(self, raw_query: str, no_emulator = False) -> None:
         try:
             logger.info(
                 f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
-            self.catalog.emulator.execute(raw_query)
+            if no_emulator:
+                self.catalog.duckdb.execute(raw_query)
+            else:
+                self.catalog.emulator.execute(raw_query)
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
         except duckdb.duckdb.DatabaseError as e:
@@ -181,12 +187,17 @@ class DuckDBExecutor(Executor):
                 duckdb_path = ':memory:'
             return f'ATTACH IF NOT EXISTS \'{duckdb_path}\' AS {sqlglot.exp.parse_identifier(db_name).sql()}'
 
-    def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
+    def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables, file_data = None) -> sqlglot.exp.Expression:
         self._sync_catalog(locations)
-        final_ast = (simplify(ast)
+        transformed_ast = (simplify(ast)
                      .transform(self.fix_snowflake_to_duckdb_types))
 
-        return final_ast
+        if isinstance(ast, Copy):
+            transformed_ast = transformed_ast.transform(partial(transform_copy, file_data=file_data))
+        print("transformed_ast INCOMING")
+        pp(transformed_ast)
+        return transformed_ast
+    
 
     def _sync_catalog(self, locations: Tables):
         default_database = self.catalog.credentials.get('database')
@@ -375,10 +386,6 @@ class DuckDBExecutor(Executor):
             self.catalog.base_catalog.clear_cache()
         elif isinstance(ast, Copy):
             target_table = full_qualifier(ast.this, self.catalog.credentials)
-            print("target_table INCOMING")
-            pp(target_table)
-            print("ast INCOMING")
-            pp(ast)
             print("file_data INCOMING")
             pp(file_data)
             # aws_role = file_data[0]
@@ -386,13 +393,11 @@ class DuckDBExecutor(Executor):
                 urls = file_config["METADATA"]["URL"]
                 try:
                     region = get_region(urls[0], file_config["METADATA"]["storage_provider"])
-                    print("region INCOMING")
-                    print(region)
                 except Exception as e:
                     print(f"There was a problem accessing data for {file_name}:\n{e}")
 
-            sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
-            self.execute_raw(sql)
+            sql = self._sync_and_transform_query(ast, tables, file_data).sql(dialect="duckdb", pretty=True)
+            self.execute_raw(sql, True)
         else:
             sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql)
@@ -420,6 +425,12 @@ class DuckDBExecutor(Executor):
             if expression.this.value in ["VARIANT"]:
                 return sqlglot.exp.DataType.build("JSON")
         return expression
+
+    @staticmethod
+    def convert_stage_to_s3_paths(expression: sqlglot.exp.Expression, file_data) -> sqlglot.exp.Expression:
+        if file_data is None:
+            return
+        
 
     @staticmethod
     def get_iceberg_read(location: pyiceberg.table.Table) -> str:
