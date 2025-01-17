@@ -13,7 +13,7 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier, DDL, Query, Use
+from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Var
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
@@ -22,7 +22,7 @@ from universql.warehouse import Executor, Tables, ICatalog
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
-from universql.warehouse.snowflake_stages import get_stage_name
+from universql.warehouse.utils import get_stage_name
 from pprint import pp
 
 logger = logging.getLogger("💡")
@@ -154,14 +154,23 @@ class UniverSQLSession:
         return last_executor.get_as_table()
 
     def _find_tables(self, ast: sqlglot.exp.Expression, cte_aliases=None):
+        print("ast INCOMING")
+        pp(ast)
         if cte_aliases is None:
             cte_aliases = set()
         for expression in ast.walk(bfs=True):
+            # process stages first
+            if (isinstance(expression, sqlglot.exp.Table) and \
+                isinstance(expression.this, Var) and \
+                str(expression.this.this).startswith('@')):
+                continue
             if isinstance(expression, Query) or isinstance(expression, DDL):
                 if expression.ctes is not None and len(expression.ctes) > 0:
                     for cte in expression.ctes:
                         cte_aliases.add(cte.alias)
-            if isinstance(expression, sqlglot.exp.Table) and isinstance(expression.this, Identifier):
+            if (isinstance(expression, sqlglot.exp.Table) and \
+                (isinstance(expression.this, Identifier) or isinstance(expression.this, Var)) \
+                and not any(expression == parent.args.get('format') for parent in ast.walk(bfs=True))):
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
                     yield full_qualifier(expression, self.credentials), cte_aliases
 
@@ -207,6 +216,8 @@ class UniverSQLSession:
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
                     tables = self._find_tables(ast.expression) if ast.expression is not None else []
+                    print("tables INCOMING")
+                    pp(tables)
                 else:
                     tables = []
                     must_run_on_catalog = True
