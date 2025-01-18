@@ -30,11 +30,6 @@ from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from sqlglot.optimizer.simplify import simplify
 from pprint import pp
 
-from universql.lake.cloud import s3, gcs, in_lambda
-from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
-from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
-from universql.warehouse import ICatalog, Executor, Locations, Tables
-
 from functools import partial
 
 logger = logging.getLogger("🐥")
@@ -443,3 +438,4 @@ def get_region(url, storage_provider):
         s3 = boto3.client('s3')
         region_dict = s3.get_bucket_location(Bucket=bucket_name)
         return region_dict.get('LocationConstraint') or 'us-east-1'
+    
