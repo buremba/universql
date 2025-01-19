@@ -487,10 +487,6 @@ def get_profile_for_role(aws_role_arn):
     for profile_name in config.sections():
         profile_data = config[profile_name]
 
-        print("profile_name INCOMING")
-        print(profile_name)
-        print("profile_data.get('role_arn') INCOMING")
-        pp(profile_data.get('role_arn'))
         if profile_data.get('role_arn') == aws_role_arn:
             target_profile = profile_name
             break
