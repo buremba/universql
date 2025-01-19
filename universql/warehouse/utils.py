@@ -40,6 +40,8 @@ def transform_copy(expression, file_data):
 
 def convert_copy_params(params):
     copy_params = []
+    params = apply_param_post_processing(params)
+
     for property_name, property_info in params.items():
         if property_name == "METADATA":
             continue
@@ -53,6 +55,34 @@ def convert_copy_params(params):
             )
         )    
     return copy_params
+
+def apply_param_post_processing(params):
+    params = _add_empty_field_as_null_to_nullstr(params)
+    return params
+
+def _add_empty_field_as_null_to_nullstr(params):
+    empty_field_as_null = params.get("EMPTY_FIELD_AS_NULL")
+    print("empty_field_as_null INCOMING")
+    pp(empty_field_as_null)
+    del params["EMPTY_FIELD_AS_NULL"]
+    if empty_field_as_null is None:
+        return params
+    
+    snowflake_value = empty_field_as_null.get("snowflake_property_value")
+    print("snowflake_value INCOMING")
+    pp(snowflake_value)
+    if snowflake_value.lower() == 'true':
+        nullstr = params.get("nullstr")
+        if nullstr is None:
+            return params
+
+        nullstr_values = nullstr.get("duckdb_property_value")
+        print("nullstr_values INCOMING")
+        pp(nullstr_values)
+        nullstr_values.append("")
+        params["nullstr"]["duckdb_property_value"] = nullstr_values
+    
+    return params
 
 def get_stage_info(file, file_format_params, cursor):
     if file.get("type") != "STAGE" and file.get("source_catalog") != "SNOWFLAKE":
@@ -122,7 +152,12 @@ def _format_value_for_duckdb(snowflake_property_name, data):
     snowflake_type = data["snowflake_property_type"]
     duckdb_type = data["duckdb_property_type"]
     snowflake_value = data["snowflake_property_value"]
-    if snowflake_type == 'String' and duckdb_type == 'VARCHAR':
+    if snowflake_property_name in ["date_format", "timestamp_format"]:
+        duckdb_value = snowflake_value
+        for snowflake_datetime_component, duckdb_datetime_component in SNOWFLAKE_TO_DUCKDB_DATETIME_MAPPINGS.items():
+            duckdb_value.replace(snowflake_datetime_component, duckdb_datetime_component)
+        return duckdb_value
+    elif snowflake_type == 'String' and duckdb_type == 'VARCHAR':
         return _format_string_for_duckdb(snowflake_value)
     elif snowflake_type == "Boolean" and duckdb_type == 'BOOL':
         return snowflake_value.lower()
@@ -175,6 +210,35 @@ def get_file_path(file: sqlglot.exp.Table):
         elif char == '/' and not in_quotes:
             return full_string[i + 1:]
     return ""
+
+SNOWFLAKE_TO_DUCKDB_DATETIME_MAPPINGS = {
+    'YYYY': '%Y',
+    'YY': '%y',
+    "MMMM": "%B",
+    'MM': '%m',
+    'MON': "%b", #in snowflake this means full or abbreviated; duckdb doesn't have an either or option
+    "DD": "%d",
+    "DY": "%a",
+    "HH24": "%24",
+    "HH12": "%I",
+    "AM": "%p",
+    "PM": "%p",
+    "MI": "%M",
+    "SS": "%S",
+    "FF0": "",
+    "FF1": "%g",
+    "FF2": "%g",
+    "FF3": "%g",
+    "FF4": "%f",
+    "FF5": "%f",
+    "FF6": "%f",
+    "FF7": "%n",
+    "FF8": "%n",
+    "FF9": "%n",
+    "TZH:TZM": "%z",
+    "TZHTZM": "%z",
+    "TZH": "%z",
+}
 
 SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
     "TYPE": {
@@ -258,8 +322,8 @@ SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
         "duckdb_property_type": None 
     },
     "EMPTY_FIELD_AS_NULL": {
-        "duckdb_property_name": None,
-        "duckdb_property_type": None 
+        "duckdb_property_name": "EMPTY_FIELD_AS_NULL",
+        "duckdb_property_type": "SPECIAL_HANDLING" 
     },
     "SKIP_BYTE_ORDER_MARK": {
         "duckdb_property_name": None,
