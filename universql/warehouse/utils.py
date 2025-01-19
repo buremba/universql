@@ -7,8 +7,6 @@ DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'Parquet']
 
     
 def transform_copy(expression, file_data):
-    print("expression INCOMING")
-    pp(expression)
     if not expression.args.get('files'):
         return expression
         
@@ -44,6 +42,8 @@ def convert_copy_params(params):
     copy_params = []
     for property_name, property_info in params.items():
         if property_name == "METADATA":
+            continue
+        if property_name == "dateformat" and property_info["duckdb_property_value"] == 'AUTO':
             continue
         copy_params.append(
             CopyParameter(

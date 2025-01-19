@@ -79,8 +79,6 @@ class SnowflakeCatalog(ICatalog):
         for location in tables.values():
             queries.append(location.sql(dialect='snowflake'))
         final_query = '\n'.join(queries)
-        print("final_query INCOMING")
-        pp(final_query)
         if final_query:
             logger.info(f"[{self.session_id}] Syncing Snowflake catalog \n{prepend_to_lines(final_query)}")
             try:
@@ -119,11 +117,6 @@ class SnowflakeCatalog(ICatalog):
         
     def get_file_info(self, files, ast):
         copy_data = {}
-        pp(f"get_file_info files INCOMING")
-        pp(files)
-
-        print(f"get_file_info ast INCOMING")
-        pp(ast)
 
         if len(files) == 0:
             return {}
@@ -132,8 +125,6 @@ class SnowflakeCatalog(ICatalog):
             file_format_params = copy_params.get("FILE_FORMAT")
             cursor = self.cursor()
             for file in files:
-                print("file in files INCOMING")
-                pp(file)
                 if file.get("type") == 'STAGE':
                     stage_info = get_stage_info(file, file_format_params, cursor)
                     stage_info["METADATA"] = stage_info["METADATA"] | file

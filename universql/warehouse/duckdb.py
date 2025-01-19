@@ -20,7 +20,7 @@ from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
-    Var, Literal, IcebergProperty, Copy, Delete, Merge, Use, DataType
+    Var, Literal, IcebergProperty, Copy, Delete, Merge, Use, DataType, ColumnDef
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.warehouse.utils import get_stage_name, transform_copy
@@ -77,6 +77,7 @@ class DuckDBCatalog(ICatalog):
         fake_snowflake_conn.database_set = True
         fake_snowflake_conn.schema_set = True
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
+        self.current_connection = self.emulator
         self._register_data_lake(context)
 
     def _get_table_location(self, table: sqlglot.exp.Table) -> typing.Optional[TableType]:
@@ -141,6 +142,11 @@ class DuckDBCatalog(ICatalog):
     def executor(self) -> Executor:
         return DuckDBExecutor(self)
 
+    def arrow_table(self):
+        if self.current_connection == self.emulator:
+            return self.emulator._arrow_table
+        elif self.current_connection == self.duckdb:
+            return self.duckdb.arrow()
 
 class DuckDBExecutor(Executor):
 
@@ -161,9 +167,10 @@ class DuckDBExecutor(Executor):
             logger.info(
                 f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
             if no_emulator:
-                self.catalog.duckdb.execute(raw_query)
+                self.catalog.current_connection = self.catalog.duckdb
             else:
-                self.catalog.emulator.execute(raw_query)
+                self.catalog.current_connection = self.catalog.emulator
+            self.catalog.current_connection.execute(raw_query)
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
         except duckdb.duckdb.DatabaseError as e:
@@ -189,8 +196,6 @@ class DuckDBExecutor(Executor):
 
         if isinstance(ast, Copy):
             transformed_ast = transformed_ast.transform(partial(transform_copy, file_data=file_data))
-        print("transformed_ast INCOMING")
-        pp(transformed_ast)
         return transformed_ast
     
 
@@ -385,7 +390,9 @@ class DuckDBExecutor(Executor):
             pp(file_data)
             # aws_role = file_data[0]
             for file_name, file_config in file_data.items():
+                print("hola")
                 urls = file_config["METADATA"]["URL"]
+                profile = file_config["METADATA"]["URL"]
                 try:
                     region = get_region(urls[0], file_config["METADATA"]["storage_provider"])
                 except Exception as e:
@@ -400,7 +407,7 @@ class DuckDBExecutor(Executor):
         return None
 
     def get_as_table(self) -> pyarrow.Table:
-        arrow_table = self.catalog.emulator._arrow_table
+        arrow_table = self.catalog.arrow_table()
         if arrow_table is None:
             raise QueryError("No result returned from DuckDB")
         for idx, column in enumerate(self.catalog.duckdb.description):
@@ -432,10 +439,10 @@ class DuckDBExecutor(Executor):
         return sqlglot.exp.func("iceberg_scan",
                                 sqlglot.exp.Literal.string(location.metadata_location)).sql()
 
-def get_region(url, storage_provider):
+def get_region(profile, url, storage_provider):
     if storage_provider == 'Amazon S3':
         bucket_name = url[5:].split("/")[0]
-        s3 = boto3.client('s3')
+        session = boto3.Session(profile_name=profile)
+        s3 = session.client('s3')
         region_dict = s3.get_bucket_location(Bucket=bucket_name)
-        return region_dict.get('LocationConstraint') or 'us-east-1'
-    
+        return region_dict.get('LocationConstraint') or 'us-east-1'    

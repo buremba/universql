@@ -473,33 +473,6 @@ def full_qualifier(table: sqlglot.exp.Table, credentials: dict):
     new_table = sqlglot.exp.Table(catalog=catalog, db=db, this=table.this)
     return new_table
 
-def get_profile_for_credentials(aws_role_arn):
-    # Get credentials file location and read TOML file
-    creds_file = get_credentials_file_location()
-    try:
-        config = configparser.ConfigParser()
-        config.read(creds_file)
-    except Exception as e:
-        raise Exception(f"Failed to read credentials file: {str(e)}")
-    
-    # Find which profile has our target role_arn
-    target_profile = None
-    for profile_name, profile_data in config.items():
-        if profile_data.get('role_arn') == aws_role_arn:
-            target_profile = profile_name
-            break
-    
-    if not target_profile:
-        if not target_profile:
-            # Try default profile if target role not found
-            if config.has_section('default'):
-                return _find_profile_with_credentials('default', config, creds_file)
-        raise Exception(
-            f"We were unable to find credentials for {aws_role_arn} in {creds_file}."
-            "Please make sure you have this role_arn in your credentials file or have a default profile configured."
-            "You can set the environment variable AWS_SHARED_CREDENTIALS_FILE to a different credentials file location."
-        )
-
 def get_profile_for_role(aws_role_arn):
     # Get credentials file location and read TOML file
     creds_file = get_credentials_file_location()
@@ -511,7 +484,13 @@ def get_profile_for_role(aws_role_arn):
     
     # Find which profile has our target role_arn
     target_profile = None
-    for profile_name, profile_data in config.items():
+    for profile_name in config.sections():
+        profile_data = config[profile_name]
+
+        print("profile_name INCOMING")
+        print(profile_name)
+        print("profile_data.get('role_arn') INCOMING")
+        pp(profile_data.get('role_arn'))
         if profile_data.get('role_arn') == aws_role_arn:
             target_profile = profile_name
             break

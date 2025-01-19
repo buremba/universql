@@ -120,6 +120,7 @@ class UniverSQLSession:
         if queries is None:
             last_executor = self.perform_query(self.catalog_executor, raw_query)
         else:
+
             last_error = None
             for ast in queries:
                 for compute in self.compute_plan:
@@ -154,8 +155,6 @@ class UniverSQLSession:
         return last_executor.get_as_table()
 
     def _find_tables(self, ast: sqlglot.exp.Expression, cte_aliases=None):
-        print("ast INCOMING")
-        pp(ast)
         if cte_aliases is None:
             cte_aliases = set()
         for expression in ast.walk(bfs=True):
@@ -174,7 +173,6 @@ class UniverSQLSession:
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
                     yield full_qualifier(expression, self.credentials), cte_aliases
 
-    # INCOMING ADJUSTMENT
     def _find_files(self, ast: sqlglot.exp.Expression):
         # Ensure the root node is a Copy node
         if isinstance(ast, sqlglot.exp.Copy) == False:
