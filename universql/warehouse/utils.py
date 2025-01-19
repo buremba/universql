@@ -18,7 +18,7 @@ def transform_copy(expression, file_data):
             stage_name = get_stage_name(table)
             stage_file_data = file_data.get(stage_name)
             metadata = stage_file_data["METADATA"]
-            file_type = metadata["file_type"]
+            file_type = stage_file_data["format"]["snowflake_property_value"]
             if file_type not in DUCKDB_SUPPORTED_FILE_TYPES:
                 raise Exception(f"DuckDB currently does not support reading from {file_type} files.")
             url = metadata["URL"][0]
@@ -62,23 +62,17 @@ def apply_param_post_processing(params):
 
 def _add_empty_field_as_null_to_nullstr(params):
     empty_field_as_null = params.get("EMPTY_FIELD_AS_NULL")
-    print("empty_field_as_null INCOMING")
-    pp(empty_field_as_null)
     del params["EMPTY_FIELD_AS_NULL"]
     if empty_field_as_null is None:
         return params
     
     snowflake_value = empty_field_as_null.get("snowflake_property_value")
-    print("snowflake_value INCOMING")
-    pp(snowflake_value)
     if snowflake_value.lower() == 'true':
         nullstr = params.get("nullstr")
         if nullstr is None:
             return params
 
         nullstr_values = nullstr.get("duckdb_property_value")
-        print("nullstr_values INCOMING")
-        pp(nullstr_values)
         nullstr_values.append("")
         params["nullstr"]["duckdb_property_value"] = nullstr_values
     
@@ -242,8 +236,8 @@ SNOWFLAKE_TO_DUCKDB_DATETIME_MAPPINGS = {
 
 SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
     "TYPE": {
-        "duckdb_property_name": "file_type",
-        "duckdb_property_type": "METADATA" 
+        "duckdb_property_name": "format",
+        "duckdb_property_type": "VARCHAR" 
     },
     "RECORD_DELIMITER": {
         "duckdb_property_name": 'new_line',
