@@ -14,6 +14,23 @@ def get_load_file_format_queries(file_format):
     return FILE_FORMAT_LOAD_QUERIES.get(file_format, [])
     
 def transform_copy(expression, file_data):
+    """
+    Transforms Snowflake COPY commands to DuckDB-compatible file reading operations.
+    
+    Converts Snowflake stage references (@stage) into direct file paths and 
+    maps Snowflake COPY parameters to their DuckDB equivalents.
+    
+    Args:
+        expression: COPY command AST
+        file_data: Stage and file metadata
+    
+    Returns:
+        Modified AST with direct file paths and mapped parameters
+    
+    Raises:
+        Exception: If file format is not supported by DuckDB
+    """
+
     if not expression.args.get('files'):
         return expression
         
@@ -46,6 +63,19 @@ def transform_copy(expression, file_data):
     return expression
 
 def convert_copy_params(params):
+    """
+    Converts Snowflake COPY parameters to DuckDB-compatible options.
+    
+    Maps and transforms file reading parameters between Snowflake and DuckDB,
+    handling special cases and default values.
+    
+    Args:
+        params: Dictionary of Snowflake parameters
+    
+    Returns:
+        List of DuckDB CopyParameter nodes
+    """
+
     copy_params = []
     params = apply_param_post_processing(params)
 
@@ -110,6 +140,20 @@ def _add_required_params(params, format):
     return params
 
 def get_stage_info(file, file_format_params, cursor):
+    """
+    Retrieves and processes Snowflake stage metadata.
+    
+    Gets stage configuration from Snowflake and converts it to 
+    DuckDB-compatible format options, handling parameter overrides.
+    
+    Args:
+        file: Stage reference info
+        file_format_params: Optional format parameter overrides
+        cursor: Database cursor for stage queries
+    
+    Returns:
+        Dictionary of processed DuckDB parameters
+    """
     if file.get("type") != "STAGE" and file.get("source_catalog") != "SNOWFLAKE":
         raise Exception("There was an issue processing your file data.")
     if file_format_params is None:
@@ -135,6 +179,18 @@ def get_stage_info(file, file_format_params, cursor):
     return duckdb_data
 
 def convert_to_duckdb_properties(copy_properties):
+    """
+    Maps Snowflake stage properties to DuckDB file reading options.
+    
+    Processes stage configuration and converts each property to its 
+    DuckDB equivalent, handling special cases and metadata extraction.
+    
+    Args:
+        copy_properties: Dictionary of Snowflake stage properties
+    
+    Returns:
+        Dictionary of mapped DuckDB properties and metadata
+    """
     file_format = copy_properties['TYPE']['snowflake_property_value']
     all_converted_properties = {}
     metadata = {}

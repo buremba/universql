@@ -163,6 +163,21 @@ class DuckDBExecutor(Executor):
             return f"Run locally on DuckDB: {cost}"
 
     def execute_raw(self, raw_query: str, no_emulator = False) -> None:
+        """
+        Executes a raw SQL query with optional Snowflake emulation.
+        
+        Provides direct query execution capabilities with two modes:
+        1. Snowflake emulation mode (default) - translates Snowflake syntax
+        2. Direct DuckDB mode - bypasses emulation for native DuckDB operations
+        
+        Args:
+            raw_query: SQL query to execute
+            no_emulator: If True, executes directly on DuckDB without Snowflake emulation
+        
+        Raises:
+            QueryError: On any execution failure, wrapping the underlying database error
+        """
+
         try:
             logger.info(
                 f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
@@ -171,8 +186,6 @@ class DuckDBExecutor(Executor):
             else:
                 self.catalog.current_connection = self.catalog.emulator
             logger.info(f"Debug - Catalog connection type: {type(self.catalog.current_connection)}")
-            print("type(self.catalog.current_connection) INCOMING")
-            pp(type(self.catalog.current_connection))
             self.catalog.current_connection.execute(raw_query)
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
@@ -193,6 +206,22 @@ class DuckDBExecutor(Executor):
             return f'ATTACH IF NOT EXISTS \'{duckdb_path}\' AS {sqlglot.exp.parse_identifier(db_name).sql()}'
 
     def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables, file_data = None) -> sqlglot.exp.Expression:
+        """
+        Prepares a query for DuckDB execution by syncing catalogs and transforming syntax.
+        
+        Performs three key operations:
+        1. Syncs catalog state to ensure required schemas/tables exist
+        2. Transforms Snowflake SQL syntax to DuckDB-compatible syntax
+        3. For COPY commands, transforms stage references to direct file paths
+        
+        Args:
+            ast: SQL Abstract Syntax Tree
+            locations: Table location mappings
+            file_data: Optional stage/file metadata for COPY commands
+        
+        Returns:
+            Transformed AST ready for DuckDB execution
+        """
         self._sync_catalog(locations)
         transformed_ast = (simplify(ast)
                      .transform(self.fix_snowflake_to_duckdb_types))
@@ -260,6 +289,26 @@ class DuckDBExecutor(Executor):
             self.execute_raw(query)
                 
     def execute(self, ast: sqlglot.exp.Expression, tables: Tables, file_data = None) -> typing.Optional[Locations]:
+        """
+        Main query execution handler with specialized processing for different SQL commands.
+        
+        Provides specific handling for:
+        - CREATE: Tables (including Iceberg) and views
+        - INSERT: Data insertion for both Iceberg and local tables
+        - DROP: Table removal
+        - USE: Database/schema context switching
+        - COPY: Stage-based data loading with file format handling
+        
+        For COPY commands, processes stage metadata and converts to direct file access.
+        
+        Args:
+            ast: SQL Abstract Syntax Tree
+            tables: Table location mappings
+            file_data: Stage and file metadata for COPY commands
+        
+        Returns:
+            Optional[Locations]: Updated location mappings for new tables/views
+        """
         # if file_data is not None:
         #     self.prep_duckdb_for_files(file_data)
 
@@ -457,6 +506,21 @@ class DuckDBExecutor(Executor):
                                 sqlglot.exp.Literal.string(location.metadata_location)).sql()
 
 def get_region(profile, url, storage_provider):
+    """
+    Resolves AWS region for an S3 bucket.
+    
+    Takes a bucket URL and retrieves its region using AWS SDK.
+    Handles the special case where a null LocationConstraint indicates us-east-1.
+    Additionally, this sets the profile to use for the copy operation.
+    
+    Args:
+        profile: AWS credentials profile
+        url: S3 URL containing bucket name
+        storage_provider: Must be 'Amazon S3'
+    
+    Returns:
+        str: AWS region identifier (e.g., 'us-east-1')
+    """
     if storage_provider == 'Amazon S3':
         bucket_name = url[5:].split("/")[0]
         session = boto3.Session(profile_name=profile)

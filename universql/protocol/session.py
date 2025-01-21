@@ -174,6 +174,28 @@ class UniverSQLSession:
                     yield full_qualifier(expression, self.credentials), cte_aliases
 
     def _find_files(self, ast: sqlglot.exp.Expression):
+        """
+        Extracts file information from a Snowflake COPY command's AST.
+        
+        This function specifically handles Snowflake stage references (prefixed with @) 
+        in COPY commands. It processes the 'files' argument of the COPY command and 
+        returns structured information about each file source.
+
+        Args:
+            ast (sqlglot.exp.Expression): The Abstract Syntax Tree of the SQL query
+
+        Returns:
+            List[Dict] | None: A list of dictionaries containing file information with keys:
+                - file_qualifier: Full path/identifier of the file
+                - type: Type of source (e.g., 'STAGE')
+                - source_catalog: Origin catalog (e.g., 'SNOWFLAKE')
+                - stage_name: Name of the stage (for stage-based files)
+            Returns None if the AST is not a COPY command.
+
+        Notes:
+            Currently only supports Snowflake stage references (@stage_name).
+            Direct file ingestion is not yet implemented.
+        """
         # Ensure the root node is a Copy node
         if isinstance(ast, sqlglot.exp.Copy) == False:
             return None
@@ -222,10 +244,6 @@ class UniverSQLSession:
             else:
                 tables = self._find_tables(ast)
                 files_list = self._find_files(ast)
-                print("ast INCOMING")
-                pp(ast)
-                print("files_list")
-                pp(files_list)
             tables_list = [table[0] for table in tables]
             must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables_list, ast)
             if not must_run_on_catalog:
