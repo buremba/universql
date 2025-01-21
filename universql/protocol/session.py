@@ -222,6 +222,10 @@ class UniverSQLSession:
             else:
                 tables = self._find_tables(ast)
                 files_list = self._find_files(ast)
+                print("ast INCOMING")
+                pp(ast)
+                print("files_list")
+                pp(files_list)
             tables_list = [table[0] for table in tables]
             must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables_list, ast)
             if not must_run_on_catalog:

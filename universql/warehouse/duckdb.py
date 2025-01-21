@@ -23,7 +23,7 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
     Var, Literal, IcebergProperty, Copy, Delete, Merge, Use, DataType, ColumnDef
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
-from universql.warehouse.utils import get_stage_name, transform_copy
+from universql.warehouse.utils import transform_copy, get_file_format, get_load_file_format_queries
 from universql.lake.cloud import s3, gcs, in_lambda
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier, get_role_credentials
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
@@ -170,6 +170,9 @@ class DuckDBExecutor(Executor):
                 self.catalog.current_connection = self.catalog.duckdb
             else:
                 self.catalog.current_connection = self.catalog.emulator
+            logger.info(f"Debug - Catalog connection type: {type(self.catalog.current_connection)}")
+            print("type(self.catalog.current_connection) INCOMING")
+            pp(type(self.catalog.current_connection))
             self.catalog.current_connection.execute(raw_query)
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
@@ -248,7 +251,18 @@ class DuckDBExecutor(Executor):
                                                                 Var) and expression.this.this.casefold() == name.casefold()),
             None)
 
+    def prep_duckdb_for_files(self, file_data):
+        file_format = get_file_format(file_data[next(iter(file_data.keys()))])
+        load_file_format_queries = get_load_file_format_queries(file_format)
+        print(f"Found {file_format} files to read")
+        for query in load_file_format_queries:
+            print(f"Executing {query}")
+            self.execute_raw(query)
+                
     def execute(self, ast: sqlglot.exp.Expression, tables: Tables, file_data = None) -> typing.Optional[Locations]:
+        # if file_data is not None:
+        #     self.prep_duckdb_for_files(file_data)
+
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this
@@ -385,26 +399,29 @@ class DuckDBExecutor(Executor):
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             self.catalog.base_catalog.clear_cache()
         elif isinstance(ast, Copy):
-            target_table = full_qualifier(ast.this, self.catalog.credentials)
-            print("file_data INCOMING")
-            pp(file_data)
-            # aws_role = file_data[0]
             for file_name, file_config in file_data.items():
-                print("hola")
                 urls = file_config["METADATA"]["URL"]
-                profile = file_config["METADATA"]["URL"]
+                # profile = file_config["METADATA"]["URL"]
                 try:
                     region = get_region(urls[0], file_config["METADATA"]["storage_provider"])
                 except Exception as e:
                     print(f"There was a problem accessing data for {file_name}:\n{e}")
-
+            
             sql = self._sync_and_transform_query(ast, tables, file_data).sql(dialect="duckdb", pretty=True)
+            logger.info(f"Debug - Final SQL: {sql}")
+            logger.info(f"Debug - File data: {file_data}")
             self.execute_raw(sql, True)
         else:
             sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql)
 
         return None
+
+    def _load_file_format(file_format):
+        file_format_queries = {
+            "JSON": ["INSTALL json;", "LOAD json;"],
+            "AVRO": ["INSTALL avro FROM community;", "LOAD avro;"]
+        }
 
     def get_as_table(self) -> pyarrow.Table:
         arrow_table = self.catalog.arrow_table()

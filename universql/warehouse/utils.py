@@ -5,6 +5,13 @@ from sqlglot.expressions import Literal, CopyParameter, Var
 
 DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'Parquet']
 
+FILE_FORMAT_LOAD_QUERIES = {
+    "JSON": ["INSTALL json;", "LOAD json;"],
+    "AVRO": ["INSTALL avro FROM community;", "LOAD avro;"]
+}
+
+def get_load_file_format_queries(file_format):
+    return FILE_FORMAT_LOAD_QUERIES.get(file_format, [])
     
 def transform_copy(expression, file_data):
     if not expression.args.get('files'):
@@ -18,7 +25,7 @@ def transform_copy(expression, file_data):
             stage_name = get_stage_name(table)
             stage_file_data = file_data.get(stage_name)
             metadata = stage_file_data["METADATA"]
-            file_type = stage_file_data["format"]["snowflake_property_value"]
+            file_type = get_file_format(stage_file_data)
             if file_type not in DUCKDB_SUPPORTED_FILE_TYPES:
                 raise Exception(f"DuckDB currently does not support reading from {file_type} files.")
             url = metadata["URL"][0]
@@ -56,16 +63,22 @@ def convert_copy_params(params):
         )    
     return copy_params
 
+def get_file_format(params):
+    return params["format"]["duckdb_property_value"]
+
 def apply_param_post_processing(params):
+    format = get_file_format(params)
+    params = _remove_problematic_params(params, format)
+    params = _add_required_params(params, format)
     params = _add_empty_field_as_null_to_nullstr(params)
     return params
 
 def _add_empty_field_as_null_to_nullstr(params):
     empty_field_as_null = params.get("EMPTY_FIELD_AS_NULL")
-    del params["EMPTY_FIELD_AS_NULL"]
     if empty_field_as_null is None:
         return params
-    
+
+    del params["EMPTY_FIELD_AS_NULL"]    
     snowflake_value = empty_field_as_null.get("snowflake_property_value")
     if snowflake_value.lower() == 'true':
         nullstr = params.get("nullstr")
@@ -76,6 +89,24 @@ def _add_empty_field_as_null_to_nullstr(params):
         nullstr_values.append("")
         params["nullstr"]["duckdb_property_value"] = nullstr_values
     
+    return params
+
+def _remove_problematic_params(params, format):
+    disallowed_params = DISALLOWED_PARAMS_BY_FORMAT.get(format, {})
+    for disallowed_param, disallowed_values in disallowed_params.items():
+        if params.get(disallowed_param) is not None:
+            if disallowed_values[0] in ("ALWAYS_REMOVE"):
+                del params[disallowed_param]
+                continue
+            param_current_value = params[disallowed_param]["duckdb_property_value"]
+            if param_current_value in disallowed_values:
+                del params[disallowed_param]
+    return params    
+
+def _add_required_params(params, format):
+    # required_params = REQUIRED_PARAMS_BY_FORMAT.get(format, {})
+    # for required_param, required_values in required_params.items():
+    #     params[required_param] = required_values
     return params
 
 def get_stage_info(file, file_format_params, cursor):
@@ -104,11 +135,12 @@ def get_stage_info(file, file_format_params, cursor):
     return duckdb_data
 
 def convert_to_duckdb_properties(copy_properties):
+    file_format = copy_properties['TYPE']['snowflake_property_value']
     all_converted_properties = {}
     metadata = {}
 
     for snowflake_property_name, snowflake_property_info in copy_properties.items():
-        converted_properties = convert_properties(snowflake_property_name, snowflake_property_info)
+        converted_properties = convert_properties(file_format, snowflake_property_name, snowflake_property_info)
         duckdb_property_name, property_values = next(iter(converted_properties.items()))
         if property_values["duckdb_property_type"] == 'METADATA':
             metadata[duckdb_property_name] = property_values["duckdb_property_value"]
@@ -124,7 +156,7 @@ def convert_to_duckdb_properties(copy_properties):
     all_converted_properties["METADATA"] = metadata    
     return all_converted_properties
 
-def convert_properties(snowflake_property_name, snowflake_property_info):
+def convert_properties(file_format, snowflake_property_name, snowflake_property_info):
     no_match = {
         "duckdb_property_name": None,
         "duckdb_property_type": None 
@@ -136,13 +168,13 @@ def convert_properties(snowflake_property_name, snowflake_property_info):
         "duckdb_property_type": duckdb_property_type
     } | snowflake_property_info | {"snowflake_property_name": snowflake_property_name}
     if duckdb_property_name is not None:
-        value = _format_value_for_duckdb(snowflake_property_name, properties)
+        value = _format_value_for_duckdb(file_format, snowflake_property_name, properties)
         properties["duckdb_property_value"] = value
     else:
         properties["duckdb_property_value"] = None
     return {duckdb_property_name: properties}
 
-def _format_value_for_duckdb(snowflake_property_name, data):
+def _format_value_for_duckdb(file_format, snowflake_property_name, data):
     snowflake_type = data["snowflake_property_type"]
     duckdb_type = data["duckdb_property_type"]
     snowflake_value = data["snowflake_property_value"]
@@ -152,6 +184,8 @@ def _format_value_for_duckdb(snowflake_property_name, data):
             duckdb_value.replace(snowflake_datetime_component, duckdb_datetime_component)
         return duckdb_value
     elif snowflake_type == 'String' and duckdb_type == 'VARCHAR':
+        if file_format == 'JSON' and snowflake_property_name.lower() == 'compression' and snowflake_value.lower() == 'auto':
+            return "auto_detect"
         return _format_string_for_duckdb(snowflake_value)
     elif snowflake_type == "Boolean" and duckdb_type == 'BOOL':
         return snowflake_value.lower()
@@ -204,6 +238,23 @@ def get_file_path(file: sqlglot.exp.Table):
         elif char == '/' and not in_quotes:
             return full_string[i + 1:]
     return ""
+
+DISALLOWED_PARAMS_BY_FORMAT = {
+    "JSON": {
+        "ignore_errors": ["ALWAYS_REMOVE"],
+        "nullstr": ["ALWAYS_REMOVE"],
+        "timestampformat": ["AUTO"]
+    }
+}
+
+REQUIRED_PARAMS_BY_FORMAT = {
+    "JSON": {
+        "auto_detect": {
+            "duckdb_property_type": "BOOL",
+            "duckdb_property_value": "TRUE"
+        }
+    }
+}
 
 SNOWFLAKE_TO_DUCKDB_DATETIME_MAPPINGS = {
     'YYYY': '%Y',
@@ -380,6 +431,26 @@ SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
         "duckdb_property_type": None
     },
     "AUTO_REFRESH": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "ALLOW_DUPLICATE": { # duckdb only takes the last value
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "ENABLE_OCTAL": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "IGNORE_UTF8_ERRORS": {
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "STRIP_NULL_VALUES": { # would need to be handled after a successful copy
+        "duckdb_property_name": None,
+        "duckdb_property_type": None
+    },
+    "STRIP_OUTER_ARRAY": { # needs to use json_array_elements() after loading
         "duckdb_property_name": None,
         "duckdb_property_type": None
     }

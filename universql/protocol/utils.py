@@ -138,12 +138,6 @@ def get_field_from_duckdb(column: list[str], arrow_table: Table, idx: int) -> ty
     (field_name, field_type) = column[0], column[1]
     pa_type = arrow_table.schema[idx].type
 
-    print(f"\nProcessing column: {field_name}")
-    print(f"Full column info: {column}")
-    print(f"DuckDB field type: {field_type}")
-    print(f"Current PyArrow type: {pa_type}")
-    print(f"Arrow table column data: {arrow_table[idx]}")
-
     metadata = {}
     value = arrow_table[idx]
 
