@@ -28,6 +28,7 @@ from universql.util import unpack_request_body, session_from_request, parameters
 from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
 from universql.protocol.session import UniverSQLSession
+from pprint import pp
 
 logger = logging.getLogger("🧵")
 

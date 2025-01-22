@@ -5,6 +5,7 @@ import typing
 from enum import Enum
 from string import Template
 from typing import List
+import boto3
 
 import duckdb
 import pyiceberg.table
@@ -18,14 +19,18 @@ from pyiceberg.catalog import Catalog
 from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
-from sqlglot.expressions import Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
-    Var, Literal, IcebergProperty, Use, ColumnDef, DataType
-from sqlglot.optimizer.simplify import simplify
+from sqlglot.expressions import Select, Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
+    Var, Literal, IcebergProperty, Copy, Delete, Merge, Use, DataType, ColumnDef
 
-from universql.lake.cloud import s3, gcs, in_lambda
-from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
-from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
 from universql.warehouse import ICatalog, Executor, Locations, Tables
+from universql.warehouse.utils import transform_copy, get_file_format, get_load_file_format_queries
+from universql.lake.cloud import s3, gcs, in_lambda
+from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier, get_role_credentials
+from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
+from sqlglot.optimizer.simplify import simplify
+from pprint import pp
+
+from functools import partial
 
 logger = logging.getLogger("🐥")
 
@@ -72,6 +77,7 @@ class DuckDBCatalog(ICatalog):
         fake_snowflake_conn.database_set = True
         fake_snowflake_conn.schema_set = True
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
+        self.current_connection = self.emulator
         self._register_data_lake(context)
 
     def _get_table_location(self, table: sqlglot.exp.Table) -> typing.Optional[TableType]:
@@ -108,6 +114,11 @@ class DuckDBCatalog(ICatalog):
             return TableType.ICEBERG
 
         raise NotSupportedError
+    
+    def _get_file_location(self, file):
+        database = file.parts[0]
+        schema = file.parts[1]
+        table_name = file.parts[2].quoted   
 
     def register_locations(self, tables: Locations):
         raise Exception("Unsupported operation")
@@ -131,6 +142,11 @@ class DuckDBCatalog(ICatalog):
     def executor(self) -> Executor:
         return DuckDBExecutor(self)
 
+    def arrow_table(self):
+        if self.current_connection == self.emulator:
+            return self.emulator._arrow_table
+        elif self.current_connection == self.duckdb:
+            return self.duckdb.arrow()
 
 class DuckDBExecutor(Executor):
 
@@ -146,11 +162,31 @@ class DuckDBExecutor(Executor):
             cost = calculate_script_cost(total_duration)
             return f"Run locally on DuckDB: {cost}"
 
-    def execute_raw(self, raw_query: str) -> None:
+    def execute_raw(self, raw_query: str, no_emulator = False) -> None:
+        """
+        Executes a raw SQL query with optional Snowflake emulation.
+        
+        Provides direct query execution capabilities with two modes:
+        1. Snowflake emulation mode (default) - translates Snowflake syntax
+        2. Direct DuckDB mode - bypasses emulation for native DuckDB operations
+        
+        Args:
+            raw_query: SQL query to execute
+            no_emulator: If True, executes directly on DuckDB without Snowflake emulation
+        
+        Raises:
+            QueryError: On any execution failure, wrapping the underlying database error
+        """
+
         try:
             logger.info(
                 f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
-            self.catalog.emulator.execute(raw_query)
+            if no_emulator:
+                self.catalog.current_connection = self.catalog.duckdb
+            else:
+                self.catalog.current_connection = self.catalog.emulator
+            logger.info(f"Debug - Catalog connection type: {type(self.catalog.current_connection)}")
+            self.catalog.current_connection.execute(raw_query)
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
         except duckdb.duckdb.DatabaseError as e:
@@ -169,12 +205,31 @@ class DuckDBExecutor(Executor):
                 duckdb_path = ':memory:'
             return f'ATTACH IF NOT EXISTS \'{duckdb_path}\' AS {sqlglot.exp.parse_identifier(db_name).sql()}'
 
-    def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
+    def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables, file_data = None) -> sqlglot.exp.Expression:
+        """
+        Prepares a query for DuckDB execution by syncing catalogs and transforming syntax.
+        
+        Performs three key operations:
+        1. Syncs catalog state to ensure required schemas/tables exist
+        2. Transforms Snowflake SQL syntax to DuckDB-compatible syntax
+        3. For COPY commands, transforms stage references to direct file paths
+        
+        Args:
+            ast: SQL Abstract Syntax Tree
+            locations: Table location mappings
+            file_data: Optional stage/file metadata for COPY commands
+        
+        Returns:
+            Transformed AST ready for DuckDB execution
+        """
         self._sync_catalog(locations)
-        final_ast = (simplify(ast)
+        transformed_ast = (simplify(ast)
                      .transform(self.fix_snowflake_to_duckdb_types))
 
-        return final_ast
+        if isinstance(ast, Copy):
+            transformed_ast = transformed_ast.transform(partial(transform_copy, file_data=file_data))
+        return transformed_ast
+    
 
     def _sync_catalog(self, locations: Tables):
         default_database = self.catalog.credentials.get('database')
@@ -225,7 +280,38 @@ class DuckDBExecutor(Executor):
                                                                 Var) and expression.this.this.casefold() == name.casefold()),
             None)
 
-    def execute(self, ast: sqlglot.exp.Expression, tables: Tables) -> typing.Optional[Locations]:
+    def prep_duckdb_for_files(self, file_data):
+        file_format = get_file_format(file_data[next(iter(file_data.keys()))])
+        load_file_format_queries = get_load_file_format_queries(file_format)
+        print(f"Found {file_format} files to read")
+        for query in load_file_format_queries:
+            print(f"Executing {query}")
+            self.execute_raw(query)
+                
+    def execute(self, ast: sqlglot.exp.Expression, tables: Tables, file_data = None) -> typing.Optional[Locations]:
+        """
+        Main query execution handler with specialized processing for different SQL commands.
+        
+        Provides specific handling for:
+        - CREATE: Tables (including Iceberg) and views
+        - INSERT: Data insertion for both Iceberg and local tables
+        - DROP: Table removal
+        - USE: Database/schema context switching
+        - COPY: Stage-based data loading with file format handling
+        
+        For COPY commands, processes stage metadata and converts to direct file access.
+        
+        Args:
+            ast: SQL Abstract Syntax Tree
+            tables: Table location mappings
+            file_data: Stage and file metadata for COPY commands
+        
+        Returns:
+            Optional[Locations]: Updated location mappings for new tables/views
+        """
+        # if file_data is not None:
+        #     self.prep_duckdb_for_files(file_data)
+
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this
@@ -361,14 +447,89 @@ class DuckDBExecutor(Executor):
                 self._sync_catalog({})
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             self.catalog.base_catalog.clear_cache()
+        elif isinstance(ast, Copy):
+
+            cache_directory = self.catalog.context.get('cache_directory')
+            file_cache_directories = []
+
+            for file_name, file_config in file_data.items():
+                urls = file_config["METADATA"]["URL"]
+                profile = file_config["METADATA"]["profile"]
+                stage_name_length = len(file_config["METADATA"]["stage_name"])
+                file_nodes = ast.args.get("files", [])
+                primary_folder = urls[0].replace('://', '/')
+                for file in file_nodes:
+                    sub_path = file.this.name[stage_name_length + 2:].rsplit('/', 1)[0] + "/"
+                    full_path = cache_directory + "/" + primary_folder + sub_path
+                    file_cache_directories.append(full_path)
+                try:
+                    region = get_region(profile, urls[0], file_config["METADATA"]["storage_provider"])
+                except Exception as e:
+                    print(f"There was a problem accessing data for {file_name}:\n{e}")
+            
+            sql = self._sync_and_transform_query(ast, tables, file_data).sql(dialect="duckdb", pretty=True)
+
+            try:
+                self.execute_raw(sql, True)
+            finally:
+                self._cleanup_cache(file_cache_directories)
         else:
             sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql)
 
         return None
 
+    def _get_cache_snapshot(self, monitored_dirs):
+        """
+        Creates a snapshot of all files currently in the specified directories.
+        Files found are stored as absolute paths in a set for quick comparison.
+        
+        Args:
+            monitored_dirs: List of directory paths to check for files
+            
+        Returns:
+            set: Absolute paths of all files found in monitored directories
+            
+        Note: 
+            Silently skips directories that don't exist
+        """        
+        files = set()
+        for directory in monitored_dirs:
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        if entry.is_file():
+                            files.add(entry.path)
+            except FileNotFoundError:
+                pass
+        return files
+
+    def _cleanup_cache(self, monitored_dirs):
+        """
+        Removes files in the monitored directories. 
+        
+        Args:
+            before_snapshot: Set of file paths that existed before COPY
+            monitored_dirs: List of directory paths to clean up
+            
+        Note:
+            Logs warnings for files it fails to remove but continues execution
+        """        
+        files_in_cache = self._get_cache_snapshot(monitored_dirs)
+        for file_path in files_in_cache:
+            try:
+                os.remove(file_path)
+            except (FileNotFoundError, PermissionError):
+                logger.warning(f"Could not remove cached file: {file_path}")
+
+    def _load_file_format(file_format):
+        file_format_queries = {
+            "JSON": ["INSTALL json;", "LOAD json;"],
+            "AVRO": ["INSTALL avro FROM community;", "LOAD avro;"]
+        }
+
     def get_as_table(self) -> pyarrow.Table:
-        arrow_table = self.catalog.emulator._arrow_table
+        arrow_table = self.catalog.arrow_table()
         if arrow_table is None:
             raise QueryError("No result returned from DuckDB")
         for idx, column in enumerate(self.catalog.duckdb.description):
@@ -387,10 +548,38 @@ class DuckDBExecutor(Executor):
                 return sqlglot.exp.DataType.build("TIMESTAMPTZ")
             if expression.this.value in ["VARIANT"]:
                 return sqlglot.exp.DataType.build("JSON")
-
         return expression
+
+    @staticmethod
+    def convert_stage_to_s3_paths(expression: sqlglot.exp.Expression, file_data) -> sqlglot.exp.Expression:
+        if file_data is None:
+            return
+        
 
     @staticmethod
     def get_iceberg_read(location: pyiceberg.table.Table) -> str:
         return sqlglot.exp.func("iceberg_scan",
                                 sqlglot.exp.Literal.string(location.metadata_location)).sql()
+
+def get_region(profile, url, storage_provider):
+    """
+    Resolves AWS region for an S3 bucket.
+    
+    Takes a bucket URL and retrieves its region using AWS SDK.
+    Handles the special case where a null LocationConstraint indicates us-east-1.
+    Additionally, this sets the profile to use for the copy operation.
+    
+    Args:
+        profile: AWS credentials profile
+        url: S3 URL containing bucket name
+        storage_provider: Must be 'Amazon S3'
+    
+    Returns:
+        str: AWS region identifier (e.g., 'us-east-1')
+    """
+    if storage_provider == 'Amazon S3':
+        bucket_name = url[5:].split("/")[0]
+        session = boto3.Session(profile_name=profile)
+        s3 = session.client('s3')
+        region_dict = s3.get_bucket_location(Bucket=bucket_name)
+        return region_dict.get('LocationConstraint') or 'us-east-1'    

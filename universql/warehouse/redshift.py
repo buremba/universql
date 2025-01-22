@@ -27,7 +27,8 @@ class RedshiftCatalog(ICatalog):
 class RedshiftExecutor(Executor):
     def __init__(self, catalog: RedshiftCatalog):
         super().__init__(catalog)
-    def execute(self, ast: sqlglot.exp.Expression, locations: Tables) -> typing.Optional[Locations]:
+
+    def execute(self, ast: sqlglot.exp.Expression, locations: Tables, file_data = None) -> typing.Optional[Locations]:
         return None
 
     def execute_raw(self, raw_query: str) -> None:

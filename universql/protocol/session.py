@@ -13,15 +13,17 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier, DDL, Query, Use
+from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Var
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
-    prepend_to_lines, parse_compute, QueryError, full_qualifier
+    prepend_to_lines, parse_compute, QueryError, full_qualifier, get_profile_for_role
 from universql.warehouse import Executor, Tables, ICatalog
 from universql.warehouse.bigquery import BigQueryCatalog
 from universql.warehouse.duckdb import DuckDBCatalog
 from universql.warehouse.snowflake import SnowflakeCatalog
+from universql.warehouse.utils import get_stage_name
+from pprint import pp
 
 logger = logging.getLogger("💡")
 
@@ -118,6 +120,7 @@ class UniverSQLSession:
         if queries is None:
             last_executor = self.perform_query(self.catalog_executor, raw_query)
         else:
+
             last_error = None
             for ast in queries:
                 for compute in self.compute_plan:
@@ -155,17 +158,81 @@ class UniverSQLSession:
         if cte_aliases is None:
             cte_aliases = set()
         for expression in ast.walk(bfs=True):
+            # process stages first
+            if (isinstance(expression, sqlglot.exp.Table) and \
+                isinstance(expression.this, Var) and \
+                str(expression.this.this).startswith('@')):
+                continue
             if isinstance(expression, Query) or isinstance(expression, DDL):
                 if expression.ctes is not None and len(expression.ctes) > 0:
                     for cte in expression.ctes:
                         cte_aliases.add(cte.alias)
-            if isinstance(expression, sqlglot.exp.Table) and isinstance(expression.this, Identifier):
+            if (isinstance(expression, sqlglot.exp.Table) and \
+                (isinstance(expression.this, Identifier) or isinstance(expression.this, Var)) \
+                and not any(expression == parent.args.get('format') for parent in ast.walk(bfs=True))):
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
                     yield full_qualifier(expression, self.credentials), cte_aliases
+
+    def _find_files(self, ast: sqlglot.exp.Expression):
+        """
+        Extracts file information from a Snowflake COPY command's AST.
+        
+        This function specifically handles Snowflake stage references (prefixed with @) 
+        in COPY commands. It processes the 'files' argument of the COPY command and 
+        returns structured information about each file source.
+
+        Args:
+            ast (sqlglot.exp.Expression): The Abstract Syntax Tree of the SQL query
+
+        Returns:
+            List[Dict] | None: A list of dictionaries containing file information with keys:
+                - file_qualifier: Full path/identifier of the file
+                - type: Type of source (e.g., 'STAGE')
+                - source_catalog: Origin catalog (e.g., 'SNOWFLAKE')
+                - stage_name: Name of the stage (for stage-based files)
+            Returns None if the AST is not a COPY command.
+
+        Notes:
+            Currently only supports Snowflake stage references (@stage_name).
+            Direct file ingestion is not yet implemented.
+        """
+        # Ensure the root node is a Copy node
+        if isinstance(ast, sqlglot.exp.Copy) == False:
+            return None
+        
+        # Access the files property
+        file_nodes = ast.args.get("files", [])
+        files = []
+
+        for file_node in file_nodes:
+            match = False
+            if isinstance(file_node, sqlglot.exp.Table) and isinstance(self.catalog, SnowflakeCatalog):
+                if file_node.this.name[0] == '@':
+                    files.append({
+                        'file_qualifier': full_qualifier(file_node, self.credentials),
+                        'type': 'STAGE',
+                        'source_catalog': 'SNOWFLAKE',
+                        'stage_name': get_stage_name(file_node)
+                    })
+                    match = True
+
+            if isinstance(file_node, sqlglot.exp.Var):
+                print("Ingesting data directly from files is not yet supported.")
+                match = True
+
+            if match != True:
+                print("Unknown node type in files:", file_node)
+
+        return files
+    
+    def _get_file_credentials():
+        pass
 
     def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
         if ast is not None and alternative_executor != self.catalog_executor:
             must_run_on_catalog = False
+            files_list = None
+            processed_file_data = None
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
                     tables = self._find_tables(ast.expression) if ast.expression is not None else []
@@ -176,19 +243,33 @@ class UniverSQLSession:
                 tables = []
             else:
                 tables = self._find_tables(ast)
+                files_list = self._find_files(ast)
             tables_list = [table[0] for table in tables]
             must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables_list, ast)
             if not must_run_on_catalog:
                 op_name = alternative_executor.__class__.__name__
-                with sentry_sdk.start_span(op=op_name, name="Get table paths"):
-                    locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
-                with sentry_sdk.start_span(op=op_name, name="Execute query"):
-                    new_locations = alternative_executor.execute(ast, locations)
-                if new_locations is not None:
-                    with sentry_sdk.start_span(op=op_name, name="Register new locations"):
-                        self.catalog.register_locations(new_locations)
-                return alternative_executor
+                if files_list is not None:
+                    with sentry_sdk.start_span(op=op_name, name="Get file info"):
+                        processed_file_data = self.catalog.get_file_info(files_list, ast)
+                        for file_name, file_config in processed_file_data.items():
+                            metadata = file_config["METADATA"]
+                            if metadata["storage_provider"] != "Amazon S3":
+                                raise Exception("Universql currently only supports Amazon S3 stages.")
+                            aws_role = metadata["AWS_ROLE"]
+                            profile_to_use = get_profile_for_role(aws_role)
+                            metadata["profile"] = profile_to_use
 
+                with sentry_sdk.start_span(op=op_name, name="Get table paths"):
+                    table_locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
+
+                with sentry_sdk.start_span(op=op_name, name="Execute query"):
+                    new_table_locations = alternative_executor.execute(ast, table_locations, processed_file_data)
+
+                if new_table_locations is not None:
+                    with sentry_sdk.start_span(op=op_name, name="Register new locations"):
+                        self.catalog.register_locations(new_table_locations)
+
+                return alternative_executor
         with sentry_sdk.start_span(name="Execute query on Snowflake"):
             last_executor = self.catalog_executor
             if ast is None:
@@ -212,6 +293,9 @@ class UniverSQLSession:
             self.metadata_db.close()
             if os.path.exists(self.metadata_db.name):
                 os.remove(self.metadata_db.name)
+
+    # def get_file_paths_and_credentials_from_catalog(self, alternative_catalog: ICatalog, files_list):
+    #     return alternative_catalog.get_file_paths(files_list)
 
     def get_table_paths_from_catalog(self, alternative_catalog: ICatalog, tables: list[sqlglot.exp.Table]) -> Tables:
         not_existed = []

@@ -24,6 +24,8 @@ from sqlglot.expressions import Literal, Var, Property, IcebergProperty, Propert
 from universql.warehouse import ICatalog, Executor, Locations, Tables
 from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
 from universql.protocol.utils import get_field_for_snowflake
+from pprint import pp
+from .utils import get_stage_info
 
 MAX_LIMIT = 10000
 
@@ -112,6 +114,44 @@ class SnowflakeCatalog(ICatalog):
         except DatabaseError as e:
             err_message = f"Unable to find location of Iceberg tables. See: https://github.com/buremba/universql#cant-query-native-snowflake-tables. Cause: \n {e.msg} \n{final_query}"
             raise QueryError(err_message, e.sqlstate)
+        
+    def get_file_info(self, files, ast):
+        copy_data = {}
+
+        if len(files) == 0:
+            return {}
+        try:
+            copy_params = self._extract_copy_params(ast)
+            file_format_params = copy_params.get("FILE_FORMAT")
+            cursor = self.cursor()
+            for file in files:
+                if file.get("type") == 'STAGE':
+                    stage_info = get_stage_info(file, file_format_params, cursor)
+                    stage_info["METADATA"] = stage_info["METADATA"] | file
+                    copy_data[file["stage_name"]] = stage_info
+        finally:
+            cursor.close()
+            return copy_data
+        
+    def _extract_copy_params(self, ast):
+        params = {}
+        for param in ast.args.get('params', []):
+            param_name = param.args['this'].args['this']
+            
+            # Handle single expression case
+            if 'expression' in param.args:
+                expr = param.args['expression']
+                params[param_name] = expr.args['this'].args['this']
+                
+            # Handle multiple expressions case
+            elif 'expressions' in param.args:
+                params[param_name] = {}
+                for expr in param.args['expressions']:
+                    property_name = expr.args['this'].args['this']
+                    property_value = expr.args['value'].args['this']
+                    params[param_name][property_name] = property_value
+                    
+        return params
 
     def get_volume_lake_path(self, volume: str) -> str:
         cursor = self.cursor()
@@ -136,57 +176,7 @@ class SnowflakeCatalog(ICatalog):
             raise QueryError(f"Unable to find storage location for volume {volume}.")
 
         return storage_base_url
-    # def find_table_location(self, database: str, schema: str, table_name: str, lazy_check: bool = True) -> str:
-    #     table_location = self.databases.get(database, {}).get(schema, {}).get(table_name)
-    #     if table_location is None:
-    #         if lazy_check:
-    #             self.load_database_schema(database, schema)
-    #             return self.find_table_location(database, schema, table_name, lazy_check=False)
-    #         else:
-    #             raise Exception(f"Table {table_name} not found in {database}.{schema}")
-    #     return table_location
-    # def load_external_volumes_for_tables(self, tables: pd.DataFrame) -> pd.DataFrame:
-    #     volumes = tables["external_volume_name"].unique()
-    #
-    #     volume_mapping = {}
-    #     for volume in volumes:
-    #         volume_location = pd.read_sql("DESC EXTERNAL VOLUME identifier(%s)", self.connection, params=[volume])
-    #         active_storage = duckdb.sql("""select property_value from volume_location
-    #                     where parent_property = 'STORAGE_LOCATIONS' and property = 'ACTIVE'
-    #                    """).fetchall()[0][0]
-    #         all_properties = duckdb.execute("""select property_value from volume_location
-    #                 where parent_property = 'STORAGE_LOCATIONS' and property like 'STORAGE_LOCATION_%'""").fetchall()
-    #         for properties in all_properties:
-    #             loads = json.loads(properties[0])
-    #             if loads.get('NAME') == active_storage:
-    #                 volume_mapping[volume] = loads
-    #                 break
-    #     return volume_mapping
-
-    # def load_database_schema(self, database: str, schema: str):
-    #     tables = self.load_iceberg_tables(database, schema)
-    #     external_volumes = self.load_external_volumes_for_tables(tables)
-    #
-    #     tables["external_location"] = tables.apply(
-    #         lambda x: (external_volumes[x["external_volume_name"]].get('STORAGE_BASE_URL')
-    #                    + x["base_location"]), axis=1)
-    #     if database not in self.databases:
-    #         self.databases[database] = {}
-    #
-    #     self.databases[database][schema] = dict(zip(tables.name, tables.external_location))
-
-    # def load_iceberg_tables(self, database: str, schema: str, after: Optional[str] = None) -> pd.DataFrame:
-    #     query = "SHOW ICEBERG TABLES IN SCHEMA IDENTIFIER(%s) LIMIT %s", [database + '.' + schema, MAX_LIMIT]
-    #     if after is not None:
-    #         query[0] += " AFTER %s"
-    #         query[1].append(after)
-    #     tables = pd.read_sql(query[0], self.connection, params=query[1])
-    #     if len(tables.index) >= MAX_LIMIT:
-    #         after = tables.iloc[-1, :]["name"]
-    #         return tables + self.load_iceberg_tables(database, schema, after=after)
-    #     else:
-    #         return tables
-
+    
 
 class SnowflakeExecutor(Executor):
 
@@ -216,7 +206,7 @@ class SnowflakeExecutor(Executor):
             message = f"{e.sfqid}: {e.msg} \n{compiled_sql}"
             raise QueryError(message, e.sqlstate)
 
-    def execute(self, ast: sqlglot.exp.Expression, locations: Tables) -> \
+    def execute(self, ast: sqlglot.exp.Expression, locations: Tables, file_data = None) -> \
             typing.Optional[typing.Dict[sqlglot.exp.Table, str]]:
         compiled_sql = (ast
                         # .transform(self.default_create_table_as_iceberg)

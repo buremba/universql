@@ -100,7 +100,7 @@ def snowflake_connection(**properties) -> Generator:
         conn.close()
 
 @contextmanager
-def universql_connection(**properties) -> SnowflakeConnection:
+def universql_connection(**properties) ->  Generator[SnowflakeConnection, None, None]:
     # https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect#connecting-using-the-connections-toml-file
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
     connections = CONFIG_MANAGER["connections"]
