@@ -448,23 +448,82 @@ class DuckDBExecutor(Executor):
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             self.catalog.base_catalog.clear_cache()
         elif isinstance(ast, Copy):
+
+            cache_directory = self.catalog.context.get('cache_directory')
+            file_cache_directories = []
+
             for file_name, file_config in file_data.items():
                 urls = file_config["METADATA"]["URL"]
-                # profile = file_config["METADATA"]["URL"]
+                profile = file_config["METADATA"]["profile"]
+                stage_name_length = len(file_config["METADATA"]["stage_name"])
+                file_nodes = ast.args.get("files", [])
+                primary_folder = urls[0].replace('://', '/')
+                for file in file_nodes:
+                    sub_path = file.this.name[stage_name_length + 2:].rsplit('/', 1)[0] + "/"
+                    full_path = cache_directory + "/" + primary_folder + sub_path
+                    file_cache_directories.append(full_path)
                 try:
-                    region = get_region(urls[0], file_config["METADATA"]["storage_provider"])
+                    region = get_region(profile, urls[0], file_config["METADATA"]["storage_provider"])
                 except Exception as e:
                     print(f"There was a problem accessing data for {file_name}:\n{e}")
             
             sql = self._sync_and_transform_query(ast, tables, file_data).sql(dialect="duckdb", pretty=True)
-            logger.info(f"Debug - Final SQL: {sql}")
-            logger.info(f"Debug - File data: {file_data}")
-            self.execute_raw(sql, True)
+            current_snapshot = self._get_cache_snapshot(file_cache_directories)
+
+            try:
+                self.execute_raw(sql, True)
+            finally:
+                self._cleanup_cache(current_snapshot, file_cache_directories)
         else:
             sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql)
 
         return None
+
+    def _get_cache_snapshot(self, monitored_dirs):
+        """
+        Creates a snapshot of all files currently in the specified directories.
+        Files found are stored as absolute paths in a set for quick comparison.
+        
+        Args:
+            monitored_dirs: List of directory paths to check for files
+            
+        Returns:
+            set: Absolute paths of all files found in monitored directories
+            
+        Note: 
+            Silently skips directories that don't exist
+        """        
+        files = set()
+        for directory in monitored_dirs:
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        if entry.is_file():
+                            files.add(entry.path)
+            except FileNotFoundError:
+                pass
+        return files
+    
+    def _cleanup_cache(self, before_snapshot, monitored_dirs):
+        """
+        Removes files that were created during an operation by comparing
+        before/after directory snapshots. Only removes files in specified directories.
+        
+        Args:
+            before_snapshot: Set of file paths that existed before COPY
+            monitored_dirs: List of directory paths to clean up
+            
+        Note:
+            Logs warnings for files it fails to remove but continues execution
+        """        
+        after_snapshot = self._get_cache_snapshot(monitored_dirs)
+        new_files = after_snapshot - before_snapshot
+        for file_path in new_files:
+            try:
+                os.remove(file_path)
+            except (FileNotFoundError, PermissionError):
+                logger.warning(f"Could not remove cached file: {file_path}")
 
     def _load_file_format(file_format):
         file_format_queries = {
