@@ -468,12 +468,11 @@ class DuckDBExecutor(Executor):
                     print(f"There was a problem accessing data for {file_name}:\n{e}")
             
             sql = self._sync_and_transform_query(ast, tables, file_data).sql(dialect="duckdb", pretty=True)
-            current_snapshot = self._get_cache_snapshot(file_cache_directories)
 
             try:
                 self.execute_raw(sql, True)
             finally:
-                self._cleanup_cache(current_snapshot, file_cache_directories)
+                self._cleanup_cache(file_cache_directories)
         else:
             sql = self._sync_and_transform_query(ast, tables).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql)
@@ -504,11 +503,10 @@ class DuckDBExecutor(Executor):
             except FileNotFoundError:
                 pass
         return files
-    
-    def _cleanup_cache(self, before_snapshot, monitored_dirs):
+
+    def _cleanup_cache(self, monitored_dirs):
         """
-        Removes files that were created during an operation by comparing
-        before/after directory snapshots. Only removes files in specified directories.
+        Removes files in the monitored directories. 
         
         Args:
             before_snapshot: Set of file paths that existed before COPY
@@ -517,9 +515,8 @@ class DuckDBExecutor(Executor):
         Note:
             Logs warnings for files it fails to remove but continues execution
         """        
-        after_snapshot = self._get_cache_snapshot(monitored_dirs)
-        new_files = after_snapshot - before_snapshot
-        for file_path in new_files:
+        files_in_cache = self._get_cache_snapshot(monitored_dirs)
+        for file_path in files_in_cache:
             try:
                 os.remove(file_path)
             except (FileNotFoundError, PermissionError):
