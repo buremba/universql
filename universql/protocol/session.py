@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 from string import Template
+from typing import List
 from urllib.parse import urlparse, parse_qs
 
 import pyarrow
@@ -13,20 +14,14 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier, DDL, Query, Use
+from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError, full_qualifier
-from universql.warehouse import Executor, Tables, ICatalog
-from universql.warehouse.bigquery import BigQueryCatalog
-from universql.warehouse.duckdb import DuckDBCatalog
-from universql.warehouse.snowflake import SnowflakeCatalog
+from universql.plugin import Executor, Tables, ICatalog, COMPUTES, TRANSFORMS, UniversqlPlugin
 
 logger = logging.getLogger("💡")
-
-COMPUTES = {"duckdb": DuckDBCatalog, "local": DuckDBCatalog, "bigquery": BigQueryCatalog, "snowflake": SnowflakeCatalog}
-
 
 class UniverSQLSession:
     def __init__(self, context, session_id, credentials: dict, session_parameters: dict):
@@ -40,14 +35,15 @@ class UniverSQLSession:
         first_catalog_compute = next(snowflake_computes, {}).get('args')
         self.allowed_to_run_compute_on_catalog = first_catalog_compute is not None
         self.iceberg_catalog = self._get_iceberg_catalog()
-        self.catalog = SnowflakeCatalog(context, self.session_id, self.credentials, first_catalog_compute or {},
-                                        self.iceberg_catalog)
+        self.catalog = COMPUTES["snowflake"](self, first_catalog_compute or {})
         self.catalog_executor = self.catalog.executor()
         self.computes = {"snowflake": self.catalog_executor}
 
         self.last_executor_cursor = None
         self.processing = False
         self.metadata_db = None
+        self.transforms : List[UniversqlPlugin] = [transform(self.catalog_executor) for transform in TRANSFORMS]
+
 
     def _get_iceberg_catalog(self):
         iceberg_catalog = self.context.get('universql_catalog')
@@ -120,17 +116,17 @@ class UniverSQLSession:
         else:
             last_error = None
             for ast in queries:
+                if isinstance(ast, Semicolon) and ast.this is None:
+                    continue
                 for compute in self.compute_plan:
                     last_error = None
                     compute_name = compute.get('name')
                     last_executor = self.computes.get(compute_name)
                     if last_executor is None:
-                        last_executor = COMPUTES[compute_name](self.context,
-                                                               self.session_id,
-                                                               self.credentials,
-                                                               compute,
-                                                               self.iceberg_catalog,
-                                                               self.catalog).executor()
+                        target_compute = COMPUTES.get(compute_name)
+                        if target_compute is None:
+                            raise QueryError(f"Unknown compute found: {compute_name}")
+                        last_executor = target_compute(self, compute).executor()
                         self.computes[compute_name] = last_executor
                     try:
                         last_executor = self.perform_query(last_executor, raw_query, ast=ast)
@@ -183,7 +179,11 @@ class UniverSQLSession:
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
                     locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
-                    new_locations = alternative_executor.execute(ast, locations)
+                    current_ast = ast
+                    for transform in self.transforms:
+                        current_ast = current_ast.transform(transform.transform_sql, alternative_executor)
+
+                    new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
                         self.catalog.register_locations(new_locations)
@@ -192,9 +192,9 @@ class UniverSQLSession:
         with sentry_sdk.start_span(name="Execute query on Snowflake"):
             last_executor = self.catalog_executor
             if ast is None:
-                last_executor.execute_raw(raw_query)
+                last_executor.execute_raw(raw_query, self.catalog_executor)
             else:
-                last_executor.execute(ast, {})
+                last_executor.execute(ast, self.catalog_executor, {})
         return last_executor
 
     def do_query(self, raw_query: str) -> pyarrow.Table:

@@ -11,19 +11,15 @@ import sentry_sdk
 import snowflake.connector
 import sqlglot
 from pyarrow import ArrowInvalid
-from pyiceberg.catalog import Catalog
 from pyiceberg.table import StaticTable
 from pyiceberg.table.snapshots import Summary, Operation
 from pyiceberg.typedef import IcebergBaseModel
 from snowflake.connector import NotSupportedError, DatabaseError
-from snowflake.connector.constants import FIELD_TYPES, FieldType
-from sqlglot.expressions import Literal, Var, Property, IcebergProperty, Properties, ColumnDef, DataType, \
-    Schema, TransientProperty, TemporaryProperty, Select, Column, Alias, Anonymous, parse_identifier, Subquery, Show, \
-    Use
-
-from universql.warehouse import ICatalog, Executor, Locations, Tables
-from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
+from snowflake.connector.constants import FieldType
+from universql.protocol.session import UniverSQLSession
 from universql.protocol.utils import get_field_for_snowflake
+from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since
+from universql.plugin import ICatalog, Executor, Locations, Tables, register
 
 MAX_LIMIT = 10000
 
@@ -32,6 +28,7 @@ logger = logging.getLogger("❄️")
 logging.getLogger('snowflake.connector').setLevel(logging.WARNING)
 
 
+# temporary workaround until pyiceberg bug is resolved
 def summary_init(summary, **kwargs):
     operation = kwargs.get('operation', Operation.APPEND)
     if "operation" in kwargs:
@@ -42,23 +39,26 @@ def summary_init(summary, **kwargs):
 
 Summary.__init__ = summary_init
 
-
+@register(name="snowflake")
 class SnowflakeCatalog(ICatalog):
 
-    def __init__(self, context: dict, session_id: str, credentials: dict, compute, iceberg_catalog: Catalog):
-        super().__init__(context, session_id, credentials, compute, iceberg_catalog)
-        if context.get('account') is not None:
-            credentials["account"] = context.get('account')
+    def __init__(self, session : UniverSQLSession, compute):
+        super().__init__(session, compute)
+        if session.context.get('account') is not None:
+            session.credentials["account"] = session.context.get('account')
         if SNOWFLAKE_HOST is not None:
-            credentials["host"] = SNOWFLAKE_HOST
+            session.credentials["host"] = SNOWFLAKE_HOST
 
         self.databases = {}
-        credentials["warehouse"] = compute.get('warehouse', str(uuid4()))
+        session.credentials["warehouse"] = compute.get('warehouse', str(uuid4()))
         # lazily create
         self._cursor = None
 
     def clear_cache(self):
         self._cursor = None
+
+    def executor(self) -> Executor:
+        return SnowflakeExecutor(self)
 
     def cursor(self, create_if_not_exists=True):
         if self._cursor is not None or not create_if_not_exists:
@@ -87,9 +87,6 @@ class SnowflakeCatalog(ICatalog):
                     f"({get_friendly_time_since(start_time, performance_counter)})")
             except snowflake.connector.Error as e:
                 raise QueryError(e.msg, e.sqlstate)
-
-    def executor(self) -> Executor:
-        return SnowflakeExecutor(self)
 
     def _get_ref(self, table_information) -> pyiceberg.table.Table:
         location = table_information.get('metadataLocation')
@@ -207,21 +204,21 @@ class SnowflakeExecutor(Executor):
             return 'TEXT'
         return snowflake_type.name
 
-    def execute_raw(self, compiled_sql: str, run_on_warehouse=None) -> None:
+    def execute_raw(self, raw_query: str, catalog_executor: Executor, run_on_warehouse=None) -> None:
         try:
             emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
-            logger.info(f"[{self.catalog.session_id}] Running on Snowflake.. {emoji} \n {compiled_sql}")
-            self.catalog.cursor().execute(compiled_sql)
+            logger.info(f"[{self.catalog.session_id}] Running on Snowflake.. {emoji} \n {raw_query}")
+            self.catalog.cursor().execute(raw_query)
         except DatabaseError as e:
-            message = f"{e.sfqid}: {e.msg} \n{compiled_sql}"
+            message = f"{e.sfqid}: {e.msg} \n{raw_query}"
             raise QueryError(message, e.sqlstate)
 
-    def execute(self, ast: sqlglot.exp.Expression, locations: Tables) -> \
+    def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables) -> \
             typing.Optional[typing.Dict[sqlglot.exp.Table, str]]:
         compiled_sql = (ast
                         # .transform(self.default_create_table_as_iceberg)
                         .sql(dialect="snowflake", pretty=True))
-        self.execute_raw(compiled_sql, run_on_warehouse=not isinstance(ast, Show) and not isinstance(ast, Use))
+        self.execute_raw(compiled_sql, catalog_executor)
         return None
 
     def get_query_log(self, total_duration) -> str:

@@ -1,25 +1,19 @@
+import logging
 import os
 import socketserver
-import sys
 import threading
 from contextlib import contextmanager
-from traceback import print_exc
+from itertools import product
 from typing import Generator
 
-import click
 import pyarrow
 import pytest
 from click.testing import CliRunner
 from snowflake.connector import connect as snowflake_connect, SnowflakeConnection
 from snowflake.connector.config_manager import CONFIG_MANAGER
 from snowflake.connector.constants import CONNECTIONS_FILE
-from itertools import product
-import toml
-import logging
 
 logger = logging.getLogger(__name__)
-
-
 
 from universql.util import LOCALHOSTCOMPUTING_COM
 
@@ -89,6 +83,7 @@ ARRAY_CONSTRUCT(1, 2, 3, 4) AS sample_array,
 
 server_cache = {}
 
+
 @contextmanager
 def snowflake_connection(**properties) -> Generator:
     print(f"Reading {CONNECTIONS_FILE} with {properties}")
@@ -98,6 +93,7 @@ def snowflake_connection(**properties) -> Generator:
         yield conn
     finally:
         conn.close()
+
 
 @contextmanager
 def universql_connection(**properties) -> SnowflakeConnection:
@@ -145,6 +141,7 @@ def universql_connection(**properties) -> SnowflakeConnection:
         if connect is not None:
             connect.close()
 
+
 def execute_query(conn, query: str) -> pyarrow.Table:
     cur = conn.cursor()
     try:
@@ -188,7 +185,8 @@ def compare_results(snowflake_result: pyarrow.Table, universql_result: pyarrow.T
 
     print("Results match perfectly!")
 
-def generate_name_variants(name, include_blank = False):
+
+def generate_name_variants(name, include_blank=False):
     lowercase = name.lower()
     uppercase = name.upper()
     mixed_case = name.capitalize()
@@ -196,7 +194,8 @@ def generate_name_variants(name, include_blank = False):
     print([lowercase, uppercase, mixed_case, in_quotes])
     return [lowercase, uppercase, mixed_case, in_quotes]
 
-def generate_select_statement_combos(sets_of_identifiers, connected_db = None, connected_schema = None):
+
+def generate_select_statement_combos(sets_of_identifiers, connected_db=None, connected_schema=None):
     select_statements = []
     for set in sets_of_identifiers:
         set_of_select_statements = []
@@ -210,7 +209,7 @@ def generate_select_statement_combos(sets_of_identifiers, connected_db = None, c
                     set_of_select_statements.append(f"SELECT * FROM {table_variant}")
         else:
             raise Exception("No table name provided for a select statement combo.")
-        
+
         if schema is not None:
             schema_variants = generate_name_variants(schema)
             if database == connected_db:
@@ -220,7 +219,7 @@ def generate_select_statement_combos(sets_of_identifiers, connected_db = None, c
         else:
             if database is not None:
                 raise Exception("You must provide a schema name if you provide a database name.")
-        
+
         if database is not None:
             database_variants = generate_name_variants(database)
             object_name_combos = product(database_variants, schema_variants, table_variants)
@@ -231,10 +230,12 @@ def generate_select_statement_combos(sets_of_identifiers, connected_db = None, c
         for statement in set_of_select_statements:
             logger.info(statement)
         # logger.info(f"database: {database}, schema: {schema}, table: {table}")
-            
+
     return select_statements
 
-def _set_connection_name(connection_dict = {}):
+
+def _set_connection_name(connection_dict={}):
     snowflake_connection_name = connection_dict.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
     logger.info(f"Using the {snowflake_connection_name} connection")
     return snowflake_connection_name
+

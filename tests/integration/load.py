@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from snowflake.connector import ProgrammingError
 
@@ -6,12 +8,14 @@ from tests.integration.utils import execute_query, universql_connection, SIMPLE_
 
 class TestCreate:
     def test_create_iceberg_table(self):
-        with universql_connection(snowflake_connection_name="jinjat_aws_us_east", warehouse=None) as conn:
+        EXTERNAL_VOLUME_NAME = os.getenv("EXTERNAL_VOLUME_NAME")
+
+        with universql_connection(warehouse=None) as conn:
             execute_query(conn, f"""
             CREATE OR REPLACE ICEBERG TABLE test_iceberg_table
-            external_volume = ICEBERG_JINJAT
+            external_volume = {EXTERNAL_VOLUME_NAME}
             catalog = 'SNOWFLAKE'
-            BASE_LOCATION = 'dim_devices'
+            BASE_LOCATION = 'test_iceberg_table'
             AS {SIMPLE_QUERY}
             """)
             universql_result = execute_query(conn, f"SELECT * FROM test_iceberg_table LIMIT 1")
