@@ -1,24 +1,17 @@
-import importlib
+import logging
 import os
 import socketserver
-import sys
 import threading
 from contextlib import contextmanager
-from traceback import print_exc
-from typing import Generator, List
+from itertools import product
+from typing import Generator
 
-import click
 import pyarrow
 import pytest
 from click.testing import CliRunner
 from snowflake.connector import connect as snowflake_connect, SnowflakeConnection
 from snowflake.connector.config_manager import CONFIG_MANAGER
 from snowflake.connector.constants import CONNECTIONS_FILE
-from itertools import product
-import toml
-import logging
-
-from universql.warehouse import ICatalog
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +145,7 @@ def universql_connection(**properties) -> SnowflakeConnection:
 def execute_query(conn, query: str) -> pyarrow.Table:
     cur = conn.cursor()
     try:
-        cur.execute(, query,
+        cur.execute(query)
         return cur.fetch_arrow_all()
     finally:
         cur.close()

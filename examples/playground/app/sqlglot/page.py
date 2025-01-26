@@ -212,13 +212,15 @@ sql_expressions = {
 
 default_flattenable_classes = ["Column", "ColumnDef", "Alias"]
 
-flattenable_classes = st.multiselect(
-    "Select what types of expressions you would like to flatten:",
-    sql_expressions.keys(),
-    default=default_flattenable_classes,
-)
-
 if parsed_sql[0]:
+    st.code(parsed_sql[0].__repr__())
+
+    flattenable_classes = st.multiselect(
+        "Select what types of expressions you would like to flatten:",
+        sql_expressions.keys(),
+        default=default_flattenable_classes,
+    )
+
     ast_to_link_analysis(
         parsed_sql[0],
         tuple(
@@ -226,5 +228,3 @@ if parsed_sql[0]:
             for class_name in flattenable_classes
         ),
     )
-
-    st.code(parsed_sql[0].__repr__())

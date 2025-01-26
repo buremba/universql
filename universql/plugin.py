@@ -1,6 +1,8 @@
 import inspect
 
 import pyarrow
+from asgiref.sync import AsyncToSync
+from fastapi import FastAPI
 from sqlglot import Expression
 from starlette.requests import Request
 from starlette.responses import Response
@@ -67,7 +69,7 @@ class Executor(typing.Protocol[T]):
         pass
 
 
-class Transformer:
+class UniversqlPlugin:
     def __init__(self,
                  source_executor: Executor
                  ):
@@ -81,6 +83,8 @@ class Transformer:
 COMPUTES = {}
 # [method]
 TRANSFORMS = []
+# apps to be installed
+APPS = []
 
 
 def register(name: typing.Optional[str] = None):
@@ -91,12 +95,17 @@ def register(name: typing.Optional[str] = None):
     """
 
     def decorator(cls):
-        if issubclass(cls, ICatalog) and cls is not ICatalog:
-            if name is None:
-                raise SystemError("name is required for catalogs")
-            COMPUTES[name] = cls
-        elif issubclass(cls, Transformer) and cls is not Transformer:
-            TRANSFORMS.append(cls)
+        if inspect.isclass(cls):
+            if issubclass(cls, ICatalog) and cls is not ICatalog:
+                if name is None:
+                    raise SystemError("name is required for catalogs")
+                COMPUTES[name] = cls
+            elif issubclass(cls, UniversqlPlugin) and cls is not UniversqlPlugin:
+                TRANSFORMS.append(cls)
+        elif inspect.isfunction(cls):
+            signature = inspect.signature(cls)
+            if len(signature.parameters) == 1 and signature.parameters.values().__iter__().__next__().annotation is FastAPI:
+                APPS.append(cls)
         else:
             raise SystemError(f"Unknown type {cls}")
         return cls

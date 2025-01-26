@@ -1,3 +1,6 @@
+import asyncio
+import glob
+import json
 import logging
 import base64
 import os
@@ -10,20 +13,19 @@ from typing import Any
 from uuid import uuid4
 
 import click
-import marimo
 import pyarrow as pa
 import sentry_sdk
 import yaml
 
 from fastapi import FastAPI
 from pyarrow import Schema
-from snowflake.connector import DatabaseError
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, HTMLResponse
 
 from universql.agent.cloudflared import get_cloudflare_url
 from universql.lake.fsspec_util import get_friendly_disk_usage
+from universql.plugin import APPS
 from universql.util import unpack_request_body, session_from_request, parameters, \
     print_dict_as_markdown_table, QueryError, LOCALHOSTCOMPUTING_COM
 from fastapi.encoders import jsonable_encoder
@@ -49,13 +51,14 @@ sentry_sdk.init(
 sessions = {}
 query_results = {}
 
-# load all modules
+# register all warehouses and plugins
 for module in [
     "universql.warehouse.duckdb",
     "universql.warehouse.bigquery",
     "universql.warehouse.snowflake",
     "universql.warehouse.redshift",
-    "universql.plugins.snowflake",
+    "universql.plugins.snow",
+    "universql.plugins.ui",
 ]:
     __import__(module)
 
@@ -71,6 +74,7 @@ if context is None:
     logger.info(f"Context is {current_context}")
 else:
     current_context = context.params
+
 
 @app.post("/session/v1/login-request")
 async def login_request(request: Request) -> JSONResponse:
@@ -208,6 +212,7 @@ async def abort_request(request: Request) -> JSONResponse:
     return JSONResponse(
         {"data": {}, "success": True})
 
+
 @app.post("/queries/v1/query-request")
 async def query_request(request: Request) -> JSONResponse:
     query_id = str(uuid4())
@@ -270,7 +275,7 @@ async def query_request(request: Request) -> JSONResponse:
     except QueryError as e:
         # print_exc(limit=1)
         return JSONResponse({"id": query_id, "success": False, "message": e.message, "data": {"sqlState": e.sql_state}})
-    except DatabaseError as e:
+    except snowflake.connector.DatabaseError as e:
         print_exc(limit=10)
         return JSONResponse({"id": query_id, "success": False,
                              "message": f"Error running query on Snowflake: {e.raw_msg}",
@@ -282,7 +287,9 @@ async def query_request(request: Request) -> JSONResponse:
                 logger.exception(f"Error processing query: {query}")
             else:
                 logger.exception(f"Error processing query request", e)
-        return JSONResponse({"id": query_id, "success": False, "message": "Unable to run the query due to a system error. Please create issue on https://github.com/buremba/universql/issues", "data": {"sqlState": "0000"}})
+        return JSONResponse({"id": query_id, "success": False,
+                             "message": "Unable to run the query due to a system error. Please create issue on https://github.com/buremba/universql/issues",
+                             "data": {"sqlState": "0000"}})
 
 
 @app.get("/jupyterlite/new")
@@ -302,10 +309,31 @@ async def home(request: Request) -> JSONResponse:
     return JSONResponse(
         {"status": "X-Duck is ducking 🐥", "new": {"jupyter": "/jupyterlite/new", "streamlit": "/streamlit/new"}})
 
+def get_files(path):
+    files_dict = {}
+    prefix = f"app/{path}/"
+    for filepath in glob.glob(f"{prefix}**/*", recursive=True):
+        if os.path.isfile(filepath):
+            with open(filepath, 'r', encoding='utf-8') as file:
+                # Create relative path as key
+                relative_path = os.path.relpath(filepath, prefix)
+                files_dict[relative_path] = file.read()
+    return files_dict
 
-@app.get("/streamlit/new")
-async def streamlit_new(request: Request) -> JSONResponse:
-    return HTMLResponse("""
+def get_requirements(path):
+    requirements_file = os.path.abspath(f"app/{path}/requirements.txt")
+    if os.path.exists(requirements_file):
+        with open(requirements_file, 'r', encoding='utf-8') as file:
+            return file.read().splitlines()
+    else:
+        return []
+
+
+@app.get("/{rest_of_path:path}")
+async def streamlit_renderer(request: Request, rest_of_path: str) -> JSONResponse:
+    settings = {"requirements": get_requirements(rest_of_path), "entrypoint": "page.py", "streamlitConfig": {},
+                "files": get_files(rest_of_path)}
+    return HTMLResponse(f"""
     <!doctype html>
 <html>
   <head>
@@ -325,13 +353,7 @@ async def streamlit_new(request: Request) -> JSONResponse:
     <div id="root"></div>
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.1/build/stlite.js"></script>
     <script>
-      stlite.mount(
-        `
-import streamlit as st
-
-name = st.text_input('Your name')
-st.write("Hello,", name or "world")
-`,
+      stlite.mount({json.dumps(settings)},
         document.getElementById("root"),
       );
     </script>
@@ -404,6 +426,7 @@ async def shutdown_event():
     for token, session in sessions.items():
         session.close()
 
+
 @app.on_event("startup")
 async def startup_event():
     context = current_context
@@ -441,7 +464,10 @@ async def startup_event():
         "You can connect to UniverSQL with any Snowflake client using your Snowflake credentials.",
         "For application support, see https://github.com/buremba/universql",)))
 
-app.mount("/", marimo.create_asgi_app(include_code=False)
-    .with_app(path="/notebooks", root="/Users/bkabak/Downloads/notebook (1).py")
-    # .with_dynamic_directory(path="/notebooks", directory="/Users/bkabak/Code/universql/resources/snowflake_redshift_usage")
-          .build())
+
+loop = asyncio.get_event_loop()
+
+for app_to_be_installed in APPS:
+    app_to_be_installed(app)
+    # loop.run_until_complete(app_to_be_installed(app))
+# loop.close()

@@ -1,3 +1,8 @@
+# Running Github Actions locally
+
+```shell
+act push --container-architecture linux/amd64 --secret-file .env.act --workflows ./.github/workflows/test.yml --insecure-secrets
+```
 
 # [DRAFT] Transformers
 

@@ -18,7 +18,7 @@ from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
-    Var, Literal, IcebergProperty, Use, ColumnDef, DataType
+    Var, Literal, IcebergProperty, Use, ColumnDef, DataType, Copy
 from sqlglot.optimizer.simplify import simplify
 
 from universql.lake.cloud import s3, gcs, in_lambda
@@ -41,12 +41,13 @@ class DuckDBCatalog(ICatalog):
     def __init__(self, session : UniverSQLSession, compute: dict):
         super().__init__(session, compute)
         duck_config = {
-            'max_memory': session.context.get('max_memory'),
             'temp_directory': os.path.join(session.context.get('cache_directory'), "duckdb-staging"),
             # 'lock_configuration': 'true',
             'enable_external_access': 'true',
         }
-        if session.context.get('max_cache_size') != "0":
+        if 'max_memory' in session.context:
+            duck_config["max_memory"] = session.context.get('max_memory')
+        if session.context.get('max_cache_size') != "0" and "max_temp_directory_size" in session.context:
             duck_config['max_temp_directory_size'] = session.context.get('max_cache_size')
         self.account = parse_snowflake_account(session.context.get('account'))
         database_path = self.context.get('database_path')
@@ -113,10 +114,8 @@ class DuckDBCatalog(ICatalog):
         raise Exception("Unsupported operation")
 
     def _register_data_lake(self, args: dict):
-        if args.get('aws_profile') is not None or self.account.cloud == 'aws':
-            self.duckdb.register_filesystem(s3(args))
-        if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
-            self.duckdb.register_filesystem(gcs(args))
+        self.duckdb.register_filesystem(s3(args))
+        self.duckdb.register_filesystem(gcs(args))
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         native_tables = {}
@@ -149,7 +148,12 @@ class DuckDBExecutor(Executor):
         try:
             logger.info(
                 f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
-            self.catalog.emulator.execute(raw_query, catalog_executor)
+            self.catalog.emulator.execute(raw_query)
+        except duckdb.HTTPException as e:
+            if e.status_code == 403:
+                raise QueryError(f"Access denied: {e.args[0]}")
+            else:
+                raise QueryError(f"Error when pulling data from filesystem in DuckDB: {e.args[0]}")
         except duckdb.Error as e:
             raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
         except duckdb.duckdb.DatabaseError as e:
@@ -339,7 +343,6 @@ class DuckDBExecutor(Executor):
                     self.execute_raw(self._sync_and_transform_query(ast, locations).sql(dialect="duckdb"), catalog_executor)
                 else:
                     raise QueryError("Unable to determine table type")
-
         elif isinstance(ast, Drop):
             delete_table = ast.this
             self.catalog.iceberg_catalog.drop_table(delete_table.sql())
@@ -361,6 +364,9 @@ class DuckDBExecutor(Executor):
                 self._sync_catalog({})
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             catalog_executor.catalog.clear_cache()
+        elif isinstance(ast, Copy):
+            sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
+            self.catalog.duckdb.execute(sql)
         else:
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql, catalog_executor)

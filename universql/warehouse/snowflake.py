@@ -16,9 +16,6 @@ from pyiceberg.table.snapshots import Summary, Operation
 from pyiceberg.typedef import IcebergBaseModel
 from snowflake.connector import NotSupportedError, DatabaseError
 from snowflake.connector.constants import FieldType
-from sqlglot.expressions import Show, \
-    Use
-
 from universql.protocol.session import UniverSQLSession
 from universql.protocol.utils import get_field_for_snowflake
 from universql.util import SNOWFLAKE_HOST, QueryError, prepend_to_lines, get_friendly_time_since

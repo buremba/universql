@@ -12,7 +12,7 @@ from sqlglot import Expression
 from sqlglot.expressions import TransientProperty, TemporaryProperty, Properties, IcebergProperty
 from starlette.requests import Request
 
-from universql.plugin import Transformer, Executor
+from universql.plugin import UniversqlPlugin, Executor
 from universql.warehouse.duckdb import DuckDBCatalog, DuckDBExecutor
 from universql.warehouse.snowflake import SnowflakeCatalog
 
@@ -26,7 +26,7 @@ FROM @iceberg_db.public.landing_stage/initial_objects/
 FILE_FORMAT = (TYPE = CSV SKIP_HEADER = 1);""", read="snowflake")
 
 
-class FixTimestampTypes(Transformer):
+class FixTimestampTypes(UniversqlPlugin):
 
     def transform_sql(self, expression, target_executor: Executor):
         if isinstance(target_executor, DuckDBExecutor) and isinstance(expression, sqlglot.exp.DataType):
@@ -38,7 +38,7 @@ class FixTimestampTypes(Transformer):
         return expression
 
 
-class RewriteCreateAsIceberg(Transformer):
+class RewriteCreateAsIceberg(UniversqlPlugin):
 
     def transform_sql(self, expression: Expression, target_executor: Executor) -> Expression:
         prefix = self.catalog.iceberg_catalog.properties.get("location")

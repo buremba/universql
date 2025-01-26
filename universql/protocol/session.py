@@ -14,12 +14,12 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier, DDL, Query, Use
+from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError, full_qualifier
-from universql.plugin import Executor, Tables, ICatalog, COMPUTES, TRANSFORMS, Transformer
+from universql.plugin import Executor, Tables, ICatalog, COMPUTES, TRANSFORMS, UniversqlPlugin
 
 logger = logging.getLogger("💡")
 
@@ -42,7 +42,8 @@ class UniverSQLSession:
         self.last_executor_cursor = None
         self.processing = False
         self.metadata_db = None
-        self.transforms : List[Transformer] = [transform(self.catalog_executor) for transform in TRANSFORMS]
+        self.transforms : List[UniversqlPlugin] = [transform(self.catalog_executor) for transform in TRANSFORMS]
+
 
     def _get_iceberg_catalog(self):
         iceberg_catalog = self.context.get('universql_catalog')
@@ -115,6 +116,8 @@ class UniverSQLSession:
         else:
             last_error = None
             for ast in queries:
+                if isinstance(ast, Semicolon) and ast.this is None:
+                    continue
                 for compute in self.compute_plan:
                     last_error = None
                     compute_name = compute.get('name')
