@@ -1,6 +1,7 @@
 import inspect
 import logging
 import os
+import shutil
 from datetime import timedelta, datetime
 from functools import wraps
 
@@ -102,6 +103,32 @@ class MonitoredSimpleCacheFileSystem(SimpleCacheFileSystem):
 
     # def glob(self, path):
     #     return [self._strip_protocol(path)]
+
+    def get_file(self, path, lpath, **kwargs):
+        """
+        Overridden method to manage the local caching process manually.
+        Downloads the remote file to `lpath + '.tmp'` and then renames it to `lpath`.
+        """
+
+        # If the final file already exists and we are not forcing re-download, skip
+        if os.path.exists(lpath):
+            return
+
+        tmp_path = lpath + ".tmp"
+
+        # In case a previous failed download left a stale tmp file
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+        # Ensure the target directory for lpath exists
+        os.makedirs(os.path.dirname(lpath), exist_ok=True)
+
+        # Open the remote file and download to the temporary local file
+        with self.fs.open(path, 'rb') as source, open(tmp_path, 'wb') as target:
+            shutil.copyfileobj(source, target)
+
+        # Atomically move the temporary file to the final location
+        os.rename(tmp_path, lpath)
 
     def size(self, path):
         cached_file = self._check_file(self._strip_protocol(path))

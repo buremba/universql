@@ -28,14 +28,15 @@ FILE_FORMAT = (TYPE = CSV SKIP_HEADER = 1);""", read="snowflake")
 
 class FixTimestampTypes(UniversqlPlugin):
 
-    def transform_sql(self, expression, target_executor: Executor):
-        if isinstance(target_executor, DuckDBExecutor) and isinstance(expression, sqlglot.exp.DataType):
-            if expression.this.value in ["TIMESTAMPLTZ", "TIMESTAMPTZ"]:
-                return sqlglot.exp.DataType.build("TIMESTAMPTZ")
-            if expression.this.value in ["VARIANT"]:
-                return sqlglot.exp.DataType.build("JSON")
+    def transform_sql(self, ast, target_executor: Executor):
+        def fix_timestamp_types(expression):
+            if isinstance(target_executor, DuckDBExecutor) and isinstance(expression, sqlglot.exp.DataType):
+                if expression.this.value in ["TIMESTAMPLTZ", "TIMESTAMPTZ"]:
+                    return sqlglot.exp.DataType.build("TIMESTAMPTZ")
+                if expression.this.value in ["VARIANT"]:
+                    return sqlglot.exp.DataType.build("JSON")
 
-        return expression
+        return ast.transform(fix_timestamp_types)
 
 
 class RewriteCreateAsIceberg(UniversqlPlugin):

@@ -181,6 +181,7 @@ class UniverSQLSession:
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     current_ast = ast
                     for transform in self.transforms:
+                        transform.transform_sql(current_ast, alternative_executor)
                         current_ast = current_ast.transform(transform.transform_sql, alternative_executor)
 
                     new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)

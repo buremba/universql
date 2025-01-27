@@ -7,8 +7,8 @@ from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NoSuchTableError, OAuthError
 from pyiceberg.io import PY_IO_IMPL
 
+from universql.plugin import Locations, ICatalog
 from universql.protocol.session import UniverSQLSession
-from universql.warehouse import ICatalog, Executor, Locations
 from universql.lake.cloud import CACHE_DIRECTORY_KEY
 from universql.util import SnowflakeError
 
