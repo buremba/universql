@@ -275,7 +275,7 @@ SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
     }
 }
 
-
+@register()
 class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
     def __init__(self, source_executor: SnowflakeExecutor):
         super().__init__(source_executor)
