@@ -84,7 +84,9 @@ class TestSelect:
 
     def test_stage(self):
         with universql_connection(warehouse=None) as conn:
-            result = execute_query(conn, "copy into table_name FROM @stagename/")
+            result = execute_query(conn, """
+            create temp table if not exists table_name1 as select 1 as t;
+            copy into table_name1 FROM @stagename/""")
             # result = execute_query(conn, "select * from @iceberg_db.public.landing_stage/initial_objects/device_metadata.csv")
             assert result.num_rows > 0
 

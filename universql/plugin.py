@@ -1,11 +1,8 @@
 import inspect
 
 import pyarrow
-from asgiref.sync import AsyncToSync
 from fastapi import FastAPI
 from sqlglot import Expression
-from starlette.requests import Request
-from starlette.responses import Response
 
 import typing
 from abc import ABC, abstractmethod
