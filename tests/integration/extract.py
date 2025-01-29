@@ -81,9 +81,11 @@ class TestSelect:
             result = execute_query(conn, "select 1 union all select 2")
             assert result.num_rows == 2
 
+
     def test_stage(self):
         with universql_connection(warehouse=None) as conn:
-            result = execute_query(conn, "select * from @iceberg_db.public.landing_stage/initial_objects/device_metadata.csv")
+            result = execute_query(conn, "copy into table_name FROM @stagename/")
+            # result = execute_query(conn, "select * from @iceberg_db.public.landing_stage/initial_objects/device_metadata.csv")
             assert result.num_rows > 0
 
     def test_copy_into(self):
