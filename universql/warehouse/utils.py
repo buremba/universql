@@ -1,7 +1,7 @@
 import ast
 import sqlglot
 from pprint import pp
-from sqlglot.expressions import Literal, CopyParameter, Var
+from sqlglot.expressions import Literal, CopyParameter, Var, EQ, Column, Identifier, Literal, Insert, Star, Anonymous, Array, From, Table, Select
 
 DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'Parquet']
 
@@ -42,7 +42,7 @@ def transform_copy(expression, file_data):
             stage_name = get_stage_name(table)
             stage_file_data = file_data.get(stage_name)
             metadata = stage_file_data["METADATA"]
-            file_type = get_file_format(stage_file_data)
+            file_type = file_data["file_parameters"]["format"]
             if file_type not in DUCKDB_SUPPORTED_FILE_TYPES:
                 raise Exception(f"DuckDB currently does not support reading from {file_type} files.")
             url = metadata["URL"][0]
@@ -51,7 +51,7 @@ def transform_copy(expression, file_data):
             # Create new function node for read_csv with the S3 path
             new_files.append(Literal.string(full_path))
             if copy_params == []:
-                copy_params = convert_copy_params(stage_file_data)
+                copy_params = convert_copy_params(stage_file_data)             
                 existing_params = expression.args.get('params', [])
                 # remove existing CopyParameter from params
                 filtered_params = [p for p in existing_params if not isinstance(p, sqlglot.exp.CopyParameter)]            
@@ -61,6 +61,72 @@ def transform_copy(expression, file_data):
             
     expression.args['files'] = new_files
     return expression
+
+def transform_copy_into_insert_into_select(expression, copy_data):
+    """
+    Transforms Snowflake COPY commands to DuckDB-compatible file reading operations.
+    
+    Converts Snowflake stage references (@stage) into direct file paths and 
+    maps Snowflake COPY parameters to their DuckDB equivalents.
+    
+    Args:
+        expression: COPY command AST
+        file_data: Stage and file metadata
+    
+    Returns:
+        Modified AST with direct file paths and mapped parameters
+    
+    Raises:
+        Exception: If file format is not supported by DuckDB
+    """
+
+    if not expression.args.get('files'):
+        return expression
+        
+    files = expression.args['files']
+    new_files = []
+
+    file_type = copy_data["file_parameters"]['format']["duckdb_property_value"]
+    if file_type not in DUCKDB_SUPPORTED_FILE_TYPES:
+        raise Exception(f"DuckDB currently does not support reading from {file_type} files.")
+    
+    for table in files:
+        if isinstance(table, sqlglot.exp.Table) and str(table.this).startswith('@'):
+            stage_name = get_stage_name(table)
+            stage_data = copy_data["files"].get(stage_name)
+
+            url = stage_data["URL"][0]
+            full_path = url + get_file_path(table)
+
+            if full_path[-1] == "/":
+                full_path = full_path + "*"
+            
+            # Create new function node for read_csv with the S3 path
+            new_files.append(Literal.string(full_path))
+        else:
+            new_files.append(table)
+
+    file_parameters = convert_copy_params_to_read_datatype_params(copy_data["file_parameters"])
+    function_name = "read_" + file_type.lower()
+    from_ast = From(
+        this=Table(
+            this=Anonymous(
+                this=function_name,
+                expressions = [
+                    Array(
+                        expressions=new_files
+                    )
+                ]  + file_parameters
+            )
+        )
+    )
+
+    select_ast = Select().select(Star()).from_(from_ast)
+    insert_into_select_ast = Insert(
+        this=expression.this,
+        expression=select_ast
+    )
+    return insert_into_select_ast
 
 def convert_copy_params(params):
     """
@@ -93,6 +159,47 @@ def convert_copy_params(params):
         )    
     return copy_params
 
+def convert_copy_params_to_read_datatype_params(params):
+    """
+    Converts Snowflake COPY parameters to DuckDB-compatible options.
+    
+    Maps and transforms file reading parameters between Snowflake and DuckDB,
+    handling special cases and default values.
+    
+    Args:
+        params: Dictionary of Snowflake parameters
+    
+    Returns:
+        List of DuckDB CopyParameter nodes
+    """
+    converted_params = []
+    params = apply_param_post_processing(params)
+
+    for property_name, property_info in params.items():
+        if property_name == "dateformat" and property_info["duckdb_property_value"] == 'AUTO':
+            continue
+        # handle arrays
+        elif property_info["duckdb_property_type"][-2:] == '[]':
+            literal_array = []
+            for array_value in property_info["duckdb_property_value"]:
+                literal_array.append(Literal(this=array_value, is_string=True))
+            converted_param = EQ(
+                this=Column(
+                    this=Identifier(this="nullstr", quoted=False)
+                ),
+                expression=Array(
+                    expressions=literal_array
+                )
+            )
+        else:
+            converted_param = EQ(
+              this=Column(
+                this=Identifier(this=property_name, quoted=False)),
+              expression=Literal(this=property_info["duckdb_property_value"], is_string=True))
+            
+        converted_params.append(converted_param)
+    return converted_params
+
 def get_file_format(params):
     return params["format"]["duckdb_property_value"]
 
@@ -122,7 +229,7 @@ def _add_empty_field_as_null_to_nullstr(params):
     return params
 
 def _remove_problematic_params(params, format):
-    disallowed_params = DISALLOWED_PARAMS_BY_FORMAT.get(format, {})
+    disallowed_params = DISALLOWED_PARAMS_BY_FORMAT.get(format, {}) | DISALLOWED_PARAMS_BY_FORMAT.get("ALL_FORMATS", {})
     for disallowed_param, disallowed_values in disallowed_params.items():
         if params.get(disallowed_param) is not None:
             if disallowed_values[0] in ("ALWAYS_REMOVE"):
@@ -300,6 +407,9 @@ DISALLOWED_PARAMS_BY_FORMAT = {
         "ignore_errors": ["ALWAYS_REMOVE"],
         "nullstr": ["ALWAYS_REMOVE"],
         "timestampformat": ["AUTO"]
+    },
+    "ALL_FORMATS": {
+        "format": ["ALWAYS_REMOVE"]
     }
 }
 
@@ -351,7 +461,7 @@ SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
         "duckdb_property_type": "VARCHAR" 
     },
     "FIELD_DELIMITER": {
-        "duckdb_property_name": "delimiter",
+        "duckdb_property_name": "delim",
         "duckdb_property_type": "VARCHAR" 
     },
     "FILE_EXTENSION": {

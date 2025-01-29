@@ -251,13 +251,11 @@ class UniverSQLSession:
                 if files_list is not None:
                     with sentry_sdk.start_span(op=op_name, name="Get file info"):
                         processed_file_data = self.catalog.get_file_info(files_list, ast)
-                        for file_name, file_config in processed_file_data.items():
-                            metadata = file_config["METADATA"]
-                            if metadata["storage_provider"] != "Amazon S3":
+                        for file_name, file_config in processed_file_data["files"].items():
+                            if file_config["storage_provider"] != "Amazon S3":
                                 raise Exception("Universql currently only supports Amazon S3 stages.")
-                            aws_role = metadata["AWS_ROLE"]
-                            profile_to_use = get_profile_for_role(aws_role)
-                            metadata["profile"] = profile_to_use
+                            aws_role = file_config["AWS_ROLE"]
+                            file_config["profile"] = get_profile_for_role(aws_role)
 
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
                     table_locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)

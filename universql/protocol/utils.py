@@ -246,3 +246,6 @@ def get_field_from_duckdb(column: list[str], arrow_table: Table, idx: int) -> ty
 
     field = pa.field(field_name, type=pa_type, nullable=True, metadata=metadata)
     return value, field
+
+def sync_and_transform_stage(ast, file_data):
+    pass

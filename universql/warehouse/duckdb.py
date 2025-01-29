@@ -23,7 +23,7 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
     Var, Literal, IcebergProperty, Copy, Delete, Merge, Use, DataType, ColumnDef
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
-from universql.warehouse.utils import transform_copy, get_file_format, get_load_file_format_queries
+from universql.warehouse.utils import transform_copy, get_file_format, get_load_file_format_queries, transform_copy_into_insert_into_select
 from universql.lake.cloud import s3, gcs, in_lambda
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier, get_role_credentials
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
@@ -227,7 +227,7 @@ class DuckDBExecutor(Executor):
                      .transform(self.fix_snowflake_to_duckdb_types))
 
         if isinstance(ast, Copy):
-            transformed_ast = transformed_ast.transform(partial(transform_copy, file_data=file_data))
+            transformed_ast = transformed_ast.transform(partial(transform_copy_into_insert_into_select, copy_data=file_data))
         return transformed_ast
     
 
@@ -451,22 +451,26 @@ class DuckDBExecutor(Executor):
 
             cache_directory = self.catalog.context.get('cache_directory')
             file_cache_directories = []
+            set_profile = False
 
-            for file_name, file_config in file_data.items():
-                urls = file_config["METADATA"]["URL"]
-                profile = file_config["METADATA"]["profile"]
-                stage_name_length = len(file_config["METADATA"]["stage_name"])
+            for file_name, file_config in file_data.get("files", {}).items():
+                url = file_config["URL"][0]
+                profile = file_config["profile"]
+                stage_name_length = len(file_config["stage_name"])
                 file_nodes = ast.args.get("files", [])
-                primary_folder = urls[0].replace('://', '/')
+                primary_folder = url.replace('://', '/')
                 for file in file_nodes:
                     sub_path = file.this.name[stage_name_length + 2:].rsplit('/', 1)[0] + "/"
                     full_path = cache_directory + "/" + primary_folder + sub_path
                     file_cache_directories.append(full_path)
-                try:
-                    region = get_region(profile, urls[0], file_config["METADATA"]["storage_provider"])
-                except Exception as e:
-                    print(f"There was a problem accessing data for {file_name}:\n{e}")
-            
+                    print(f"full_path: {full_path}")
+                if set_profile == False:
+                    try:
+                        region = get_region(profile, url, file_config["storage_provider"])
+                        set_profile = True
+                    except Exception as e:
+                        print(f"There was a problem accessing data for {file_name}:\n{e}")
+
             sql = self._sync_and_transform_query(ast, tables, file_data).sql(dialect="duckdb", pretty=True)
 
             try:

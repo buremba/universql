@@ -100,8 +100,8 @@ class MonitoredSimpleCacheFileSystem(SimpleCacheFileSystem):
                 return fn
             logger.info(f"Downloading {self.protocol[0]}://{path}")
 
-    def glob(self, path):
-        return [self._strip_protocol(path)]
+    # def glob(self, path):
+    #     return [self._strip_protocol(path)]
 
     def size(self, path):
         cached_file = self._check_file(self._strip_protocol(path))
