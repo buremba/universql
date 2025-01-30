@@ -174,8 +174,7 @@ class DuckDBExecutor(Executor):
 
     def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
         self._sync_catalog(locations)
-        final_ast = (simplify(ast)
-                     .transform(self.fix_snowflake_to_duckdb_types))
+        final_ast = ast.transform(self.fix_snowflake_to_duckdb_types)
 
         return final_ast
 

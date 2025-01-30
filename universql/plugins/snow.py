@@ -1,3 +1,4 @@
+import ast
 import configparser
 import os
 import platform
@@ -5,10 +6,10 @@ import platform
 import boto3
 import sqlglot
 from sqlglot import Expression
-from sqlglot.expressions import TableSample, Identifier, Var
+from sqlglot.expressions import CopyParameter, Var, Literal
 
 from universql.plugin import UniversqlPlugin, register
-from universql.util import full_qualifier
+from universql.util import full_qualifier, QueryError
 from universql.warehouse.duckdb import DuckDBExecutor
 from universql.warehouse.snowflake import SnowflakeExecutor, SnowflakeCatalog
 
@@ -275,6 +276,9 @@ SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
     }
 }
 
+
+DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'PARQUET']
+
 @register()
 class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
     def __init__(self, source_executor: SnowflakeExecutor):
@@ -291,51 +295,165 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         files_list = self._find_files(expression)
 
         processed_file_data = self.get_file_info(files_list, expression)
-        for file_name, file_config in processed_file_data.items():
-            metadata = file_config["METADATA"]
-            if metadata["storage_provider"] != "Amazon S3":
-                raise Exception("Universql currently only supports Amazon S3 stages.")
-            aws_role = metadata["AWS_ROLE"]
-            profile_to_use = self.get_profile_for_role(aws_role)
-            metadata["profile"] = profile_to_use
+        # for file_name, file_config in processed_file_data.items():
+        #     metadata = file_config["METADATA"]
+        #     if metadata["storage_provider"] != "Amazon S3":
+        #         raise Exception("Universql currently only supports Amazon S3 stages.")
+        #     aws_role = metadata.get("AWS_ROLE")
+        #     profile_to_use = self.get_profile_for_role(aws_role)
+        #     metadata["profile"] = profile_to_use
+            # urls = file_config["METADATA"]["URL"]
+            # profile = file_config["METADATA"]["profile"]
+            # stage_name_length = len(file_config["METADATA"]["stage_name"])
+            # file_nodes = expression.args.get("files", [])
+            # primary_folder = urls[0].replace('://', '/')
+            # for file in file_nodes:
+            #     sub_path = file.this.name[stage_name_length + 2:].rsplit('/', 1)[0] + "/"
+            #     full_path = cache_directory + "/" + primary_folder + sub_path
+            #     file_cache_directories.append(full_path)
+            # try:
+            #     region = self.get_region(profile, urls[0], file_config["METADATA"]["storage_provider"])
+            # except Exception as e:
+            #     print(f"There was a problem accessing data for {file_name}:\n{e}")
 
-            urls = file_config["METADATA"]["URL"]
-            profile = file_config["METADATA"]["profile"]
-            stage_name_length = len(file_config["METADATA"]["stage_name"])
-            file_nodes = expression.args.get("files", [])
-            primary_folder = urls[0].replace('://', '/')
-            for file in file_nodes:
-                sub_path = file.this.name[stage_name_length + 2:].rsplit('/', 1)[0] + "/"
-                full_path = cache_directory + "/" + primary_folder + sub_path
-                file_cache_directories.append(full_path)
-            try:
-                region = self.get_region(profile, urls[0], file_config["METADATA"]["storage_provider"])
-            except Exception as e:
-                print(f"There was a problem accessing data for {file_name}:\n{e}")
+        return self.transform_copy(expression, processed_file_data)
 
+    def transform_copy(self, expression, file_data):
+        """
+        Transforms Snowflake COPY commands to DuckDB-compatible file reading operations.
+
+        Converts Snowflake stage references (@stage) into direct file paths and
+        maps Snowflake COPY parameters to their DuckDB equivalents.
+
+        Args:
+            expression: COPY command AST
+            file_data: Stage and file metadata
+
+        Returns:
+            Modified AST with direct file paths and mapped parameters
+
+        Raises:
+            Exception: If file format is not supported by DuckDB
+        """
+
+        if not expression.args.get('files'):
+            return expression
+
+        files = expression.args['files']
+        new_files = []
+        copy_params = []
+        for table in files:
+            if isinstance(table, sqlglot.exp.Table) and str(table.this).startswith('@'):
+                stage_name = self.get_stage_name(table)
+                stage_file_data = file_data.get(stage_name)
+                metadata = stage_file_data["METADATA"]
+                file_type = self.get_file_format(stage_file_data)
+                if file_type not in DUCKDB_SUPPORTED_FILE_TYPES:
+                    raise Exception(f"DuckDB currently does not support reading from {file_type} files.")
+                url = metadata["URL"][0]
+                full_path = url + self.get_file_path(table)
+
+                # Create new function node for read_csv with the S3 path
+                new_files.append(Literal.string(full_path))
+                if not copy_params:
+                    copy_params = self.convert_copy_params(stage_file_data)
+                    existing_params = expression.args.get('params', [])
+                    # remove existing CopyParameter from params
+                    filtered_params = [p for p in existing_params if not isinstance(p, sqlglot.exp.CopyParameter)]
+                    expression.args['params'] = copy_params + filtered_params
+            else:
+                new_files.append(table)
+
+        expression.args['files'] = new_files
         return expression
+
+    def _remove_problematic_params(self, params, format):
+        disallowed_params = DISALLOWED_PARAMS_BY_FORMAT.get(format, {})
+        for disallowed_param, disallowed_values in disallowed_params.items():
+            if params.get(disallowed_param) is not None:
+                if disallowed_values[0] in ("ALWAYS_REMOVE"):
+                    del params[disallowed_param]
+                    continue
+                param_current_value = params[disallowed_param]["duckdb_property_value"]
+                if param_current_value in disallowed_values:
+                    del params[disallowed_param]
+        return params
+
+    def apply_param_post_processing(self, params):
+        format = self.get_file_format(params)
+        params = self._remove_problematic_params(params, format)
+        params = self._add_empty_field_as_null_to_nullstr(params)
+        return params
+
+    def get_file_format(self, params):
+        return params["format"]["duckdb_property_value"]
+
+    def _add_empty_field_as_null_to_nullstr(self, params):
+        empty_field_as_null = params.get("EMPTY_FIELD_AS_NULL")
+        if empty_field_as_null is None:
+            return params
+
+        del params["EMPTY_FIELD_AS_NULL"]
+        snowflake_value = empty_field_as_null.get("snowflake_property_value")
+        if snowflake_value.lower() == 'true':
+            nullstr = params.get("nullstr")
+            if nullstr is None:
+                return params
+
+            nullstr_values = nullstr.get("duckdb_property_value")
+            nullstr_values.append("")
+            params["nullstr"]["duckdb_property_value"] = nullstr_values
+
+        return params
+
+    def convert_copy_params(self, params):
+        """
+        Converts Snowflake COPY parameters to DuckDB-compatible options.
+
+        Maps and transforms file reading parameters between Snowflake and DuckDB,
+        handling special cases and default values.
+
+        Args:
+            params: Dictionary of Snowflake parameters
+
+        Returns:
+            List of DuckDB CopyParameter nodes
+        """
+
+        copy_params = []
+        params = self.apply_param_post_processing(params)
+
+        for property_name, property_info in params.items():
+            if property_name == "METADATA":
+                continue
+            if property_name == "dateformat" and property_info["duckdb_property_value"] == 'AUTO':
+                continue
+            copy_params.append(
+                CopyParameter(
+                    this=Var(this=property_name),
+                    expression=Literal.string(property_info["duckdb_property_value"]) if isinstance(
+                        property_info["duckdb_property_value"], str)
+                    else Literal(this=property_info["duckdb_property_value"], is_string=False)
+                )
+            )
+        return copy_params
 
     def get_file_info(self, files, ast):
         copy_data = {}
-
         if len(files) == 0:
             return {}
 
-        cursor = None
-
-        try:
-            copy_params = self._extract_copy_params(ast)
-            file_format_params = copy_params.get("FILE_FORMAT")
-            cursor = self.source_executor.catalog.cursor()
+        copy_params = self._extract_copy_params(ast)
+        file_format_params = copy_params.get("FILE_FORMAT")
+        with self.source_executor.catalog.cursor() as cursor:
             for file in files:
                 if file.get("type") == 'STAGE':
                     stage_info = self.get_stage_info(file, file_format_params, cursor)
                     stage_info["METADATA"] = stage_info["METADATA"] | file
                     copy_data[file["stage_name"]] = stage_info
-        finally:
-            if cursor is not None:
-                cursor.close()
-            return copy_data
+                else:
+                    raise QueryError("Unable to find type")
+        return copy_data
 
     def _extract_copy_params(self, ast):
         params = {}
@@ -518,16 +636,6 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         # add_duckdb_escape_characters = remove_snowflake_escape_characters.replace("'", "''")
         return f"{remove_snowflake_escape_characters}"
 
-    def get_stage_name(self, file: sqlglot.exp.Table):
-        full_string = file.this.name
-        in_quotes = False
-        for i, char in enumerate(full_string):
-            if char == '"':
-                in_quotes = not in_quotes
-            elif char == '/' and not in_quotes:
-                return full_string[1:i]
-        return full_string[1:i]
-
     def get_file_path(self, file: sqlglot.exp.Table):
         full_string = file.this.name
         in_quotes = False
@@ -627,6 +735,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
 
     def get_profile_for_role(self, aws_role_arn):
         # Get credentials file location and read TOML file
+        if aws_role_arn is None:
+            return "default"
         creds_file = self.get_credentials_file_location()
         try:
             config = configparser.ConfigParser()

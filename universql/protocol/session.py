@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 from string import Template
+from traceback import print_exc
 from typing import List
 from urllib.parse import urlparse, parse_qs
 
@@ -181,9 +182,13 @@ class UniverSQLSession:
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     current_ast = ast
                     for transform in self.transforms:
-                        transform.transform_sql(current_ast, alternative_executor)
-                        current_ast = current_ast.transform(transform.transform_sql, alternative_executor)
-
+                        try:
+                            current_ast = transform.transform_sql(current_ast, alternative_executor)
+                        except Exception as e:
+                            print_exc(10)
+                            message = f"Unable to perform transformation {transform.__class__}"
+                            logger.error(message, exc_info=e)
+                            raise QueryError(f"{message}: {str(e)}")
                     new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
