@@ -114,8 +114,10 @@ class DuckDBCatalog(ICatalog):
         raise Exception("Unsupported operation")
 
     def _register_data_lake(self, args: dict):
-        self.duckdb.register_filesystem(s3(args))
-        self.duckdb.register_filesystem(gcs(args))
+        if args.get('aws_profile') is not None or self.account.cloud == 'aws':
+            self.duckdb.register_filesystem(s3(args))
+        if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
+            self.duckdb.register_filesystem(gcs(args))
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         native_tables = {}
@@ -374,6 +376,7 @@ class DuckDBExecutor(Executor):
 
     def get_as_table(self) -> pyarrow.Table:
         arrow_table = self.catalog.emulator._arrow_table
+
         if arrow_table is None:
             raise QueryError("No result returned from DuckDB")
         for idx, column in enumerate(self.catalog.duckdb.description):
