@@ -256,55 +256,6 @@ SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
 
 def get_load_file_format_queries(file_format):
     return FILE_FORMAT_LOAD_QUERIES.get(file_format, [])
-    
-def transform_copy(expression, file_data):
-    """
-    Transforms Snowflake COPY commands to DuckDB-compatible file reading operations.
-    
-    Converts Snowflake stage references (@stage) into direct file paths and 
-    maps Snowflake COPY parameters to their DuckDB equivalents.
-    
-    Args:
-        expression: COPY command AST
-        file_data: Stage and file metadata
-    
-    Returns:
-        Modified AST with direct file paths and mapped parameters
-    
-    Raises:
-        Exception: If file format is not supported by DuckDB
-    """
-
-    if not expression.args.get('files'):
-        return expression
-        
-    files = expression.args['files']
-    new_files = []
-    copy_params = []
-    for table in files:
-        if isinstance(table, sqlglot.exp.Table) and str(table.this).startswith('@'):
-            stage_name = get_stage_name(table)
-            stage_file_data = file_data.get(stage_name)
-            metadata = stage_file_data["METADATA"]
-            file_type = file_data["file_parameters"]["format"]
-            if file_type.upper() not in DUCKDB_SUPPORTED_FILE_TYPES:
-                raise Exception(f"DuckDB currently does not support reading from {file_type} files.")
-            url = metadata["URL"][0]
-            full_path = url + get_file_path(table)
-            
-            # Create new function node for read_csv with the S3 path
-            new_files.append(Literal.string(full_path))
-            if copy_params == []:
-                copy_params = convert_copy_params(stage_file_data)             
-                existing_params = expression.args.get('params', [])
-                # remove existing CopyParameter from params
-                filtered_params = [p for p in existing_params if not isinstance(p, sqlglot.exp.CopyParameter)]            
-                expression.args['params'] = copy_params + filtered_params
-        else:
-            new_files.append(table)
-            
-    expression.args['files'] = new_files
-    return expression
 
 def transform_copy_into_insert_into_select(expression, copy_data):
     """
@@ -370,37 +321,6 @@ def transform_copy_into_insert_into_select(expression, copy_data):
         expression=select_ast
     )
     return insert_into_select_ast
-
-def convert_copy_params(params):
-    """
-    Converts Snowflake COPY parameters to DuckDB-compatible options.
-    
-    Maps and transforms file reading parameters between Snowflake and DuckDB,
-    handling special cases and default values.
-    
-    Args:
-        params: Dictionary of Snowflake parameters
-    
-    Returns:
-        List of DuckDB CopyParameter nodes
-    """
-
-    copy_params = []
-    params = apply_param_post_processing(params)
-
-    for property_name, property_info in params.items():
-        if property_name == "METADATA":
-            continue
-        if property_name == "dateformat" and property_info["duckdb_property_value"] == 'AUTO':
-            continue
-        copy_params.append(
-            CopyParameter(
-                this=Var(this=property_name),
-                expression=Literal.string(property_info["duckdb_property_value"]) if isinstance(property_info["duckdb_property_value"], str) 
-                    else Literal(this=property_info["duckdb_property_value"], is_string=False)
-            )
-        )    
-    return copy_params
 
 def convert_copy_params_to_read_datatype_params(params):
     """

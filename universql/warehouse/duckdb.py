@@ -23,7 +23,7 @@ from sqlglot.expressions import Select, Insert, Create, Drop, Properties, Tempor
     Var, Literal, IcebergProperty, Copy, Delete, Merge, Use, DataType, ColumnDef
 
 from universql.warehouse import ICatalog, Executor, Locations, Tables
-from universql.warehouse.utils import transform_copy, get_file_format, get_load_file_format_queries, transform_copy_into_insert_into_select
+from universql.warehouse.utils import get_file_format, get_load_file_format_queries, transform_copy_into_insert_into_select
 from universql.lake.cloud import s3, gcs, in_lambda
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier, get_role_credentials
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
