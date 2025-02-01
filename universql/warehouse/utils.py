@@ -498,18 +498,11 @@ def get_stage_info(file, file_format_params, cursor):
     Returns:
         Dictionary of processed DuckDB parameters
     """
-    print("file INCOMING")
-    pp(file)
-    print("file_format_params INCOMING")
-    pp(file_format_params)
-    print("cursor INCOMING")
-    pp(cursor)
 
     if file.get("type") != "STAGE" and file.get("source_catalog") != "SNOWFLAKE":
         raise Exception("There was an issue processing your file data.")
     if file_format_params is None:
         file_format_params = {}
-    print("00000000000000")
     try:
         cursor.execute(f"DESCRIBE STAGE {file["stage_name"]}")
         stage_info = cursor.fetchall()
@@ -517,10 +510,7 @@ def get_stage_info(file, file_format_params, cursor):
             raise Exception(f"No metadata returned for stage {file["stage_name"]}")
     except Exception as e:
         raise Exception(f"Failed to get stage metadata: {str(e)}")
-    print(2222222222222)
     stage_info_dict = {}
-    print("stage_info INCOMING")
-    pp(stage_info)
     # file_format_overrides = None
     # if file_format_params is not None:
     #     file_format_overrides = file_format_params.keys()

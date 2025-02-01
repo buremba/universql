@@ -233,8 +233,6 @@ class UniverSQLSession:
             must_run_on_catalog = False
             files_list = None
             processed_file_data = None
-            print("ast INCOMING")
-            pp(ast)
             if isinstance(ast, Create):
                 if ast.kind in ('TABLE', 'VIEW'):
                     tables = self._find_tables(ast.expression) if ast.expression is not None else []
@@ -246,8 +244,6 @@ class UniverSQLSession:
             else:
                 tables = self._find_tables(ast)
                 files_list = self._find_files(ast)
-                print("files_list INCOMING")
-                pp(files_list)
             tables_list = [table[0] for table in tables]
             must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables_list, ast)
             if not must_run_on_catalog:
@@ -255,8 +251,6 @@ class UniverSQLSession:
                 if files_list is not None:
                     with sentry_sdk.start_span(op=op_name, name="Get file info"):
                         processed_file_data = self.catalog.get_file_info(files_list, ast)
-                        print("processed_file_data INCOMING")
-                        pp(processed_file_data)
                         for file_name, file_config in processed_file_data["files"].items():
                             if file_config["storage_provider"] != "Amazon S3":
                                 raise Exception("Universql currently only supports Amazon S3 stages.")

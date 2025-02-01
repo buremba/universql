@@ -125,13 +125,9 @@ class SnowflakeCatalog(ICatalog):
         if len(files) == 0:
             return {}
         copy_params = self._extract_copy_params(ast)
-        print("copy_params INCOMING")
-        pp(copy_params)
         file_format_params = copy_params.get("FILE_FORMAT")
         cursor = self.cursor()
         for file in files:
-            print("file INCOMING")
-            pp(file)
             if file.get("type") == 'STAGE':
                 
                 stage_info = get_stage_info(file, file_format_params, cursor)
