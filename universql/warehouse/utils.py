@@ -3,7 +3,7 @@ import sqlglot
 from pprint import pp
 from sqlglot.expressions import Literal, CopyParameter, Var, EQ, Column, Identifier, Literal, Insert, Star, Anonymous, Array, From, Table, Select
 
-DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'PARQUET']
+DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'PARQUET']
 
 FILE_FORMAT_LOAD_QUERIES = {
     "JSON": ["INSTALL json;", "LOAD json;"],
@@ -15,6 +15,12 @@ DISALLOWED_PARAMS_BY_FORMAT = {
         "ignore_errors": ["ALWAYS_REMOVE"],
         "nullstr": ["ALWAYS_REMOVE"],
         "timestampformat": ["AUTO"]
+    },
+    "AVRO": {
+        "ignore_errors": ["ALWAYS_REMOVE"],
+        "nullstr": ["ALWAYS_REMOVE"],
+        "timestampformat": ["AUTO"],
+        "compression": ["ALWAYS_REMOVE"]
     },
     "PARQUET": {
         "ignore_errors": ["ALWAYS_REMOVE"],

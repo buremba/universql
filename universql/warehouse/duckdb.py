@@ -281,12 +281,11 @@ class DuckDBExecutor(Executor):
             None)
 
     def prep_duckdb_for_files(self, file_data):
-        file_format = get_file_format(file_data[next(iter(file_data.keys()))])
+        file_format = get_file_format(file_data["file_parameters"]).upper()
         load_file_format_queries = get_load_file_format_queries(file_format)
-        print(f"Found {file_format} files to read")
         for query in load_file_format_queries:
             print(f"Executing {query}")
-            self.execute_raw(query)
+            self.execute_raw(query, True)
                 
     def execute(self, ast: sqlglot.exp.Expression, tables: Tables, file_data = None) -> typing.Optional[Locations]:
         """
@@ -309,8 +308,6 @@ class DuckDBExecutor(Executor):
         Returns:
             Optional[Locations]: Updated location mappings for new tables/views
         """
-        # if file_data is not None:
-        #     self.prep_duckdb_for_files(file_data)
 
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
@@ -448,7 +445,6 @@ class DuckDBExecutor(Executor):
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             self.catalog.base_catalog.clear_cache()
         elif isinstance(ast, Copy):
-
             cache_directory = self.catalog.context.get('cache_directory')
             file_cache_directories = []
             set_profile = False
@@ -471,6 +467,7 @@ class DuckDBExecutor(Executor):
                     except Exception as e:
                         print(f"There was a problem accessing data for {file_name}:\n{e}")
 
+            self.prep_duckdb_for_files(file_data)
             sql = self._sync_and_transform_query(ast, tables, file_data).sql(dialect="duckdb", pretty=True)
 
             try:
@@ -528,7 +525,6 @@ class DuckDBExecutor(Executor):
 
     def _load_file_format(file_format):
         file_format_queries = {
-            "JSON": ["INSTALL json;", "LOAD json;"],
             "AVRO": ["INSTALL avro FROM community;", "LOAD avro;"]
         }
 
