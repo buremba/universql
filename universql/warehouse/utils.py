@@ -16,6 +16,10 @@ DISALLOWED_PARAMS_BY_FORMAT = {
         "nullstr": ["ALWAYS_REMOVE"],
         "timestampformat": ["AUTO"]
     },
+    "PARQUET": {
+        "ignore_errors": ["ALWAYS_REMOVE"],
+        "nullstr": ["ALWAYS_REMOVE"]
+    },
     "ALL_FORMATS": {
         "format": ["ALWAYS_REMOVE"]
     }
@@ -27,6 +31,16 @@ REQUIRED_PARAMS_BY_FORMAT = {
             "duckdb_property_type": "BOOL",
             "duckdb_property_value": "TRUE"
         }
+    },
+    "PARQUET": {
+        "hive_partitioning": {
+            "duckdb_property_type": "BOOL",
+            "duckdb_property_value": "TRUE"            
+        },
+        "union_by_name": {
+            "duckdb_property_type": "BOOL",
+            "duckdb_property_value": "TRUE"            
+        },
     }
 }
 
@@ -227,6 +241,10 @@ SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
     "STRIP_OUTER_ARRAY": { # needs to use json_array_elements() after loading
         "duckdb_property_name": None,
         "duckdb_property_type": None
+    },
+    "BINARY_AS_TEXT": {
+        "duckdb_property_name": "BINARY_AS_STRING",
+        "duckdb_property_type": "BOOL"
     }
 }
 
