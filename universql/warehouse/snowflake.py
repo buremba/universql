@@ -124,24 +124,24 @@ class SnowflakeCatalog(ICatalog):
 
         if len(files) == 0:
             return {}
-        try:
-            copy_params = self._extract_copy_params(ast)
-            file_format_params = copy_params.get("FILE_FORMAT")
-            cursor = self.cursor()
-            for file in files:
-                if file.get("type") == 'STAGE':
-                    
-                    stage_info = get_stage_info(file, file_format_params, cursor)
-                    stage_info["METADATA"] = stage_info["METADATA"] | file
-                    copy_data_copy["files"][file["stage_name"]] = stage_info["METADATA"]
-                    if copy_data_copy["file_parameters"] == {}:
-                        del stage_info["METADATA"]
-                        copy_data_copy["file_parameters"] = stage_info
-                    
-
-        finally:
-            cursor.close()
-            return copy_data_copy
+        copy_params = self._extract_copy_params(ast)
+        print("copy_params INCOMING")
+        pp(copy_params)
+        file_format_params = copy_params.get("FILE_FORMAT")
+        cursor = self.cursor()
+        for file in files:
+            print("file INCOMING")
+            pp(file)
+            if file.get("type") == 'STAGE':
+                
+                stage_info = get_stage_info(file, file_format_params, cursor)
+                stage_info["METADATA"] = stage_info["METADATA"] | file
+                copy_data_copy["files"][file["stage_name"]] = stage_info["METADATA"]
+                if copy_data_copy["file_parameters"] == {}:
+                    del stage_info["METADATA"]
+                    copy_data_copy["file_parameters"] = stage_info
+                
+        return copy_data_copy
         
     def _extract_copy_params(self, ast):
         params = {}
