@@ -348,7 +348,7 @@ def convert_copy_params_to_read_datatype_params(params):
                 literal_array.append(Literal(this=array_value, is_string=True))
             converted_param = EQ(
                 this=Column(
-                    this=Identifier(this="nullstr", quoted=False)
+                    this=Identifier(this=property_name, quoted=False)
                 ),
                 expression=Array(
                     expressions=literal_array
