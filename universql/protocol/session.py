@@ -159,10 +159,10 @@ class UniverSQLSession:
             cte_aliases = set()
         for expression in ast.walk(bfs=True):
             # process stages first
-            if (isinstance(expression, sqlglot.exp.Table) and \
-                isinstance(expression.this, Var) and \
-                str(expression.this.this).startswith('@')):
+            if (isinstance(expression.parent, sqlglot.exp.Copy) and 
+                expression in expression.parent.args.get('files', [])):
                 continue
+
             if isinstance(expression, Query) or isinstance(expression, DDL):
                 if expression.ctes is not None and len(expression.ctes) > 0:
                     for cte in expression.ctes:
