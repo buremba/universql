@@ -141,22 +141,34 @@ class SnowflakeCatalog(ICatalog):
         
     def _extract_copy_params(self, ast):
         params = {}
+        print("ast INCOMING")
+        pp(ast)
         for param in ast.args.get('params', []):
+            print("param INCOMING")
+            pp(param)
             param_name = param.args['this'].args['this']
-            
+            print("param_name INCOMING")
+            pp(param_name)
+
             # Handle single expression case
             if 'expression' in param.args:
+                print(f"just one INCOMING expression for {param_name}")
                 expr = param.args['expression']
-                params[param_name] = expr.args['this'].args['this']
+                print("expr INCOMING")
+                pp(expr)
+                params[param_name] = expr.args['this']
                 
             # Handle multiple expressions case
             elif 'expressions' in param.args:
+                print(f"multiple INCOMING expressions for {param_name}")
                 params[param_name] = {}
                 for expr in param.args['expressions']:
                     property_name = expr.args['this'].args['this']
                     property_value = expr.args['value'].args['this']
                     params[param_name][property_name] = property_value
                     
+        print("params INCOMING")
+        pp(params)
         return params
 
     def get_volume_lake_path(self, volume: str) -> str:
