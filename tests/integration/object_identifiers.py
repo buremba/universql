@@ -10,7 +10,7 @@ class TestObjectIdentifiers:
 
         with snowflake_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(, f"""
+            cursor.execute(f"""
             execute immediate $$     
             begin   
             CREATE DATABASE IF NOT EXISTS universql1;
@@ -38,7 +38,7 @@ class TestObjectIdentifiers:
             AS select 1;
             end;
             $$  
-        """,
+        """)
 
 
   # requires the following:
