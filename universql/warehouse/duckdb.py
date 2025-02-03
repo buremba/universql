@@ -134,6 +134,7 @@ class DuckDBExecutor(Executor):
 
     def __init__(self, catalog: DuckDBCatalog):
         super().__init__(catalog)
+        self.is_last_raw = False
 
     def get_query_log(self, total_duration) -> str:
         if in_lambda:
@@ -144,11 +145,15 @@ class DuckDBExecutor(Executor):
             cost = calculate_script_cost(total_duration)
             return f"Run locally on DuckDB: {cost}"
 
-    def execute_raw(self, raw_query: str, catalog_executor: Executor) -> None:
+    def execute_raw(self, raw_query: str, catalog_executor: Executor, is_raw : bool = False) -> None:
         try:
             logger.info(
                 f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
-            self.catalog.emulator.execute(raw_query)
+            if is_raw:
+                self.catalog.duckdb.execute(raw_query)
+            else:
+                self.catalog.emulator.execute(raw_query)
+            self.is_last_raw = is_raw
         except duckdb.HTTPException as e:
             if e.status_code == 403:
                 raise QueryError(f"Access denied: {e.args[0]}")
@@ -266,7 +271,7 @@ class DuckDBExecutor(Executor):
                             table_location = str(os.path.join(database_location, base_location))
                         elif base_location is not None:
                             external_volume = self._get_property(ast, 'external_volume')
-                            lake_path = base_location.catalog.get_volume_lake_path(external_volume)
+                            lake_path = catalog_executor.catalog.get_volume_lake_path(external_volume)
                             # resolve external volume location
                             table_location = str(os.path.join(lake_path, base_location))
                         else:
@@ -363,16 +368,19 @@ class DuckDBExecutor(Executor):
                 self._sync_catalog({})
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             catalog_executor.catalog.clear_cache()
-        elif isinstance(ast, Copy):
-            sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
-            self.catalog.duckdb.execute(sql)
         else:
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
-            self.execute_raw(sql, catalog_executor)
+            self.execute_raw(sql, catalog_executor, is_raw = isinstance(ast, Copy))
         return None
 
+    def get_raw_table(self):
+        if self.is_last_raw:
+            return self.catalog.duckdb.fetch_arrow_table()
+        else:
+            return self.catalog.emulator._arrow_table
+
     def get_as_table(self) -> pyarrow.Table:
-        arrow_table = self.catalog.duckdb.fetch_arrow_table()
+        arrow_table = self.get_raw_table()
         if arrow_table is None:
             arrow_table = self.catalog.duckdb.sql("select 'no response returned' as message").fetch_arrow_table()
 
