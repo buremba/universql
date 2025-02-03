@@ -4,7 +4,7 @@ import re
 import typing
 from enum import Enum
 from string import Template
-from typing import List
+from typing import List, Sequence, Any
 
 import duckdb
 import pyiceberg.table
@@ -19,7 +19,6 @@ from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
     Var, Literal, IcebergProperty, Use, ColumnDef, DataType, Copy
-from sqlglot.optimizer.simplify import simplify
 
 from universql.lake.cloud import s3, gcs, in_lambda
 from universql.protocol.session import UniverSQLSession
@@ -33,7 +32,6 @@ logger = logging.getLogger("🐥")
 class TableType(Enum):
     ICEBERG = "iceberg"
     LOCAL = "local"
-
 
 @register(name="duckdb")
 class DuckDBCatalog(ICatalog):
@@ -371,14 +369,13 @@ class DuckDBExecutor(Executor):
         else:
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql, catalog_executor)
-
         return None
 
     def get_as_table(self) -> pyarrow.Table:
-        arrow_table = self.catalog.emulator._arrow_table
-
+        arrow_table = self.catalog.duckdb.fetch_arrow_table()
         if arrow_table is None:
-            raise QueryError("No result returned from DuckDB")
+            arrow_table = self.catalog.duckdb.sql("select 'no response returned' as message").fetch_arrow_table()
+
         for idx, column in enumerate(self.catalog.duckdb.description):
             array, schema = get_field_from_duckdb(column, arrow_table, idx)
             arrow_table = arrow_table.set_column(idx, schema, array)

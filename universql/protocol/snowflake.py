@@ -283,7 +283,7 @@ async def query_request(request: Request) -> JSONResponse:
                              "data": {"sqlState": e.sqlstate}})
     except Exception as e:
         if not isinstance(e, HTTPException):
-            print_exc(limit=1)
+            print_exc(limit=10)
             if query is not None:
                 logger.exception(f"Error processing query: {query}")
             else:

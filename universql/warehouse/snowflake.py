@@ -60,8 +60,8 @@ class SnowflakeCatalog(ICatalog):
     def executor(self) -> Executor:
         return SnowflakeExecutor(self)
 
-    def cursor(self, create_if_not_exists=True):
-        if self._cursor is not None or not create_if_not_exists:
+    def cursor(self):
+        if self._cursor is not None:
             return self._cursor
         with sentry_sdk.start_span(op="snowflake", name="Initialize Snowflake Connection"):
             try:
@@ -98,12 +98,13 @@ class SnowflakeCatalog(ICatalog):
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         if len(tables) == 0:
             return {}
+        cursor = self.cursor()
         sqls = ["SYSTEM$GET_ICEBERG_TABLE_INFORMATION(%s)" for _ in tables]
         values = [table.sql(comments=False, dialect="snowflake") for table in tables]
         final_query = f"SELECT {(', '.join(sqls))}"
         try:
-            self.cursor().execute(final_query, values)
-            result = self.cursor().fetchall()
+            cursor.execute(final_query, values)
+            result = cursor.fetchall()
             return {table: self._get_ref(json.loads(result[0][idx])) for idx, table in
                     enumerate(tables)}
         except DatabaseError as e:
@@ -225,7 +226,7 @@ class SnowflakeExecutor(Executor):
         return "Run on Snowflake"
 
     def close(self):
-        cursor = self.catalog.cursor(create_if_not_exists=False)
+        cursor = self.catalog._cursor
         if cursor is not None:
             cursor.close()
 

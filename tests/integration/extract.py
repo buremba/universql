@@ -83,12 +83,40 @@ class TestSelect:
 
 
     def test_stage(self):
-        with universql_connection(warehouse=None) as conn:
+        with universql_connection(warehouse=None, database="MY_ICEBERG_JINJAT", schema="TPCH_SF1") as conn:
             result = execute_query(conn, """
-            create temp table if not exists table_name1 as select 1 as t;
-            copy into table_name1 FROM @stagename/""")
+            create temp table if not exists clickhouse_public_data as select 1 as t;
+            copy into clickhouse_public_data FROM @clickhouse_public_data_stage/
+            """)
             # result = execute_query(conn, "select * from @iceberg_db.public.landing_stage/initial_objects/device_metadata.csv")
             assert result.num_rows > 0
+
+    def test_copy_into_for_ryan(self):
+        with universql_connection(snowflake_connection_name='ryan_snowflake', warehouse=None, database="ICEBERG_DB") as conn:
+
+            result = execute_query(conn, """
+                CREATE OR REPLACE TEMPORARY TABLE DEVICE_METADATA_REF (
+                device_id VARCHAR,
+                device_name VARCHAR,
+                device_type VARCHAR,
+                manufacturer VARCHAR,
+                model_number VARCHAR,
+                firmware_version VARCHAR,
+                installation_date DATE,
+                location_id VARCHAR,
+                location_name VARCHAR,
+                facility_zone VARCHAR,
+                is_active BOOLEAN,
+                expected_lifetime_months INT,
+                maintenance_interval_days INT,
+                last_maintenance_date DATE
+            );
+
+             COPY INTO DEVICE_METADATA_REF
+             FROM @iceberg_db.public.landing_stage/initial_objects/device_metadata.csv
+             FILE_FORMAT = (SKIP_HEADER = 1);
+             """)
+            assert result.num_rows != 0
 
     def test_copy_into(self):
         with universql_connection(warehouse=None) as conn:

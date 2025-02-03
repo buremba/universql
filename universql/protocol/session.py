@@ -39,8 +39,6 @@ class UniverSQLSession:
         self.catalog = COMPUTES["snowflake"](self, first_catalog_compute or {})
         self.catalog_executor = self.catalog.executor()
         self.computes = {"snowflake": self.catalog_executor}
-
-        self.last_executor_cursor = None
         self.processing = False
         self.metadata_db = None
         self.transforms : List[UniversqlPlugin] = [transform(self.catalog_executor) for transform in TRANSFORMS]

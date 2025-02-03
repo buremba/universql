@@ -445,14 +445,13 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
 
         copy_params = self._extract_copy_params(ast)
         file_format_params = copy_params.get("FILE_FORMAT")
-        with self.source_executor.catalog.cursor() as cursor:
-            for file in files:
-                if file.get("type") == 'STAGE':
-                    stage_info = self.get_stage_info(file, file_format_params, cursor)
-                    stage_info["METADATA"] = stage_info["METADATA"] | file
-                    copy_data[file["stage_name"]] = stage_info
-                else:
-                    raise QueryError("Unable to find type")
+        for file in files:
+            if file.get("type") == 'STAGE':
+                stage_info = self.get_stage_info(file, file_format_params)
+                stage_info["METADATA"] = stage_info["METADATA"] | file
+                copy_data[file["stage_name"]] = stage_info
+            else:
+                raise QueryError("Unable to find type")
         return copy_data
 
     def _extract_copy_params(self, ast):
@@ -498,7 +497,7 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             region_dict = s3.get_bucket_location(Bucket=bucket_name)
             return region_dict.get('LocationConstraint') or 'us-east-1'
 
-    def get_stage_info(self, file, file_format_params, cursor):
+    def get_stage_info(self, file, file_format_params):
         """
         Retrieves and processes Snowflake stage metadata.
 
@@ -518,6 +517,7 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         if file_format_params is None:
             file_format_params = {}
         stage_name = file["stage_name"]
+        cursor = self.source_executor.catalog.cursor()
         cursor.execute(f"DESCRIBE STAGE {stage_name}")
         stage_info = cursor.fetchall()
         stage_info_dict = {}
