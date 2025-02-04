@@ -13,6 +13,7 @@ from universql.plugin import UniversqlPlugin, register
 from universql.util import full_qualifier, QueryError
 from universql.warehouse.duckdb import DuckDBExecutor
 from universql.warehouse.snowflake import SnowflakeExecutor, SnowflakeCatalog
+
 from pprint import pp
 
 DEFAULT_CREDENTIALS_LOCATIONS = {
@@ -425,6 +426,69 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             expression=select_ast
         )
         return insert_into_select_ast
+    
+    def get_snapshot_of_copy_file_directories(self, ast):
+        directories = self._get_copy_file_directories(ast)
+        snapshot = self._get_cache_snapshot(directories)
+        return snapshot
+    
+    def _get_copy_file_directories(self, ast):
+        cache_directory = self.source_executor.catalog.context.get('cache_directory')
+        file_cache_directories = []
+        set_profile = False
+        file_nodes = ast.args.get("files", [])
+        copy_directories = []
+        for node in file_nodes:
+            node_name = node.this.this
+            if node_name[0] == "@":
+                stage_name = self.get_stage_name_from_string(node_name)
+                stage_url = self._get_stage_url(stage_name)
+                formatted_url = stage_url.replace(r"://", r"/")
+
+                relative_path = node_name[len(stage_name) + 2:]
+                relative_path_without_files = self._remove_file_from_relative_path(relative_path)
+                
+                copy_directory = f"{cache_directory}/{formatted_url}{relative_path_without_files}"
+                copy_directories.append(copy_directory)
+        return copy_directories
+                
+    def _remove_file_from_relative_path(self, relative_path):
+        last_slash_index = relative_path.rfind('/')
+        if last_slash_index == -1:
+            return relative_path
+        return relative_path[:last_slash_index]
+
+    def _get_stage_url(self, stage_name):
+        cursor = self.source_executor.catalog.cursor()
+        cursor.execute(f"DESCRIBE STAGE {stage_name}")
+        stage_info = cursor.fetchall()
+        url_value = None
+        for row in stage_info:
+            if row[1] == 'URL':  # Assuming 'property' is the second column (index 1)
+                if isinstance(row[3], list):
+                    url_value = row[3][0]
+                else:
+                    # If it's a string with brackets, strip them
+                    url_value = row[3].strip('[]"')
+
+        return url_value
+
+    def cleanup_cache(self, monitored_dirs):
+        """
+        Removes files in the monitored directories. 
+        
+        Args:
+            before_snapshot: Set of file paths that existed before COPY
+            monitored_dirs: List of directory paths to clean up
+            
+        Note:
+            Logs warnings for files it fails to remove but continues execution
+        """        
+        for file_path in monitored_dirs:
+            try:
+                os.remove(file_path)
+            except (FileNotFoundError, PermissionError):
+                raise Exception(f"Could not remove cached file: {file_path}")
 
 
     def convert_copy_params_to_read_datatype_params(self, params):
@@ -440,8 +504,7 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         Returns:
             List of DuckDB CopyParameter nodes
         """
-        # print(f"params INCOMING:")
-        # pp(params)
+
         converted_params = []
         params = self.apply_param_post_processing_copy(params)
 
@@ -575,8 +638,6 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         if len(files) == 0:
             return {}
         specified_copy_params = self._extract_copy_params(ast).get("FILE_FORMAT", {})
-        print("specified_copy_params INCOMING")
-        pp(specified_copy_params)
         cursor = self.source_executor.catalog.cursor()
         for file in files:
                 
@@ -634,7 +695,6 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
                     "snowflake_property_value": value,
                     "snowflake_property_type": data_type
                 }
-                print(f"{column_name}: {ascii(value)}")
         else:
             for property_name, property_value in file_format_params.items():
                 copy_params[property_name] = property_value
@@ -830,7 +890,6 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         remove_snowflake_escape_characters = re.sub(r'\\\\', r'\\', str)
         
         # add_duckdb_escape_characters = remove_snowflake_escape_characters.replace("'", "''")
-        print(f"INCOMING: {ascii(str)} to {ascii(remove_snowflake_escape_characters)}")
         return f"{remove_snowflake_escape_characters}"
 
     def get_file_path(self, file: sqlglot.exp.Table):
@@ -876,6 +935,15 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
 
     def get_stage_name(self, file: sqlglot.exp.Table):
         full_string = file.this.name
+        in_quotes = False
+        for i, char in enumerate(full_string):
+            if char == '"':
+                in_quotes = not in_quotes
+            elif char == '/' and not in_quotes:
+                return full_string[1:i]
+        return full_string[1:i]
+    
+    def get_stage_name_from_string(self, full_string: str):
         in_quotes = False
         for i, char in enumerate(full_string):
             if char == '"':

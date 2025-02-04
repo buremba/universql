@@ -153,8 +153,6 @@ class DuckDBExecutor(Executor):
         try:
             logger.info(
                 f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
-            print(f"raw_query: {raw_query}")
-            print(f"ascii(raw_query): {ascii(raw_query)}")
             
             if is_raw:
                 self.catalog.duckdb.execute(raw_query)
@@ -378,6 +376,7 @@ class DuckDBExecutor(Executor):
         elif isinstance(ast, Copy):
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
             
+            insert_into_select_ast = sqlglot.parse_one(sql, dialect='duckdb')
             # refactor soon
             cache_directory = self.catalog.context.get('cache_directory')
             
@@ -385,7 +384,6 @@ class DuckDBExecutor(Executor):
                 self.execute_raw(sql, catalog_executor, is_raw = isinstance(ast, Copy))
             finally:
                 self._destroy_cache(cache_directory)   
-                print(f"cache_directory INCOMING: {cache_directory}")         
         else:
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql, catalog_executor, is_raw = isinstance(ast, Copy))
@@ -412,52 +410,6 @@ class DuckDBExecutor(Executor):
 
     def close(self):
         self.catalog.emulator.close()
-        
-    def _get_file_directories(self, duckdb_sql):
-        ast = sqlglot.parse_one(duckdb_sql, dialect="duckdb")
-
-    def _get_cache_snapshot(self, monitored_dirs):
-        """
-        Creates a snapshot of all files currently in the specified directories.
-        Files found are stored as absolute paths in a set for quick comparison.
-        
-        Args:
-            monitored_dirs: List of directory paths to check for files
-            
-        Returns:
-            set: Absolute paths of all files found in monitored directories
-            
-        Note: 
-            Silently skips directories that don't exist
-        """        
-        files = set()
-        for directory in monitored_dirs:
-            try:
-                with os.scandir(directory) as entries:
-                    for entry in entries:
-                        if entry.is_file():
-                            files.add(entry.path)
-            except FileNotFoundError:
-                pass
-        return files
-
-    def _cleanup_cache(self, monitored_dirs):
-        """
-        Removes files in the monitored directories. 
-        
-        Args:
-            before_snapshot: Set of file paths that existed before COPY
-            monitored_dirs: List of directory paths to clean up
-            
-        Note:
-            Logs warnings for files it fails to remove but continues execution
-        """        
-        files_in_cache = self._get_cache_snapshot(monitored_dirs)
-        for file_path in files_in_cache:
-            try:
-                os.remove(file_path)
-            except (FileNotFoundError, PermissionError):
-                logger.warning(f"Could not remove cached file: {file_path}")
 
     @staticmethod
     def fix_snowflake_to_duckdb_types(

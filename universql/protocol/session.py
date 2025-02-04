@@ -15,12 +15,14 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon
+from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon, Copy
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError, full_qualifier
 from universql.plugin import Executor, Tables, ICatalog, COMPUTES, TRANSFORMS, UniversqlPlugin
+
+from pprint import pp
 
 logger = logging.getLogger("💡")
 
@@ -174,9 +176,14 @@ class UniverSQLSession:
             tables_list = [table[0] for table in tables]
             must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables_list, ast)
             if not must_run_on_catalog:
+                before_query_snapshot = None
+                clear_files_after_execution = False
+                stage_plugin = None
                 op_name = alternative_executor.__class__.__name__
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
                     locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
+                # if isinstance(ast, Copy):
+                #     get_copy_file_directories(ast)
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     current_ast = ast
                     for transform in self.transforms:
@@ -187,7 +194,16 @@ class UniverSQLSession:
                             message = f"Unable to perform transformation {transform.__class__}"
                             logger.error(message, exc_info=e)
                             raise QueryError(f"{message}: {str(e)}")
-                    new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
+                    if isinstance(ast, Copy):
+                        stage_plugin = next(transform for transform in self.transforms 
+                            if transform.__class__.__name__ == "SnowflakeStageUniversqlPlugin") 
+                        before_query_snapshot = stage_plugin.get_snapshot_of_copy_file_directories(ast)
+                        clear_files_after_execution = True
+                    try:                      
+                        new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
+                    finally:
+                        if clear_files_after_execution == True and stage_plugin is not None and before_query_snapshot is not None:
+                            stage_plugin.cleanup_cache(before_query_snapshot)
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
                         self.catalog.register_locations(new_locations)
