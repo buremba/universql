@@ -1,0 +1,5 @@
+streamlit
+sqlglot
+duckdb
+networkx
+st_link_analysis

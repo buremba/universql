@@ -1,0 +1,11 @@
+
+name: 'utilities'
+version: '2.0'
+
+profile: 'default'
+config-version: 2
+app-path: 'app'
+target-path: 'target'
+
+vars:
+  example_variable: 'value'

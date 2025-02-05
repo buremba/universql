@@ -112,6 +112,8 @@ CREATE TEMP TABLE hits2
   "clickbench_hide": true
 }
 */
+COPY INTO hits2 FROM 's3://clickhouse-public-datasets/hits_compatible/hits.csv.gz' FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP, FIELD_OPTIONALLY_ENCLOSED_BY = '"');
+ALTER SESSION SET USE_CACHED_RESULT = true;
 
 SELECT COUNT(*) FROM hits2;
 SELECT COUNT(*) FROM hits2 WHERE AdvEngineID <> 0;

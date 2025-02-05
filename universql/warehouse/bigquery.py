@@ -8,9 +8,8 @@ from google.cloud import bigquery
 from google.cloud.bigquery import ExternalConfig
 from snowflake.connector.cursor import ResultMetadataV2
 from snowflake.connector.options import pyarrow
-from sqlglot.expressions import Insert, Select
-
-from universql.warehouse import Executor, ICatalog, Locations
+from universql.protocol.session import UniverSQLSession
+from universql.plugin import Executor, ICatalog, Locations, register
 from universql.util import sizeof_fmt, pprint_secs, QueryError
 from universql.protocol.utils import get_field_for_snowflake, arrow_to_snowflake_type_id
 
@@ -29,16 +28,18 @@ class BigQueryIcebergExecutor(Executor):
             return sqlglot.exp.parse_identifier(bq_identifier, dialect="bigquery")
         return expression
 
-    def execute_raw(self, raw_query: str, config: typing.Optional[bigquery.QueryJobConfig] = None) -> None:
+    def execute_raw(self, raw_query: str, catalog_executor, config: typing.Optional[bigquery.QueryJobConfig] = None) -> None:
         self.query = self.client.query(raw_query, location="europe-west2", project="jinjat-demo",
                                        job_config=config)
 
-    def execute(self, ast: sqlglot.exp.Expression, locations: typing.Dict[sqlglot.exp.Table, str], file_data = None) -> None:
+
+    def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor,
+                locations: typing.Dict[sqlglot.exp.Table, str]) -> None:
         sql = ast.transform(self.replace_full_reference_as_table).sql(dialect="bigquery")
 
         definitions = {'___'.join([part.sql() for part in table.parts]):
                            BigQueryIcebergExecutor._get_config(location) for table, location in locations.items()}
-        self.execute_raw(sql, bigquery.QueryJobConfig(table_definitions=definitions))
+        self.execute_raw(sql, catalog_executor)
 
     @staticmethod
     def _get_config(location: str) -> ExternalConfig:
@@ -78,17 +79,17 @@ class BigQueryIcebergExecutor(Executor):
         self.result
 
 
+@register(name="bigquery")
 class BigQueryCatalog(ICatalog):
 
-    def __init__(self, context: dict, session_id: str, credentials: dict, compute: dict):
-        super().__init__(context, session_id, credentials, compute)
+    def __init__(self, session : UniverSQLSession, compute: dict):
+        super().__init__(session, compute)
         self.tables = None
-
-    def executor(self) -> Executor:
-        return BigQueryIcebergExecutor(self)
 
     def register_locations(self, tables: Locations):
         self.tables = tables
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]):
         raise UnsupportedOperationException("BigQuery does not support registering tables")
+    def executor(self) -> Executor:
+        return BigQueryIcebergExecutor(self)

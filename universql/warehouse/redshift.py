@@ -4,15 +4,15 @@ from typing import List
 import sqlglot
 from duckdb.experimental.spark.errors import UnsupportedOperationException
 from snowflake.connector.options import pyarrow
-from sqlglot.expressions import Select, Insert, Create
 
-from universql.util import Catalog
-from universql.warehouse import ICatalog, Executor, Locations, Tables
+from universql.protocol.session import UniverSQLSession
+from universql.plugin import ICatalog, Executor, Locations, Tables, register
 
 
+@register(name="redshift")
 class RedshiftCatalog(ICatalog):
-    def __init__(self, context, session_id: str, credentials: dict, compute: dict, iceberg_catalog: Catalog):
-        super().__init__(context, session_id, credentials, compute, iceberg_catalog)
+    def __init__(self, session: UniverSQLSession, compute: dict):
+        super().__init__(session, compute)
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         raise UnsupportedOperationException("BigQuery does not support registering tables")
@@ -21,17 +21,16 @@ class RedshiftCatalog(ICatalog):
         pass
 
     def executor(self) -> Executor:
-        pass
-
+        return RedshiftExecutor(self)
 
 class RedshiftExecutor(Executor):
     def __init__(self, catalog: RedshiftCatalog):
         super().__init__(catalog)
 
-    def execute(self, ast: sqlglot.exp.Expression, locations: Tables, file_data = None) -> typing.Optional[Locations]:
+    def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables) -> typing.Optional[Locations]:
         return None
 
-    def execute_raw(self, raw_query: str) -> None:
+    def execute_raw(self, raw_query: str, catalog_executor: Executor) -> None:
         pass
 
     def get_as_table(self) -> pyarrow.Table:

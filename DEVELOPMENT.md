@@ -1,3 +1,9 @@
+# Running Github Actions locally
+
+```shell
+act push --container-architecture linux/amd64 --secret-file .env.act --workflows ./.github/workflows/test.yml --insecure-secrets
+```
+
 # [DRAFT] Transformers
 
 If you would like to enable custom logic inside Universql,  to support transition in between different dialects or just 
@@ -74,13 +80,13 @@ For stage integration, something like:
 class SnowflakeStageTransformer(Transformer):
     def __init__(self, source_engine: SnowflakeCatalog, target_engine: DuckDBCatalog):
         super().__init__(source_engine, target_engine)
-        
+
     def transform_sql(self, ast: Expression) -> Expression:
         if isinstance(ast, sqlglot.exp.Var) and ast.name.startswith('@'):
             # transform into full path and create secret on duckdb
             self.target_engine.duckdb.sql("select from stage information_schema.stages where ..")
             if not_exists:
-                self.source_engine.executor().execute_raw("get stage info from fs")
+                self.source_engine.executor().execute_raw(, "get stage info from fs"
                 self.target_engine.duckdb.sql("INSERT INTO information_schema.stages ...")
             return new_ast_with_full_path
         return ast

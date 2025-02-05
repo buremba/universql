@@ -31,7 +31,8 @@ def cli():
 @click.option('--account',
               help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
               prompt='Account ID (example: rt21601.europe-west2.gcp)', envvar='SNOWFLAKE_ACCOUNT')
-@click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, envvar='SERVER_PORT', type=int)
+@click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, envvar='SERVER_PORT',
+              type=int)
 @click.option('--host', help='Host for Snowflake proxy server (default: localhostcomputing.com)',
               default=LOCALHOSTCOMPUTING_COM,
               envvar='SERVER_HOST',
@@ -105,12 +106,15 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, metrics_p
                 f"it's {adjective} a {context__params['catalog']} server.")
 
     if host == LOCALHOSTCOMPUTING_COM:
-        data = socket.gethostbyname_ex(LOCALHOSTCOMPUTING_COM)
-        logger.info(f"Using the SSL keyfile and certfile for localhostcomputing.com. DNS resolves to {data}")
-        if "127.0.0.1" not in data[2]:
-            logger.error(
-                "The DNS setting for localhostcomputing.com doesn't point to localhost, refusing to start. Please update UniverSQL.")
-            sys.exit(1)
+        try:
+            data = socket.gethostbyname_ex(LOCALHOSTCOMPUTING_COM)
+            logger.info(f"Using the SSL keyfile and certfile for {LOCALHOSTCOMPUTING_COM}. DNS resolves to {data}")
+            if "127.0.0.1" not in data[2]:
+                logger.error(
+                    f"The DNS setting for f{LOCALHOSTCOMPUTING_COM} doesn't point to localhost, refusing to start. Please update UniverSQL.")
+                sys.exit(1)
+        except socket.gaierror as e:
+            logger.warning(f"Unable to resolve DNS for {LOCALHOSTCOMPUTING_COM}, you're not connected to the internet")
 
     if tunnel == 'cloudflared':
         start_cloudflared(port, metrics_port)

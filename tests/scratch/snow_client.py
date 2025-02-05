@@ -27,7 +27,7 @@ def measure_all(cur, query):
     # cur.execute(
     #     "select min(convert_timezone('UTC', start_time)) from MY_CUSTOM_APP.SNOWFLAKE_COST_UNIVERSQL.stg_metering_history")
     # cur.execute("create or replace iceberg table ICEBERG_TESTS.PUBLIC.ttt EXTERNAL_VOLUME='iceberg_jinjat' CATALOG='SNOWFLAKE' BASE_LOCATION='ttt' as select * from ICEBERG_TESTS.TPCH_SF1.ORDERS  limit 1")
-    cur.execute(query)
+    cur.execute(, query,
     pandas_all = cur.fetch_pandas_all()
     print(pandas_all)
 
@@ -99,7 +99,7 @@ tt(1)
 
 # cur.execute("select count(*) from MY_ICEBERG_JINJAT.PUBLIC.MY_MANAGED_ICEBERG_TABLE")
 # cur.execute("SELECT seq4(), uniform(1, 10, RANDOM(12)) FROM TABLE(GENERATOR(ROWCOUNT => 100000)) v ORDER BY 1")
-cur.execute("""
+cur.execute(, """
 SELECT
         -- Numeric data types
         12345678901234567890123456789012345678::NUMBER AS sample_number,
@@ -142,7 +142,7 @@ SELECT
 
         -- Vector data types
         [1.1,2.2,3]::VECTOR(FLOAT,3) AS sample_vector
-""")
+""",
 # # cur.execute("""SELECT * FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));""")
 # cur.execute("""
 #

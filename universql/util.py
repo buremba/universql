@@ -1,5 +1,6 @@
 import datetime
 import gzip
+import importlib
 import json
 import logging
 import os
@@ -402,10 +403,10 @@ def parse_compute(warehouse):
     if warehouse is not None:
         matches = re.findall(pattern, warehouse)
         if len(matches) == 0:
-            matches = (('local', ''), ('snowflake', f'warehouse={warehouse}'))
+            matches = (('duckdb', ''), ('snowflake', f'warehouse={warehouse}'))
     else:
         # try locally if warehouse is not provided
-        matches = (('local', ''), )
+        matches = (('duckdb', ''), )
 
     result = []
     for func_name, args_str in matches:
@@ -473,106 +474,20 @@ def full_qualifier(table: sqlglot.exp.Table, credentials: dict):
     new_table = sqlglot.exp.Table(catalog=catalog, db=db, this=table.this)
     return new_table
 
-def get_profile_for_role(aws_role_arn):
-    # Get credentials file location and read TOML file
-    creds_file = get_credentials_file_location()
-    try:
-        config = configparser.ConfigParser()
-        config.read(creds_file)
-    except Exception as e:
-        raise Exception(f"Failed to read credentials file: {str(e)}")
-    
-    # Find which profile has our target role_arn
-    target_profile = None
-    for profile_name in config.sections():
-        profile_data = config[profile_name]
 
-        if profile_data.get('role_arn') == aws_role_arn:
-            target_profile = profile_name
-            break
-    
-    if not target_profile:
-        if not target_profile:
-            # Try default profile if target role not found
-            if config.has_section('default'):
-                return _find_profile_with_credentials('default', config, creds_file)
-        raise Exception(
-            f"We were unable to find credentials for {aws_role_arn} in {creds_file}."
-            "Please make sure you have this role_arn in your credentials file or have a default profile configured."
-            "You can set the environment variable AWS_SHARED_CREDENTIALS_FILE to a different credentials file location."
-        )
-    
-    return _find_profile_with_credentials(target_profile, config, creds_file)
+MODULES = [
+    "universql.warehouse.duckdb",
+    "universql.warehouse.bigquery",
+    "universql.warehouse.snowflake",
+    "universql.warehouse.snowflake",
+]
 
-def _find_profile_with_credentials(profile_name, config, creds_file, visited=None):
+def load_catalogs():
     """
-    Recursive function to find the appropriate profile to use, following source_profile references if needed.
-    
-    Args:
-        profile_name: Name of profile to check
-        config: Configuration dictionary from config file
-        creds_file: Path to credentials file
-        visited: Set of profiles already checked (prevents infinite loops)
-    
-    Returns:
-        str: The name of the profile to use with boto3.Session
+    Import a predefined list of modules.
     """
-    credentials_not_found_message = f"""The profile {profile_name} cannot be found in your credentials file located at {creds_file}.
-    Please update your credentials and try again."""
-
-    # Initialize visited profiles set on first call
-    if visited is None:
-        visited = set()
-    
-    # Check for circular dependencies    
-    if profile_name in visited:
-        raise Exception(
-            f"You have a circular dependency in your credentials file between the following profiles that you need to correct:"
-            f"{", ".join(visited)}"
-        )
-    visited.add(profile_name)
-    
-    # Get profile data
-    if not config.has_section(profile_name):
-        raise Exception(credentials_not_found_message)
-    
-    # If profile has source_profile, return that instead
-    if config.has_option(profile_name, 'source_profile'):
-        source_profile = config.get(profile_name, 'source_profile')
-        if not config.has_section(source_profile):
-            raise Exception(f"Source profile {source_profile} referenced by {profile_name} does not exist")
-        return source_profile
-    
-    # Otherwise return the profile itself
-    return profile_name
-
-def get_credentials_file_location():
-    # Check for environment variable
-    credentials_file_location = os.environ.get("AWS_SHARED_CREDENTIALS_FILE")
-    if credentials_file_location is not None:
-        return os.path.expandvars(os.path.expanduser(credentials_file_location))
-    
-    # fallback to default if it's not set
-    operating_system = platform.system()
-    credentials_file_location = DEFAULT_CREDENTIALS_LOCATIONS.get(operating_system)
-    if credentials_file_location is not None:
-        return os.path.expandvars(os.path.expanduser(credentials_file_location))
-    
-    raise Exception(
-        "Universql is unable to determine your credentials file location."
-        "Please set the environment variable AWS_SHARED_CREDENTIALS_FILE to your credentials file location and try again."
-    )
-
-def get_role_credentials(profile_name):
-    """
-    Gets credentials directly from the profile
-    """
-    session = boto3.Session(profile_name=profile_name)
-    
-    credentials = session.get_credentials().get_frozen_credentials()
-    
-    return {
-        'AccessKeyId': credentials.access_key,
-        'SecretAccessKey': credentials.secret_key,
-        'SessionToken': credentials.token if hasattr(credentials, 'token') else None
-    }
+    for module_path in MODULES:
+        try:
+            __import__(module_path)
+        except Exception as e:
+            print(f"Failed to load {module_path}: {e}")

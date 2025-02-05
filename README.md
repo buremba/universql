@@ -1,4 +1,4 @@
-# Execute Snowflake queries locally on DuckDB
+# 10x more efficient Snowflake compute
 
 UniverSQL is a Snowflake proxy that allows you to run SQL queries **locally** on Snowflake Iceberg tables and Polaris catalog, using DuckDB. 
 You can join Snowflake data with your local datasets, **without any need for a running warehouse**.
