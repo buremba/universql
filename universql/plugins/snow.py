@@ -921,24 +921,6 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
                 pass
         return files
 
-    def cleanup_cache(self, monitored_dirs):
-        """
-        Removes files in the monitored directories. 
-        
-        Args:
-            before_snapshot: Set of file paths that existed before COPY
-            monitored_dirs: List of directory paths to clean up
-            
-        Note:
-            Logs warnings for files it fails to remove but continues execution
-        """        
-        files_in_cache = self._get_cache_snapshot(monitored_dirs)
-        for file_path in files_in_cache:
-            try:
-                os.remove(file_path)
-            except (FileNotFoundError, PermissionError):
-                print(f"Could not remove cached file: {file_path}")
-
     def _load_file_format(self, file_format):
         file_format_queries = {
             "JSON": ["INSTALL json;", "LOAD json;"],

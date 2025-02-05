@@ -180,7 +180,6 @@ class UniverSQLSession:
                     locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     current_ast = ast
-                    clear_files_after_execution = None
                     for transform in self.transforms:
                         try:
                             current_ast = transform.transform_sql(current_ast, alternative_executor)
@@ -189,26 +188,20 @@ class UniverSQLSession:
                             message = f"Unable to perform transformation {transform.__class__}"
                             logger.error(message, exc_info=e)
                             raise QueryError(f"{message}: {str(e)}")
+                    max_query_attempts = 1
                     if isinstance(ast, Copy):
-                        stage_plugin = next(transform for transform in self.transforms 
-                            if transform.__class__.__name__ == "SnowflakeStageUniversqlPlugin") 
-                        before_query_snapshot = stage_plugin.get_snapshot_of_copy_file_directories(ast)
-                        clear_files_after_execution = True
-                    query_attempts = 0
-                    try:
-                        while query_attempts < 1:
-                            try:                      
-                                new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
-                                break
-                            except Exception as e:
-                                print(f"There was an issue executing this query: {e}. Trying again.")
-                                query_attempts += 1
-                                if query_attempts == 3:
-                                    raise e  # Re-raise the last exception if all attempts fail
-                                time.sleep(query_attempts * 1.0/2)                            
-                    finally:
-                        if clear_files_after_execution == True and stage_plugin is not None and before_query_snapshot is not None:
-                            stage_plugin.cleanup_cache(before_query_snapshot)
+                        max_query_attempts = 3
+                    query_attempt = 0
+                    while query_attempt < max_query_attempts:
+                        try:                      
+                            new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
+                            break
+                        except Exception as e:
+                            print(f"There was an issue executing this query: {e}. Trying again.")
+                            query_attempt += 1
+                            if query_attempt >= max_attempts:
+                                raise e  # Re-raise the last exception if all attempts fail
+                            time.sleep(query_attempt * 1.0/2)                            
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
                         self.catalog.register_locations(new_locations)
