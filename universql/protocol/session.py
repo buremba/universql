@@ -199,7 +199,7 @@ class UniverSQLSession:
                         except Exception as e:
                             print(f"There was an issue executing this query: {e}. Trying again.")
                             query_attempt += 1
-                            if query_attempt >= max_attempts:
+                            if query_attempt >= max_query_attempts:
                                 raise e  # Re-raise the last exception if all attempts fail
                             time.sleep(query_attempt * 1.0/2)                            
                 if new_locations is not None:
