@@ -1098,3 +1098,37 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             'SecretAccessKey': credentials.secret_key,
             'SessionToken': credentials.token if hasattr(credentials, 'token') else None
         }
+
+    def format_credentials(self, sql: str) -> str:
+        """Fix credentials section of SQL by adding commas between key-value pairs if missing"""
+        pattern = r'CREDENTIALS\s*=\s*\((.*?)\)'
+        matches = list(re.finditer(pattern, sql, re.IGNORECASE))
+
+        if len(matches) > 1:
+            raise Exception("Invalid SQL: CREDENTIALS specified multiple times")
+        elif len(matches) == 0:
+            return sql
+
+        def fix_pairs(match):
+            full_match = match.group(0)
+            pairs = re.findall(r'(\w+\s*=\s*\'[^\']*\')', full_match)
+            if len(pairs) <= 1:
+                return full_match
+
+            result = full_match
+            for i in range(len(pairs)-1):
+                pair_end = result.find(pairs[i]) + len(pairs[i])
+                next_pair_start = result.find(pairs[i+1])
+                if ',' not in result[pair_end:next_pair_start]:
+                    result = result[:pair_end] + ', ' + result[next_pair_start:]
+
+            return result
+
+        return re.sub(pattern, fix_pairs, sql, flags=re.IGNORECASE)
+
+
+    # runs sql formatting operations that will result in exceptions otherwise
+    def format_sql_for_sqlglot(self, sql: str) -> str:
+        """Format SQL to ensure it can be parsed by sqlglot"""
+        return self.format_credentials(sql)
+        # def convert_stage_params()
