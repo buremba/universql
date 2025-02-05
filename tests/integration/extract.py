@@ -5,45 +5,25 @@ from snowflake.connector import ProgrammingError
 
 from tests.integration.utils import execute_query, universql_connection, SIMPLE_QUERY, ALL_COLUMNS_QUERY
 
-def generate_name_variants(name):
-    lowercase = name.lower()
-    uppercase = name.upper()
-    mixed_case = name.capitalize()
-    in_quotes = '"' + name.upper() + '"'
-    return [lowercase, uppercase, mixed_case, in_quotes]
+class TestConnectivity:
+    def test_invalid_auth(self):
+        with universql_connection(password="invalidPass") as conn:
+            with pytest.raises(ProgrammingError, match="Incorrect username or password was specified"):
+                execute_query(conn, "SHOW TABLES LIMIT 1")
 
-def generate_select_statement_combos(table, schema = None, database = None):
-    select_statements = []
-    table_variants = generate_name_variants(table)
+        with universql_connection(password="invalidPass") as conn:
+            with pytest.raises(ProgrammingError, match="Incorrect username or password was specified"):
+                execute_query(conn, "SELECT 1")
 
-    if database is not None:
-        database_variants = generate_name_variants(database)
-        schema_variants = generate_name_variants(schema)
-        object_name_combos = product(database_variants, schema_variants, table_variants)
-        for db_name, schema_name, table_name in object_name_combos:
-            select_statements.append(f"SELECT * FROM {db_name}.{schema_name}.{table_name}")
-    else:
-        if schema is not None:
-            schema_variants = generate_name_variants(schema)
-            object_name_combos = product(schema_variants, table_variants)
-            for schema_name, table_name in object_name_combos:
-                select_statements.append(f"SELECT * FROM {schema_name}.{table_name}")
-        else:
-            for table_variant in table_variants:
-                select_statements.append(f"SELECT * FROM {table_variant}")
-    return select_statements
+        with universql_connection(password="invalidPass") as conn:
+            with pytest.raises(ProgrammingError, match="Incorrect username or password was specified"):
+                execute_query(conn, "CREATE TEMP TABLE test_table AS SELECT 1 as t; SELECT * FROM test_table;")
 
 
 class TestSelect:
     def test_simple_select(self):
         with universql_connection() as conn:
             universql_result = execute_query(conn, SIMPLE_QUERY)
-            print(universql_result)
-
-    @pytest.mark.skip(reason="Stages are not implemented yet")
-    def test_from_stage(self):
-        with universql_connection() as conn:
-            universql_result = execute_query(conn, "select count(*) from @stage/iceberg_stage")
             print(universql_result)
 
     def test_complex_select(self):
@@ -81,7 +61,43 @@ class TestSelect:
             result = execute_query(conn, "select 1 union all select 2")
             assert result.num_rows == 2
 
-    def test_copy_into(self):
+
+    def test_stage(self):
+        with universql_connection(warehouse=None, database="MY_ICEBERG_JINJAT", schema="TPCH_SF1") as conn:
+            result = execute_query(conn, """
+            select * FROM @clickhouse_public_data_stage/ limit 1
+            """)
+            # result = execute_query(conn, "select * from @iceberg_db.public.landing_stage/initial_objects/device_metadata.csv")
+            assert result.num_rows > 0
+
+    def test_copy_into_for_ryan(self):
+        with universql_connection(snowflake_connection_name='ryan_snowflake', warehouse=None, database="ICEBERG_DB") as conn:
+
+            result = execute_query(conn, """
+                CREATE OR REPLACE TEMPORARY TABLE DEVICE_METADATA_REF (
+                device_id VARCHAR,
+                device_name VARCHAR,
+                device_type VARCHAR,
+                manufacturer VARCHAR,
+                model_number VARCHAR,
+                firmware_version VARCHAR,
+                installation_date DATE,
+                location_id VARCHAR,
+                location_name VARCHAR,
+                facility_zone VARCHAR,
+                is_active BOOLEAN,
+                expected_lifetime_months INT,
+                maintenance_interval_days INT,
+                last_maintenance_date DATE
+            );
+
+             COPY INTO DEVICE_METADATA_REF
+             FROM @iceberg_db.public.landing_stage/initial_objects/device_metadata.csv
+             FILE_FORMAT = (SKIP_HEADER = 1);
+             """)
+            assert result.num_rows != 0
+
+    def test_clickbench(self):
         with universql_connection(warehouse=None) as conn:
             result = execute_query(conn, """
             CREATE TEMP TABLE hits2 AS SELECT 
@@ -196,5 +212,4 @@ class TestSelect:
             """)
 
             result = execute_query(conn, "select count(*) from hits2")
-
             assert result.num_rows == 10

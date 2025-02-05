@@ -19,6 +19,7 @@ import yaml
 
 from fastapi import FastAPI
 from pyarrow import Schema
+from snowflake.connector import DatabaseError
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, HTMLResponse
@@ -275,14 +276,14 @@ async def query_request(request: Request) -> JSONResponse:
     except QueryError as e:
         # print_exc(limit=1)
         return JSONResponse({"id": query_id, "success": False, "message": e.message, "data": {"sqlState": e.sql_state}})
-    except snowflake.connector.DatabaseError as e:
+    except DatabaseError as e:
         print_exc(limit=10)
         return JSONResponse({"id": query_id, "success": False,
                              "message": f"Error running query on Snowflake: {e.raw_msg}",
                              "data": {"sqlState": e.sqlstate}})
     except Exception as e:
         if not isinstance(e, HTTPException):
-            print_exc(limit=1)
+            print_exc(limit=10)
             if query is not None:
                 logger.exception(f"Error processing query: {query}")
             else:

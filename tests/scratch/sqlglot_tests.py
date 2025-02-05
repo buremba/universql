@@ -18,7 +18,6 @@ from universql.warehouse.snowflake import SnowflakeCatalog
 
 # SELECT ascii(t.$1), ascii(t.$2) FROM 's3://fullpath' (file_format_for_duckdb => myformat) t;
 
-SnowflakeStageTransformer(SnowflakeCatalog())
 one = sqlglot.parse_one("SELECT ascii(t.$1), ascii(t.$2) FROM @mystage1 (file_format => myformat) t;", read="snowflake")
 two = sqlglot.parse_one("""COPY INTO stg_device_metadata
 FROM @iceberg_db.public.landing_stage/initial_objects/
@@ -28,14 +27,15 @@ FILE_FORMAT = (TYPE = CSV SKIP_HEADER = 1);""", read="snowflake")
 
 class FixTimestampTypes(UniversqlPlugin):
 
-    def transform_sql(self, expression, target_executor: Executor):
-        if isinstance(target_executor, DuckDBExecutor) and isinstance(expression, sqlglot.exp.DataType):
-            if expression.this.value in ["TIMESTAMPLTZ", "TIMESTAMPTZ"]:
-                return sqlglot.exp.DataType.build("TIMESTAMPTZ")
-            if expression.this.value in ["VARIANT"]:
-                return sqlglot.exp.DataType.build("JSON")
+    def transform_sql(self, ast, target_executor: Executor):
+        def fix_timestamp_types(expression):
+            if isinstance(target_executor, DuckDBExecutor) and isinstance(expression, sqlglot.exp.DataType):
+                if expression.this.value in ["TIMESTAMPLTZ", "TIMESTAMPTZ"]:
+                    return sqlglot.exp.DataType.build("TIMESTAMPTZ")
+                if expression.this.value in ["VARIANT"]:
+                    return sqlglot.exp.DataType.build("JSON")
 
-        return expression
+        return ast.transform(fix_timestamp_types)
 
 
 class RewriteCreateAsIceberg(UniversqlPlugin):

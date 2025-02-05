@@ -107,11 +107,11 @@ def universql_connection(**properties) -> SnowflakeConnection:
     account = connection.get('account')
     if account in server_cache:
         uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": server_cache[account]} | properties
+        print(f"Reusing existing server running on port {server_cache[account]} for account {account}")
     else:
         from universql.main import snowflake
         with socketserver.TCPServer(("localhost", 0), None) as s:
             free_port = s.server_address[1]
-        print(f"Reusing existing server running on port {free_port} for account {account}")
 
         def start_universql():
             runner = CliRunner()
@@ -135,6 +135,7 @@ def universql_connection(**properties) -> SnowflakeConnection:
 
     connect = None
     try:
+        print(snowflake_connection_name, uni_string)
         connect = snowflake_connect(connection_name=snowflake_connection_name, **uni_string)
         yield connect
     finally:
@@ -186,56 +187,7 @@ def compare_results(snowflake_result: pyarrow.Table, universql_result: pyarrow.T
     print("Results match perfectly!")
 
 
-def generate_name_variants(name, include_blank=False):
-    lowercase = name.lower()
-    uppercase = name.upper()
-    mixed_case = name.capitalize()
-    in_quotes = '"' + name.upper() + '"'
-    print([lowercase, uppercase, mixed_case, in_quotes])
-    return [lowercase, uppercase, mixed_case, in_quotes]
-
-
-def generate_select_statement_combos(sets_of_identifiers, connected_db=None, connected_schema=None):
-    select_statements = []
-    for set in sets_of_identifiers:
-        set_of_select_statements = []
-        database = set.get("database")
-        schema = set.get("schema")
-        table = set.get("table")
-        if table is not None:
-            table_variants = generate_name_variants(table)
-            if database == connected_db and schema == connected_schema:
-                for table_variant in table_variants:
-                    set_of_select_statements.append(f"SELECT * FROM {table_variant}")
-        else:
-            raise Exception("No table name provided for a select statement combo.")
-
-        if schema is not None:
-            schema_variants = generate_name_variants(schema)
-            if database == connected_db:
-                object_name_combos = product(schema_variants, table_variants)
-                for schema_name, table_name in object_name_combos:
-                    set_of_select_statements.append(f"SELECT * FROM {schema_name}.{table_name}")
-        else:
-            if database is not None:
-                raise Exception("You must provide a schema name if you provide a database name.")
-
-        if database is not None:
-            database_variants = generate_name_variants(database)
-            object_name_combos = product(database_variants, schema_variants, table_variants)
-            for db_name, schema_name, table_name in object_name_combos:
-                set_of_select_statements.append(f"SELECT * FROM {db_name}.{schema_name}.{table_name}")
-        select_statements = select_statements + set_of_select_statements
-        logger.info(f"database: {database}, schema: {schema}, table: {table}")
-        for statement in set_of_select_statements:
-            logger.info(statement)
-        # logger.info(f"database: {database}, schema: {schema}, table: {table}")
-
-    return select_statements
-
-
 def _set_connection_name(connection_dict={}):
     snowflake_connection_name = connection_dict.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
     logger.info(f"Using the {snowflake_connection_name} connection")
     return snowflake_connection_name
-

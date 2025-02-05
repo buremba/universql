@@ -8,12 +8,14 @@ from tests.integration.utils import execute_query, universql_connection, SIMPLE_
 
 class TestCreate:
     def test_create_iceberg_table(self):
-        EXTERNAL_VOLUME_NAME = os.getenv("EXTERNAL_VOLUME_NAME")
+        external_volume = os.getenv("PYTEST_EXTERNAL_VOLUME")
+        if external_volume is None:
+            pytest.skip("No external volume provided, set PYTEST_EXTERNAL_VOLUME")
 
         with universql_connection(warehouse=None) as conn:
             execute_query(conn, f"""
             CREATE OR REPLACE ICEBERG TABLE test_iceberg_table
-            external_volume = {EXTERNAL_VOLUME_NAME}
+            external_volume = {external_volume}
             catalog = 'SNOWFLAKE'
             BASE_LOCATION = 'test_iceberg_table'
             AS {SIMPLE_QUERY}
@@ -33,7 +35,3 @@ class TestCreate:
         with universql_connection(warehouse=None) as conn:
             with pytest.raises(ProgrammingError, match="DuckDB can't create native Snowflake tables"):
                 execute_query(conn, f"CREATE TABLE test_native_table AS {SIMPLE_QUERY}")
-
-    @pytest.mark.skip(reason="not implemented")
-    def test_create_stage(self):
-        pass

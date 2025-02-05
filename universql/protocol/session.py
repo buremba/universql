@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 from string import Template
+from traceback import print_exc
 from typing import List
 from urllib.parse import urlparse, parse_qs
 
@@ -14,12 +15,13 @@ from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
 from sqlglot import ParseError
-from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon
+from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon, Copy
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError, full_qualifier
 from universql.plugin import Executor, Tables, ICatalog, COMPUTES, TRANSFORMS, UniversqlPlugin
+
 
 logger = logging.getLogger("💡")
 
@@ -38,8 +40,6 @@ class UniverSQLSession:
         self.catalog = COMPUTES["snowflake"](self, first_catalog_compute or {})
         self.catalog_executor = self.catalog.executor()
         self.computes = {"snowflake": self.catalog_executor}
-
-        self.last_executor_cursor = None
         self.processing = False
         self.metadata_db = None
         self.transforms : List[UniversqlPlugin] = [transform(self.catalog_executor) for transform in TRANSFORMS]
@@ -181,8 +181,13 @@ class UniverSQLSession:
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     current_ast = ast
                     for transform in self.transforms:
-                        current_ast = current_ast.transform(transform.transform_sql, alternative_executor)
-
+                        try:
+                            current_ast = transform.transform_sql(current_ast, alternative_executor)
+                        except Exception as e:
+                            print_exc(10)
+                            message = f"Unable to perform transformation {transform.__class__}"
+                            logger.error(message, exc_info=e)
+                            raise QueryError(f"{message}: {str(e)}")
                     new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):

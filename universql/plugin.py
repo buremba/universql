@@ -1,11 +1,9 @@
+import functools
 import inspect
 
 import pyarrow
-from asgiref.sync import AsyncToSync
 from fastapi import FastAPI
 from sqlglot import Expression
-from starlette.requests import Request
-from starlette.responses import Response
 
 import typing
 from abc import ABC, abstractmethod
@@ -41,16 +39,34 @@ class ICatalog(ABC):
 
 T = typing.TypeVar('T', bound=ICatalog)
 
+def _track_call(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        # Mark that the method was called on this instance.
+        self._warm = True
+        return method(self, *args, **kwargs)
+    return wrapper
 
 class Executor(typing.Protocol[T]):
 
     def __init__(self, catalog: T):
         self.catalog = catalog
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls.execute = _track_call(cls.execute)
+        cls.execute_raw = _track_call(cls.execute_raw)
+
+    def is_warm(self):
+        return getattr(self, '_warm', False)
+
     @abstractmethod
     def execute(self, ast: sqlglot.exp.Expression, catalog_executor: "Executor", locations: Tables) -> \
             typing.Optional[Locations]:
         pass
+
+    def test(self):
+        self.execute_raw("select 1", None)
 
     @abstractmethod
     def execute_raw(self, raw_query: str, catalog_executor: typing.Optional["Executor"]) -> None:

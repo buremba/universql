@@ -4,7 +4,7 @@ import re
 import typing
 from enum import Enum
 from string import Template
-from typing import List
+from typing import List, Sequence, Any
 
 import duckdb
 import pyiceberg.table
@@ -19,13 +19,16 @@ from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
     Var, Literal, IcebergProperty, Use, ColumnDef, DataType, Copy
-from sqlglot.optimizer.simplify import simplify
 
 from universql.lake.cloud import s3, gcs, in_lambda
 from universql.protocol.session import UniverSQLSession
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
 from universql.plugin import ICatalog, Executor, Locations, Tables, register
+from pprint import pp
+
+# remove later
+import shutil
 
 logger = logging.getLogger("🐥")
 
@@ -38,7 +41,7 @@ class TableType(Enum):
 @register(name="duckdb")
 class DuckDBCatalog(ICatalog):
 
-    def __init__(self, session : UniverSQLSession, compute: dict):
+    def __init__(self, session: UniverSQLSession, compute: dict):
         super().__init__(session, compute)
         duck_config = {
             'temp_directory': os.path.join(session.context.get('cache_directory'), "duckdb-staging"),
@@ -103,7 +106,7 @@ class DuckDBCatalog(ICatalog):
         if table_exists[0] is None:
             return TableType.LOCAL
 
-        match = re.search(r'CREATE VIEW (?:["\w]+\.)?[\w.]+ AS SELECT \* FROM iceberg_scan\(\'(s3://[^\']+)\'\);',
+        match = re.search(r"CREATE VIEW (?:[\"\w]+\.)?[\w.]+ AS SELECT \* FROM iceberg_scan\('([a-zA-Z]+://[^\']+)'\);",
                           table_exists[0])
         if match is not None:
             return TableType.ICEBERG
@@ -114,8 +117,10 @@ class DuckDBCatalog(ICatalog):
         raise Exception("Unsupported operation")
 
     def _register_data_lake(self, args: dict):
-        self.duckdb.register_filesystem(s3(args))
-        self.duckdb.register_filesystem(gcs(args))
+        if args.get('aws_profile') is not None or self.account.cloud == 'aws':
+            self.duckdb.register_filesystem(s3(args))
+        if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
+            self.duckdb.register_filesystem(gcs(args))
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         native_tables = {}
@@ -130,10 +135,12 @@ class DuckDBCatalog(ICatalog):
     def executor(self) -> Executor:
         return DuckDBExecutor(self)
 
+
 class DuckDBExecutor(Executor):
 
     def __init__(self, catalog: DuckDBCatalog):
         super().__init__(catalog)
+        self.is_last_raw = False
 
     def get_query_log(self, total_duration) -> str:
         if in_lambda:
@@ -144,11 +151,16 @@ class DuckDBExecutor(Executor):
             cost = calculate_script_cost(total_duration)
             return f"Run locally on DuckDB: {cost}"
 
-    def execute_raw(self, raw_query: str, catalog_executor: Executor) -> None:
+    def execute_raw(self, raw_query: str, catalog_executor: Executor, is_raw: bool = False) -> None:
         try:
             logger.info(
                 f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
-            self.catalog.emulator.execute(raw_query)
+
+            if is_raw:
+                self.catalog.duckdb.execute(raw_query)
+            else:
+                self.catalog.emulator.execute(raw_query)
+            self.is_last_raw = is_raw
         except duckdb.HTTPException as e:
             if e.status_code == 403:
                 raise QueryError(f"Access denied: {e.args[0]}")
@@ -174,8 +186,7 @@ class DuckDBExecutor(Executor):
 
     def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
         self._sync_catalog(locations)
-        final_ast = (simplify(ast)
-                     .transform(self.fix_snowflake_to_duckdb_types))
+        final_ast = ast.transform(self.fix_snowflake_to_duckdb_types)
 
         return final_ast
 
@@ -228,7 +239,13 @@ class DuckDBExecutor(Executor):
                                                                 Var) and expression.this.this.casefold() == name.casefold()),
             None)
 
-    def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables) -> typing.Optional[Locations]:
+    def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables) -> typing.Optional[
+        Locations]:
+        if not catalog_executor.is_warm():
+            # since duckdb doesn't implement auth layer,
+            # force the catalog to perform auth before executing any query
+            catalog_executor.test()
+
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this
@@ -267,7 +284,7 @@ class DuckDBExecutor(Executor):
                             table_location = str(os.path.join(database_location, base_location))
                         elif base_location is not None:
                             external_volume = self._get_property(ast, 'external_volume')
-                            lake_path = base_location.catalog.get_volume_lake_path(external_volume)
+                            lake_path = catalog_executor.catalog.get_volume_lake_path(external_volume)
                             # resolve external volume location
                             table_location = str(os.path.join(lake_path, base_location))
                         else:
@@ -303,10 +320,12 @@ class DuckDBExecutor(Executor):
                                     this=sqlglot.exp.parse_identifier(column.name),
                                     kind=DataType.build(str(column.field_type)))
                                     for column in create_iceberg_table.metadata.schema().columns]
-                                schema = Schema()
-                                schema.set('this', ast.this)
-                                schema.set('expressions', column_definitions)
-                                ast.set('this', schema)
+                                if not isinstance(ast.this, Schema):
+                                    # c
+                                    schema = Schema()
+                                    schema.set('this', ast.this)
+                                    schema.set('expressions', column_definitions)
+                                    ast.set('this', schema)
                             properties.expressions.append(
                                 Property(this=Var(this='METADATA_FILE_PATH'), value=Literal.string(metadata_file_path)))
                             return {destination_table: ast}
@@ -340,7 +359,8 @@ class DuckDBExecutor(Executor):
                     table = self.get_as_table()
                     iceberg_table.append(table)
                 elif table_type.LOCAL:
-                    self.execute_raw(self._sync_and_transform_query(ast, locations).sql(dialect="duckdb"), catalog_executor)
+                    self.execute_raw(self._sync_and_transform_query(ast, locations).sql(dialect="duckdb"),
+                                     catalog_executor)
                 else:
                     raise QueryError("Unable to determine table type")
         elif isinstance(ast, Drop):
@@ -366,17 +386,34 @@ class DuckDBExecutor(Executor):
             catalog_executor.catalog.clear_cache()
         elif isinstance(ast, Copy):
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
-            self.catalog.duckdb.execute(sql)
+
+            insert_into_select_ast = sqlglot.parse_one(sql, dialect='duckdb')
+            # refactor soon
+            cache_directory = self.catalog.context.get('cache_directory')
+
+            try:
+                self.execute_raw(sql, catalog_executor, is_raw=isinstance(ast, Copy))
+            finally:
+                self._destroy_cache(cache_directory)
         else:
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
-            self.execute_raw(sql, catalog_executor)
-
+            self.execute_raw(sql, catalog_executor, is_raw=isinstance(ast, Copy))
         return None
 
+    def _destroy_cache(self, cache_directory):
+        shutil.rmtree(cache_directory)
+
+    def get_raw_table(self):
+        if self.is_last_raw:
+            return self.catalog.duckdb.fetch_arrow_table()
+        else:
+            return self.catalog.emulator._arrow_table
+
     def get_as_table(self) -> pyarrow.Table:
-        arrow_table = self.catalog.emulator._arrow_table
+        arrow_table = self.get_raw_table()
         if arrow_table is None:
-            raise QueryError("No result returned from DuckDB")
+            arrow_table = self.catalog.duckdb.sql("select 'no response returned' as message").fetch_arrow_table()
+
         for idx, column in enumerate(self.catalog.duckdb.description):
             array, schema = get_field_from_duckdb(column, arrow_table, idx)
             arrow_table = arrow_table.set_column(idx, schema, array)
