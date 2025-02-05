@@ -22,7 +22,6 @@ from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError, full_qualifier
 from universql.plugin import Executor, Tables, ICatalog, COMPUTES, TRANSFORMS, UniversqlPlugin
 
-from pprint import pp
 
 logger = logging.getLogger("💡")
 
@@ -176,16 +175,12 @@ class UniverSQLSession:
             tables_list = [table[0] for table in tables]
             must_run_on_catalog = must_run_on_catalog or self._must_run_on_catalog(tables_list, ast)
             if not must_run_on_catalog:
-                before_query_snapshot = None
-                clear_files_after_execution = False
-                stage_plugin = None
                 op_name = alternative_executor.__class__.__name__
                 with sentry_sdk.start_span(op=op_name, name="Get table paths"):
                     locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
-                # if isinstance(ast, Copy):
-                #     get_copy_file_directories(ast)
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     current_ast = ast
+                    clear_files_after_execution = None
                     for transform in self.transforms:
                         try:
                             current_ast = transform.transform_sql(current_ast, alternative_executor)
@@ -199,8 +194,18 @@ class UniverSQLSession:
                             if transform.__class__.__name__ == "SnowflakeStageUniversqlPlugin") 
                         before_query_snapshot = stage_plugin.get_snapshot_of_copy_file_directories(ast)
                         clear_files_after_execution = True
-                    try:                      
-                        new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
+                    query_attempts = 0
+                    try:
+                        while query_attempts < 1:
+                            try:                      
+                                new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
+                                break
+                            except Exception as e:
+                                print(f"There was an issue executing this query: {e}. Trying again.")
+                                query_attempts += 1
+                                if query_attempts == 3:
+                                    raise e  # Re-raise the last exception if all attempts fail
+                                time.sleep(query_attempts * 1.0/2)                            
                     finally:
                         if clear_files_after_execution == True and stage_plugin is not None and before_query_snapshot is not None:
                             stage_plugin.cleanup_cache(before_query_snapshot)

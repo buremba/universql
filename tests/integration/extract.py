@@ -33,6 +33,20 @@ def generate_select_statement_combos(table, schema = None, database = None):
                 select_statements.append(f"SELECT * FROM {table_variant}")
     return select_statements
 
+class TestConnectivity:
+    def test_invalid_auth(self):
+        with universql_connection(password="invalidPass") as conn:
+            with pytest.raises(ProgrammingError, match="Incorrect username or password was specified"):
+                execute_query(conn, "SHOW TABLES LIMIT 1")
+
+        with universql_connection(password="invalidPass") as conn:
+            with pytest.raises(ProgrammingError, match="Incorrect username or password was specified"):
+                execute_query(conn, "SELECT 1")
+
+        with universql_connection(password="invalidPass") as conn:
+            with pytest.raises(ProgrammingError, match="Incorrect username or password was specified"):
+                execute_query(conn, "CREATE TEMP TABLE test_table AS SELECT 1 as t; SELECT * FROM test_table;")
+
 
 class TestSelect:
     def test_simple_select(self):

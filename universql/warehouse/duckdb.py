@@ -238,6 +238,11 @@ class DuckDBExecutor(Executor):
             None)
 
     def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables) -> typing.Optional[Locations]:
+        if not catalog_executor.is_warm():
+            # since duckdb doesn't implement auth layer,
+            # force the catalog to perform auth before executing any query
+            catalog_executor.test()
+
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this

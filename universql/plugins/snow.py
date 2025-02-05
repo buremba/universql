@@ -385,8 +385,7 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         new_files = []
         file_type = copy_data["file_parameters"]['format']["duckdb_property_value"]
         if file_type.upper() not in DUCKDB_SUPPORTED_FILE_TYPES:
-            raise Exception(f"DuckDB currently does not support reading from {
-                            file_type} files.")
+            raise Exception(f"DuckDB currently does not support reading from {file_type} files.")
 
         for table in files:
             if isinstance(table, sqlglot.exp.Table) and str(table.this).startswith('@'):
@@ -472,23 +471,6 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
                     url_value = row[3].strip('[]"')
 
         return url_value
-
-    def cleanup_cache(self, monitored_dirs):
-        """
-        Removes files in the monitored directories. 
-        
-        Args:
-            before_snapshot: Set of file paths that existed before COPY
-            monitored_dirs: List of directory paths to clean up
-            
-        Note:
-            Logs warnings for files it fails to remove but continues execution
-        """        
-        for file_path in monitored_dirs:
-            try:
-                os.remove(file_path)
-            except (FileNotFoundError, PermissionError):
-                raise Exception(f"Could not remove cached file: {file_path}")
 
 
     def convert_copy_params_to_read_datatype_params(self, params):
@@ -677,11 +659,10 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         
         if file.get("type").upper() == "STAGE":
             try:
-                cursor.execute(f"DESCRIBE STAGE {file["object_name"]}")
+                cursor.execute(f"DESCRIBE STAGE {file['object_name']}")
                 stage_info = cursor.fetchall()
                 if not stage_info:
-                    raise Exception(f"No metadata returned for stage {
-                                    file["object_name"]}")
+                    raise Exception(f"No metadata returned for stage {file['object_name']}")
             except Exception as e:
                 raise Exception(f"Failed to get stage metadata: {str(e)}")
             stage_info_dict = {}            
@@ -808,7 +789,7 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             # Handle single expression case
             if 'expression' in param.args:
                 expr = param.args['expression']
-                params[param_name] = expr.args['this'].args['this']
+                params[param_name] = expr.args['this']
 
             # Handle multiple expressions case
             elif 'expressions' in param.args:
@@ -843,6 +824,19 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             region_dict = s3.get_bucket_location(Bucket=bucket_name)
             return region_dict.get('LocationConstraint') or 'us-east-1'
 
+    # def describe_stage(self, cursor, stage_name):
+    #     query_attempts = 0
+    #     while query_attempts < 3:
+    #         try:
+    #             cursor.execute(f"DESCRIBE STAGE {stage_name};")
+    #             break
+    #         except Exception as e:
+    #             print(f"There was an issue getting stage data for {stage_name}: {e}. Trying again.")
+    #             query_attempts += 1
+    #             if query_attempts == 3:
+    #                 raise e  # Re-raise the last exception if all attempts fail
+    #             time.sleep(query_attempts * 1.0/2)   
+                
     def get_stage_info(self, file, file_format_params):
         """
         Retrieves and processes Snowflake stage metadata.
@@ -926,6 +920,24 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             except FileNotFoundError:
                 pass
         return files
+
+    def cleanup_cache(self, monitored_dirs):
+        """
+        Removes files in the monitored directories. 
+        
+        Args:
+            before_snapshot: Set of file paths that existed before COPY
+            monitored_dirs: List of directory paths to clean up
+            
+        Note:
+            Logs warnings for files it fails to remove but continues execution
+        """        
+        files_in_cache = self._get_cache_snapshot(monitored_dirs)
+        for file_path in files_in_cache:
+            try:
+                os.remove(file_path)
+            except (FileNotFoundError, PermissionError):
+                print(f"Could not remove cached file: {file_path}")
 
     def _load_file_format(self, file_format):
         file_format_queries = {

@@ -14,7 +14,7 @@ from pyarrow import ArrowInvalid
 from pyiceberg.table import StaticTable
 from pyiceberg.table.snapshots import Summary, Operation
 from pyiceberg.typedef import IcebergBaseModel
-from snowflake.connector import NotSupportedError, DatabaseError
+from snowflake.connector import NotSupportedError, DatabaseError, Error
 from snowflake.connector.constants import FieldType
 from universql.protocol.session import UniverSQLSession
 from universql.protocol.utils import get_field_for_snowflake
@@ -205,12 +205,15 @@ class SnowflakeExecutor(Executor):
             return 'TEXT'
         return snowflake_type.name
 
+    def test(self):
+        return self.catalog.cursor()
+
     def execute_raw(self, raw_query: str, catalog_executor: Executor, run_on_warehouse=None) -> None:
         try:
             emoji = "☁️(user cloud services)" if not run_on_warehouse else "💰(used warehouse)"
             logger.info(f"[{self.catalog.session_id}] Running on Snowflake.. {emoji} \n {raw_query}")
             self.catalog.cursor().execute(raw_query)
-        except DatabaseError as e:
+        except Error as e:
             message = f"{e.sfqid}: {e.msg} \n{raw_query}"
             raise QueryError(message, e.sqlstate)
 

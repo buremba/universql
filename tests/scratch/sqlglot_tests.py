@@ -18,7 +18,6 @@ from universql.warehouse.snowflake import SnowflakeCatalog
 
 # SELECT ascii(t.$1), ascii(t.$2) FROM 's3://fullpath' (file_format_for_duckdb => myformat) t;
 
-SnowflakeStageTransformer(SnowflakeCatalog())
 one = sqlglot.parse_one("SELECT ascii(t.$1), ascii(t.$2) FROM @mystage1 (file_format => myformat) t;", read="snowflake")
 two = sqlglot.parse_one("""COPY INTO stg_device_metadata
 FROM @iceberg_db.public.landing_stage/initial_objects/

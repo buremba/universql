@@ -1,6 +1,7 @@
 import inspect
 import logging
 import os
+import re
 import shutil
 from datetime import timedelta, datetime
 from functools import wraps
@@ -84,6 +85,7 @@ def get_friendly_disk_usage(storage: str, debug=False) -> str:
     last_free = usage.free
     return message
 
+ICEBERG_FILE_REGEX = re.compile('(?i).*/(data|metadata)/.*\.(parquet|avro|json)$')
 
 class MonitoredSimpleCacheFileSystem(SimpleCacheFileSystem):
 
@@ -93,7 +95,7 @@ class MonitoredSimpleCacheFileSystem(SimpleCacheFileSystem):
         self._mapper = FileNameCacheMapper(kwargs.get('cache_storage'))
 
     def _check_file(self, path):
-        self._check_cache()
+        # self._check_cache()
         cache_path = self._mapper(path)
         for storage in self.storage:
             fn = os.path.join(storage, cache_path)
@@ -136,6 +138,17 @@ class MonitoredSimpleCacheFileSystem(SimpleCacheFileSystem):
             return self.fs.size(path)
         else:
             return os.path.getsize(cached_file)
+
+    def open(self, path, mode="rb", **kwargs):
+        """
+        Open a file. If the file's path does not match the cache regex, bypass the
+        caching and read directly from the underlying filesystem.
+        """
+        if not ICEBERG_FILE_REGEX.search(path):
+            # bypass caching.
+            return self.fs.open(path, mode=mode, **kwargs)
+
+        return super().open(path, mode=mode, **kwargs)
 
     def __getattribute__(self, item):
         if item in {

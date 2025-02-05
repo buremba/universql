@@ -107,11 +107,11 @@ def universql_connection(**properties) -> SnowflakeConnection:
     account = connection.get('account')
     if account in server_cache:
         uni_string = {"host": LOCALHOSTCOMPUTING_COM, "port": server_cache[account]} | properties
+        print(f"Reusing existing server running on port {server_cache[account]} for account {account}")
     else:
         from universql.main import snowflake
         with socketserver.TCPServer(("localhost", 0), None) as s:
             free_port = s.server_address[1]
-        print(f"Reusing existing server running on port {free_port} for account {account}")
 
         def start_universql():
             runner = CliRunner()
@@ -135,6 +135,7 @@ def universql_connection(**properties) -> SnowflakeConnection:
 
     connect = None
     try:
+        print(snowflake_connection_name, uni_string)
         connect = snowflake_connect(connection_name=snowflake_connection_name, **uni_string)
         yield connect
     finally:
