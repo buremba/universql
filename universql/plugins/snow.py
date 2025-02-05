@@ -7,7 +7,7 @@ import re
 import boto3
 import sqlglot
 from sqlglot import Expression
-from sqlglot.expressions import CopyParameter, Var, Literal, From, Table, Anonymous, Array, Select, Star, Insert, EQ, Column, Identifier
+from sqlglot.expressions import CopyParameter, Var, Literal, From, Table, Anonymous, Array, Select, Star, Insert, EQ, Column, Identifier, Tuple, Property
 
 from universql.plugin import UniversqlPlugin, register
 from universql.util import full_qualifier, QueryError
@@ -355,9 +355,9 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             return expression
 
         files_list = self._find_files(expression)
-
         processed_file_data_copy = self.get_file_info_copy(files_list, expression)
-
+        # print("processed_file_data_copy INCOMING")
+        # pp(processed_file_data_copy)
         return self.transform_copy_into_insert_into_select(expression, processed_file_data_copy)
 
     def transform_copy_into_insert_into_select(self, expression, copy_data):
@@ -378,6 +378,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             Exception: If file format is not supported by DuckDB
         """
 
+        # print("copy_data INCOMING")
+        # pp(copy_data)
         if not expression.args.get('files'):
             return expression
 
@@ -616,10 +618,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             "file_parameters": {}
         }
 
+        specified_copy_params = self._extract_copy_params(ast)
 
-        if len(files) == 0:
-            return {}
-        specified_copy_params = self._extract_copy_params(ast).get("FILE_FORMAT", {})
         cursor = self.source_executor.catalog.cursor()
         for file in files:
                 
@@ -678,7 +678,11 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
                 }
         else:
             for property_name, property_value in file_format_params.items():
-                copy_params[property_name] = property_value
+                property_info = copy_params.get(property_name.upper())
+                if property_info is None:
+                    continue
+                property_info["snowflake_property_value"] = property_value
+                copy_params[property_name] = property_info
                 
         duckdb_data = self.convert_to_duckdb_properties_copy(copy_params)
 
@@ -722,7 +726,9 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         return all_converted_properties
 
     def convert_properties_copy(self, file_format, snowflake_property_name, snowflake_property_info):
-
+        # print(f"snowflake_property_name INCOMING: {snowflake_property_name}")
+        # print("snowflake_property_info INCOMING")
+        # print(f"{snowflake_property_name}: {snowflake_property_info}")
         no_match = {
             "duckdb_property_name": None,
             "duckdb_property_type": None
@@ -783,24 +789,43 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
 
     def _extract_copy_params(self, ast):
         params = {}
+        pp(ast)
         for param in ast.args.get('params', []):
-            param_name = param.args['this'].args['this']
+            param_name = param.args['this'].args['this']            
+            
 
             # Handle single expression case
             if 'expression' in param.args:
                 expr = param.args['expression']
-                params[param_name] = expr.args['this']
-
+                if isinstance(expr, Literal):
+                    params[param_name] = expr.args['this']
+                    print(f"{param_name} expression Literal")
+                # handle multiple expressions within a single
+                elif isinstance(expr, Tuple):
+                    expressions = expr.args["expressions"]
+                    param_pair = self._iterate_through_expressions(expressions)
+                    params.update(param_pair)
+                    print(f"{param_name} expression Tuple")
             # Handle multiple expressions case
             elif 'expressions' in param.args:
-                params[param_name] = {}
-                for expr in param.args['expressions']:
-                    property_name = expr.args['this'].args['this']
-                    property_value = expr.args['value'].args['this']
-                    params[param_name][property_name] = property_value
-
+                expressions = param.args['expressions']
+                param_pair = self._iterate_through_expressions(expressions)
+                params.update(param_pair)
+                print(f"{param_name} expressions")
         return params
 
+    def _iterate_through_expressions(self, expressions):
+        result = {}
+        for expr in expressions:
+            if isinstance(expr, Property):
+                property_name = expr.args['this'].args['this']
+                property_value = expr.args['value'].args['this'] 
+            elif isinstance(expr, EQ):
+                property_name = expr.args["this"].args["this"].args["this"]
+                property_value = expr.args["expression"].args["this"]
+            result[property_name] = property_value
+        return result
+            
     def get_region(self, profile, url, storage_provider):
         """
         Resolves AWS region for an S3 bucket.
@@ -970,7 +995,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         # Access the files property
         file_nodes = ast.args.get("files", [])
         files = []
-
+        # print("file_nodes INCOMING")
+        # pp(file_nodes)
         for file_node in file_nodes:
             match = False
             if isinstance(file_node, sqlglot.exp.Table) and isinstance(self.source_executor.catalog, SnowflakeCatalog):
@@ -982,7 +1008,14 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
                         'object_name': self.get_stage_name(file_node)
                     })
                     match = True
-
+                else:
+                    files.append({
+                        'file_qualifier': None,
+                        'type': 'URL',
+                        'source_catalog': 'SNOWFLAKE',
+                        'object_name': file_node.this.name
+                    })
+                    match = True
             if isinstance(file_node, sqlglot.exp.Var):
                 print("Ingesting data directly from files is not yet supported.")
                 match = True
