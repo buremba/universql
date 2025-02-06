@@ -21,7 +21,7 @@ from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError, full_qualifier
 from universql.plugin import Executor, Tables, ICatalog, COMPUTES, TRANSFORMS, UniversqlPlugin
-
+from pprint import pp
 
 logger = logging.getLogger("💡")
 
@@ -181,15 +181,18 @@ class UniverSQLSession:
                     locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     current_ast = ast
+                    credentials = {}
                     for transform in self.transforms:
                         try:
-                            current_ast = transform.transform_sql(current_ast, alternative_executor)
+                            ast_dict = transform.transform_sql(current_ast, alternative_executor)
+                            current_ast = ast_dict["final_ast"]
+                            credentials = ast_dict["credentials"]
                         except Exception as e:
                             print_exc(10)
                             message = f"Unable to perform transformation {transform.__class__}"
                             logger.error(message, exc_info=e)
                             raise QueryError(f"{message}: {str(e)}")
-                    new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)                      
+                    new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations, credentials)                      
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
                         self.catalog.register_locations(new_locations)

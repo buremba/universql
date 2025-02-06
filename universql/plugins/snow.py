@@ -351,21 +351,24 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
 
     def transform_sql(self, expression: Expression, target_executor: DuckDBExecutor) -> Expression:
         # Ensure the root node is a Copy node
+        
+        
         if not isinstance(expression, sqlglot.exp.Copy):
-            return expression
+            return {
+                "credentials": None,
+                "final_ast": expression
+            }
 
         files_list = self._find_files(expression)
         processed_file_data_copy = self.get_file_info_copy(files_list, expression)
         
-        prep_queries = self._get_set_duckdb_secret_keys_queries(processed_file_data_copy, target_executor)
-        final_query = self.transform_copy_into_insert_into_select(expression, processed_file_data_copy)
-        
-        to_return = None
-        if prep_queries is not None:
-            return [*prep_queries, final_query]
+        credentials = self._get_credentials_for_copy(processed_file_data_copy, target_executor)
+        final_ast = self.transform_copy_into_insert_into_select(expression, processed_file_data_copy)
 
-        else:
-            return final_query
+        return {
+            "credentials": credentials,
+            "final_ast": final_ast
+        }        
         
     def transform_copy_into_insert_into_select(self, expression, copy_data):
         """
@@ -385,8 +388,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             Exception: If file format is not supported by DuckDB
         """
 
-        print("copy_data INCOMING")
-        pp(copy_data)
+        # print("copy_data INCOMING")
+        # pp(copy_data)
         if not expression.args.get('files'):
             return expression
 
@@ -435,23 +438,15 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         )
         return insert_into_select_ast
     
-    def _get_set_duckdb_secret_keys_queries(self, copy_data, target_executor):
+    def _get_credentials_for_copy(self, copy_data, target_executor):
         s3_access_key_id = copy_data.get("s3_access_key_id")
         s3_secret_access_key = copy_data.get("s3_secret_access_key")
         if s3_access_key_id is None or s3_secret_access_key is None:
-            return
-        
-        setup_queries = [
-            f"SET s3_access_key_id = '{s3_access_key_id}'",
-            f"SET s3_secret_access_key = '{s3_secret_access_key}'"
-        ]
-        
-        return setup_queries
-        # print(target_executor)
-
-        # for query in setup_queries:
-        #     print(query)
-        #     target_executor.execute_raw(query, target_executor, True)
+            return None
+        return {
+            's3_access_key_id': s3_access_key_id,
+            's3_secret_access_key':s3_secret_access_key
+        }
     
     def get_snapshot_of_copy_file_directories(self, ast):
         directories = self._get_copy_file_directories(ast)
@@ -675,8 +670,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         Returns:
             Dictionary of processed DuckDB parameters
         """
-        print("file_format_params INCOMING")
-        pp(file_format_params)
+        # print("file_format_params INCOMING")
+        # pp(file_format_params)
         if catalog_type == "SNOWFLAKE":
             copy_params = SNOWFLAKE_DEFAULT_COPY_PARAMETERS
         else:
@@ -732,8 +727,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         file_format = copy_properties['TYPE']['snowflake_property_value']
         all_converted_properties = {}
         metadata = {}
-        print("copy_properties INCOMING")
-        pp(copy_properties)
+        # print("copy_properties INCOMING")
+        # pp(copy_properties)
 
         for snowflake_property_name, snowflake_property_info in copy_properties.items():
             converted_properties = self.convert_properties_copy(

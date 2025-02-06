@@ -4,7 +4,7 @@ import re
 import typing
 from enum import Enum
 from string import Template
-from typing import List, Sequence, Any
+from typing import List, Sequence, Any, Dict
 
 import duckdb
 import pyiceberg.table
@@ -26,6 +26,7 @@ from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
 from universql.plugin import ICatalog, Executor, Locations, Tables, register
 from pprint import pp
+import aiobotocore
 
 # remove later
 import shutil
@@ -115,11 +116,15 @@ class DuckDBCatalog(ICatalog):
     def register_locations(self, tables: Locations):
         raise Exception("Unsupported operation")
 
-    def _register_data_lake(self, args: dict):
+    def _register_data_lake(self, args: dict, session = None):
         if args.get('aws_profile') is not None or self.account.cloud == 'aws':
-            self.duckdb.register_filesystem(s3(args))
+            s3_info = s3(args, session=session)
+            self.filesystem = s3_info["s3_file_system"]
+            self.session_credentials = s3_info["session_credentials"]
+            self.duckdb.register_filesystem(self.filesystem)
         if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
-            self.duckdb.register_filesystem(gcs(args))
+            self.filesystem = gcs(args)
+            self.duckdb.register_filesystem(self.filesystem)
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         native_tables = {}
@@ -149,35 +154,94 @@ class DuckDBExecutor(Executor):
             cost = calculate_script_cost(total_duration)
             return f"Run locally on DuckDB: {cost}"
 
-    def execute_raw(self, raw_query: str, catalog_executor: Executor, is_raw : bool = False) -> None:
-        
-        queries = None
-        if isinstance(raw_query, List) == False:
-            queries = [raw_query]
-        else:
-            queries = raw_query
-        
-        for query in queries:
-            try:
-                logger.info(
-                    f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(query)}")
-                
-                if is_raw:
-                    self.catalog.duckdb.execute(query)
-                else:
-                    self.catalog.emulator.execute(query)
-                self.is_last_raw = is_raw
-            except duckdb.HTTPException as e:
-                if e.status_code == 403:
-                    raise QueryError(f"Access denied: {e.args[0]}")
-                else:
-                    raise QueryError(f"Error when pulling data from filesystem in DuckDB: {e.args[0]}")
-            except duckdb.Error as e:
-                raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
-            except duckdb.duckdb.DatabaseError as e:
-                raise QueryError(f"Unable to run the query locally on DuckDB. {str(e)}")
-            except snowflake.connector.ProgrammingError as e:
-                raise QueryError(f"Unable to run the query locally on DuckDB. {e.msg}")
+    def execute_raw(self, raw_query: str, catalog_executor: Executor, session_credentials : Dict = {}, is_raw : bool = False) -> None:
+        queries = [raw_query]
+        original_session_credentials = None
+        session = None
+
+        if session_credentials is not None:
+            original_session_credentials = self.catalog.session_credentials
+            session = self.catalog.filesystem.session
+            
+            # Log state before changing credentials
+            logger.info("Before credential change:")
+            logger.info(f"Original session credentials: {original_session_credentials}")
+            logger.info(f"Session current credentials: {session._credentials}")
+            logger.info(f"Session profile: {session.get_config_variable('profile')}")
+            
+            session.set_credentials(session_credentials.get("s3_access_key_id"), session_credentials.get("s3_secret_access_key"))
+            
+            
+            # Log state after changing credentials
+            logger.info("After credential change:")
+            logger.info(f"Session credentials: {session._credentials}")
+            logger.info(f"Session profile: {session.get_config_variable('profile')}")
+            
+        try:
+            for query in queries:
+                try:
+                    logger.info(
+                        f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(query)}")
+                    
+                    if is_raw:
+                        self.catalog.duckdb.execute(query)
+                    else:
+                        self.catalog.emulator.execute(query)
+                    self.is_last_raw = is_raw
+                except duckdb.HTTPException as e:
+                    if e.status_code == 403:
+                        raise QueryError(f"Access denied: {e.args[0]}")
+                    else:
+                        raise QueryError(f"Error when pulling data from filesystem in DuckDB: {e.args[0]}")
+                except duckdb.Error as e:
+                    raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
+                except duckdb.duckdb.DatabaseError as e:
+                    raise QueryError(f"Unable to run the query locally on DuckDB. {str(e)}")
+                except snowflake.connector.ProgrammingError as e:
+                    raise QueryError(f"Unable to run the query locally on DuckDB. {e.msg}")
+        # finally:
+        #     if session is not None:
+
+        #         profile = original_session_credentials.get("aws_profile")                
+        #         # session.set_config_variable('profile', profile)
+        #         # session._credentials = None
+        #         # session.set_credentials(None, None)
+        #         self.catalog.duckdb.unregister_filesystem("s3")  # Remove old filesystem
+        #         self.catalog._register_data_lake(self.catalog.context, session)
+        #         # Create a brand new session and pass it into _register_data_lake
+        #         new_session = aiobotocore.session.AioSession(profile=profile)
+        #         logger.info(f"Created new aiobotocore session with profile: {profile}")
+
+        #         # Re-register the data lake with the fresh session
+        #         self.catalog._register_data_lake(self.catalog.context, new_session)
+        finally:
+            if session is not None:
+                profile = original_session_credentials.get("aws_profile")                
+
+                # Log before unregistering
+                logger.info(f"Before unregistering: DuckDB Filesystems -> {self.catalog.duckdb.list_filesystems()}")
+
+                # Remove old filesystem
+                self.catalog.duckdb.unregister_filesystem("s3")  
+
+                # Log after unregistering
+                logger.info(f"After unregistering: DuckDB Filesystems -> {self.catalog.duckdb.list_filesystems()}")
+
+                # Create a brand new session and pass it into _register_data_lake
+                new_session = aiobotocore.session.AioSession(profile=profile)
+                logger.info(f"Created new aiobotocore session with profile: {profile}")
+
+                # Re-register the data lake with the fresh session
+                self.catalog._register_data_lake(self.catalog.context, new_session)
+
+                # Log after re-registering
+                logger.info(f"After re-registering: DuckDB Filesystems -> {self.catalog.duckdb.list_filesystems()}")
+            
+                try:
+                    test_files = list(self.catalog.filesystem.glob("s3://needs-a-specific-key/*"))
+                    logger.info(f"🔍 S3FS can see files: {test_files}")
+                except Exception as e:
+                    logger.warning(f"⚠️ S3FS failed to list files: {e}")
 
     def _register_db_sql(self, db_name):
         if self.catalog.context.get('motherduck_token') is not None:
@@ -191,8 +255,8 @@ class DuckDBExecutor(Executor):
             return f'ATTACH IF NOT EXISTS \'{duckdb_path}\' AS {sqlglot.exp.parse_identifier(db_name).sql()}'
 
     def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
-        print("ast INCOMING")
-        pp(ast)
+        # print("ast INCOMING")
+        # pp(ast)
         self._sync_catalog(locations)
         final_ast = ast.transform(self.fix_snowflake_to_duckdb_types)
 
@@ -247,7 +311,8 @@ class DuckDBExecutor(Executor):
                                                                 Var) and expression.this.this.casefold() == name.casefold()),
             None)
 
-    def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables) -> typing.Optional[Locations]:
+    def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables, credentials: Dict) -> typing.Optional[Locations]:
+        
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this
@@ -275,7 +340,7 @@ class DuckDBExecutor(Executor):
                         namespace = iceberg_catalog.properties.get('namespace')
                         database_location = iceberg_catalog.properties.get(LOCATION)
                         if final_query.expression is not None:
-                            self.execute_raw(final_query.expression.sql(dialect="duckdb"), catalog_executor)
+                            self.execute_raw(final_query.expression.sql(dialect="duckdb"), catalog_executor, credentials)
                             arrow_table = self.get_as_table()
                         else:
                             arrow_table = None
@@ -335,19 +400,20 @@ class DuckDBExecutor(Executor):
                                 expressions=[expression for expression in properties.expressions if
                                              not isinstance(expression, TemporaryProperty)])
 
-                            self.execute_raw(ast.sql(dialect="duckdb"), catalog_executor)
+                            self.execute_raw(ast.sql(dialect="duckdb"), catalog_executor, credentials)
                             return None
                         else:
                             raise QueryError(
                                 "DuckDB can't create native Snowflake tables, please use Iceberg or External tables")
                 elif ast.kind == 'VIEW':
                     duckdb_query = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb")
-                    self.execute_raw(duckdb_query, catalog_executor)
+                    self.execute_raw(duckdb_query, catalog_executor, credentials)
 
                     if not is_temp:
                         return {destination_table: ast.expression}
             elif isinstance(ast, Insert):
                 table_type = self.catalog._get_table_location(destination_table)
+                print("INSERT ON THE WAY")
                 if table_type == TableType.ICEBERG:
                     namespace = self.catalog.iceberg_catalog.properties.get('namespace')
                     try:
@@ -355,11 +421,11 @@ class DuckDBExecutor(Executor):
                     except NoSuchTableError as e:
                         raise QueryError(f"Error accessing catalog {e.args}")
                     self.execute_raw(self._sync_and_transform_query(ast.expression, locations).sql(dialect="duckdb"),
-                                     catalog_executor)
+                                     catalog_executor, credentials)
                     table = self.get_as_table()
                     iceberg_table.append(table)
                 elif table_type.LOCAL:
-                    self.execute_raw(self._sync_and_transform_query(ast, locations).sql(dialect="duckdb"), catalog_executor)
+                    self.execute_raw(self._sync_and_transform_query(ast, locations).sql(dialect="duckdb"), catalog_executor, credentials)
                 else:
                     raise QueryError("Unable to determine table type")
         elif isinstance(ast, Drop):
@@ -391,12 +457,12 @@ class DuckDBExecutor(Executor):
             cache_directory = self.catalog.context.get('cache_directory')
             
             try:
-                self.execute_raw(sql, catalog_executor, is_raw = isinstance(ast, Copy))
+                self.execute_raw(sql, catalog_executor, credentials, is_raw = isinstance(ast, Copy))
             finally:
                 self._destroy_cache(cache_directory)   
         else:
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
-            self.execute_raw(sql, catalog_executor, is_raw = isinstance(ast, Copy))
+            self.execute_raw(sql, catalog_executor, credentials, is_raw = isinstance(ast, Copy))
         return None
 
     def _destroy_cache(self, cache_directory):
