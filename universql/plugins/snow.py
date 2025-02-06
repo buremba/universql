@@ -259,45 +259,45 @@ SNOWFLAKE_TO_DUCKDB_PROPERTY_MAPPINGS = {
 }
 
 SNOWFLAKE_DEFAULT_COPY_PARAMETERS = {
-    'TYPE': {"snowflake_property_value": "String", "snowflake_property_type": "CSV"},
-    'RECORD_DELIMITER': {"snowflake_property_value": "String", "snowflake_property_type": "\n"},
-    'FIELD_DELIMITER': {"snowflake_property_value": "String", "snowflake_property_type": ","},
-    'SKIP_HEADER': {"snowflake_property_value": "Integer", "snowflake_property_type": 0},
-    'PARSE_HEADER': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'DATE_FORMAT': {"snowflake_property_value": "String", "snowflake_property_type": "AUTO"},
-    'TIME_FORMAT': {"snowflake_property_value": "String", "snowflake_property_type": "AUTO"},
-    'TIMESTAMP_FORMAT': {"snowflake_property_value": "String", "snowflake_property_type": "AUTO"},
-    'BINARY_FORMAT': {"snowflake_property_value": "String", "snowflake_property_type": "HEX"},
-    'ESCAPE': {"snowflake_property_value": "String", "snowflake_property_type": "NONE"},
-    'ESCAPE_UNENCLOSED_FIELD': {"snowflake_property_value": "String", "snowflake_property_type": "\\"},
-    'TRIM_SPACE': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'FIELD_OPTIONALLY_ENCLOSED_BY': {"snowflake_property_value": "String", "snowflake_property_type": "NONE"},
-    'NULL_IF': {"snowflake_property_value": "List", "snowflake_property_type": "[\\N]"},
-    'COMPRESSION': {"snowflake_property_value": "String", "snowflake_property_type": "AUTO"},
-    'ERROR_ON_COLUMN_COUNT_MISMATCH': {"snowflake_property_value": "Boolean", "snowflake_property_type": "TRUE"},
-    'VALIDATE_UTF8': {"snowflake_property_value": "Boolean", "snowflake_property_type": "TRUE"},
-    'SKIP_BLANK_LINES': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'REPLACE_INVALID_CHARACTERS': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'EMPTY_FIELD_AS_NULL': {"snowflake_property_value": "Boolean", "snowflake_property_type": "TRUE"},
-    'SKIP_BYTE_ORDER_MARK': {"snowflake_property_value": "Boolean", "snowflake_property_type": "TRUE"},
-    'ENCODING': {"snowflake_property_value": "String", "snowflake_property_type": "UTF8"},
-    'ON_ERROR': {"snowflake_property_value": "String", "snowflake_property_type": "ABORT_STATEMENT"},
-    'PURGE': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'RETURN_FAILED_ONLY': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'ENFORCE_LENGTH': {"snowflake_property_value": "Boolean", "snowflake_property_type": "TRUE"},
-    'TRUNCATECOLUMNS': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'FORCE': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'ENABLE': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'AUTO_REFRESH': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'USE_PRIVATELINK_ENDPOINT': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'ENABLE_OCTAL': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'ALLOW_DUPLICATE': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'STRIP_OUTER_ARRAY': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'STRIP_NULL_VALUES': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'IGNORE_UTF8_ERRORS': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'BINARY_AS_TEXT': {"snowflake_property_value": "Boolean", "snowflake_property_type": "TRUE"},
-    'USE_LOGICAL_TYPE': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"},
-    'USE_VECTORIZED_SCANNER': {"snowflake_property_value": "Boolean", "snowflake_property_type": "FALSE"}
+    'TYPE': {"snowflake_property_type": "String", "snowflake_property_value": "CSV"},
+    'RECORD_DELIMITER': {"snowflake_property_type": "String", "snowflake_property_value": "\n"},
+    'FIELD_DELIMITER': {"snowflake_property_type": "String", "snowflake_property_value": ","},
+    'SKIP_HEADER': {"snowflake_property_type": "Integer", "snowflake_property_value": 0},
+    'PARSE_HEADER': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'DATE_FORMAT': {"snowflake_property_type": "String", "snowflake_property_value": "AUTO"},
+    'TIME_FORMAT': {"snowflake_property_type": "String", "snowflake_property_value": "AUTO"},
+    'TIMESTAMP_FORMAT': {"snowflake_property_type": "String", "snowflake_property_value": "AUTO"},
+    'BINARY_FORMAT': {"snowflake_property_type": "String", "snowflake_property_value": "HEX"},
+    'ESCAPE': {"snowflake_property_type": "String", "snowflake_property_value": "NONE"},
+    'ESCAPE_UNENCLOSED_FIELD': {"snowflake_property_type": "String", "snowflake_property_value": "\\"},
+    'TRIM_SPACE': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'FIELD_OPTIONALLY_ENCLOSED_BY': {"snowflake_property_type": "String", "snowflake_property_value": "NONE"},
+    'NULL_IF': {"snowflake_property_type": "List", "snowflake_property_value": "[\\N]"},
+    'COMPRESSION': {"snowflake_property_type": "String", "snowflake_property_value": "AUTO"},
+    'ERROR_ON_COLUMN_COUNT_MISMATCH': {"snowflake_property_type": "Boolean", "snowflake_property_value": "TRUE"},
+    'VALIDATE_UTF8': {"snowflake_property_type": "Boolean", "snowflake_property_value": "TRUE"},
+    'SKIP_BLANK_LINES': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'REPLACE_INVALID_CHARACTERS': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'EMPTY_FIELD_AS_NULL': {"snowflake_property_type": "Boolean", "snowflake_property_value": "TRUE"},
+    'SKIP_BYTE_ORDER_MARK': {"snowflake_property_type": "Boolean", "snowflake_property_value": "TRUE"},
+    'ENCODING': {"snowflake_property_type": "String", "snowflake_property_value": "UTF8"},
+    'ON_ERROR': {"snowflake_property_type": "String", "snowflake_property_value": "ABORT_STATEMENT"},
+    'PURGE': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'RETURN_FAILED_ONLY': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'ENFORCE_LENGTH': {"snowflake_property_type": "Boolean", "snowflake_property_value": "TRUE"},
+    'TRUNCATECOLUMNS': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'FORCE': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'ENABLE': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'AUTO_REFRESH': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'USE_PRIVATELINK_ENDPOINT': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'ENABLE_OCTAL': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'ALLOW_DUPLICATE': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'STRIP_OUTER_ARRAY': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'STRIP_NULL_VALUES': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'IGNORE_UTF8_ERRORS': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'BINARY_AS_TEXT': {"snowflake_property_type": "Boolean", "snowflake_property_value": "TRUE"},
+    'USE_LOGICAL_TYPE': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"},
+    'USE_VECTORIZED_SCANNER': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"}
 }
 
 DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'PARQUET']
@@ -356,10 +356,17 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
 
         files_list = self._find_files(expression)
         processed_file_data_copy = self.get_file_info_copy(files_list, expression)
-        # print("processed_file_data_copy INCOMING")
-        # pp(processed_file_data_copy)
-        return self.transform_copy_into_insert_into_select(expression, processed_file_data_copy)
+        
+        prep_queries = self._get_set_duckdb_secret_keys_queries(processed_file_data_copy, target_executor)
+        final_query = self.transform_copy_into_insert_into_select(expression, processed_file_data_copy)
+        
+        to_return = None
+        if prep_queries is not None:
+            return [*prep_queries, final_query]
 
+        else:
+            return final_query
+        
     def transform_copy_into_insert_into_select(self, expression, copy_data):
         """
         Transforms Snowflake COPY commands to DuckDB-compatible file reading operations.
@@ -378,8 +385,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             Exception: If file format is not supported by DuckDB
         """
 
-        # print("copy_data INCOMING")
-        # pp(copy_data)
+        print("copy_data INCOMING")
+        pp(copy_data)
         if not expression.args.get('files'):
             return expression
 
@@ -427,6 +434,24 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
             expression=select_ast
         )
         return insert_into_select_ast
+    
+    def _get_set_duckdb_secret_keys_queries(self, copy_data, target_executor):
+        s3_access_key_id = copy_data.get("s3_access_key_id")
+        s3_secret_access_key = copy_data.get("s3_secret_access_key")
+        if s3_access_key_id is None or s3_secret_access_key is None:
+            return
+        
+        setup_queries = [
+            f"SET s3_access_key_id = '{s3_access_key_id}'",
+            f"SET s3_secret_access_key = '{s3_secret_access_key}'"
+        ]
+        
+        return setup_queries
+        # print(target_executor)
+
+        # for query in setup_queries:
+        #     print(query)
+        #     target_executor.execute_raw(query, target_executor, True)
     
     def get_snapshot_of_copy_file_directories(self, ast):
         directories = self._get_copy_file_directories(ast)
@@ -619,17 +644,19 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         }
 
         specified_copy_params = self._extract_copy_params(ast)
-
+        s3_access_key_id = specified_copy_params.get("AWS_KEY_ID")
+        s3_secret_access_key = specified_copy_params.get("AWS_SECRET_KEY")
         cursor = self.source_executor.catalog.cursor()
-        for file in files:
-                
+        
+        for file in files:        
             raw_duckdb_copy_params = self.get_duckdb_copy_params_copy(file, specified_copy_params, cursor, "SNOWFLAKE")
             raw_duckdb_copy_params["METADATA"] = raw_duckdb_copy_params["METADATA"] | file
             copy_data["files"][file["object_name"]] = raw_duckdb_copy_params["METADATA"]
             if copy_data["file_parameters"] == {}:
                 del raw_duckdb_copy_params["METADATA"]
                 copy_data["file_parameters"] = raw_duckdb_copy_params
-                
+                copy_data["s3_access_key_id"] = s3_access_key_id
+                copy_data["s3_secret_access_key"] = s3_secret_access_key
         return copy_data
     
     
@@ -648,7 +675,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         Returns:
             Dictionary of processed DuckDB parameters
         """
-
+        print("file_format_params INCOMING")
+        pp(file_format_params)
         if catalog_type == "SNOWFLAKE":
             copy_params = SNOWFLAKE_DEFAULT_COPY_PARAMETERS
         else:
@@ -704,6 +732,8 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         file_format = copy_properties['TYPE']['snowflake_property_value']
         all_converted_properties = {}
         metadata = {}
+        print("copy_properties INCOMING")
+        pp(copy_properties)
 
         for snowflake_property_name, snowflake_property_info in copy_properties.items():
             converted_properties = self.convert_properties_copy(
@@ -716,12 +746,15 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
                 continue
             else:
                 all_converted_properties = all_converted_properties | converted_properties
-        first_url = metadata["URL"][0]
-        if first_url.startswith("s3:"):
-            metadata["storage_provider"] = "Amazon S3"
-        else:
-            raise Exception(
-                "Universql currently only supports Amazon S3 for stages locations.")
+        # need to check for storage provider somewhere else
+        # print("metadata INCOMING")
+        # pp(metadata)
+        # first_url = metadata.get("URL",[""])
+        # if first_url.startswith("s3:"):
+        #     metadata["storage_provider"] = "Amazon S3"
+        # else:
+        #     raise Exception(
+        #         "Universql currently only supports Amazon S3 for stages locations.")
         all_converted_properties["METADATA"] = metadata
         return all_converted_properties
 
@@ -789,11 +822,9 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
 
     def _extract_copy_params(self, ast):
         params = {}
-        pp(ast)
         for param in ast.args.get('params', []):
             param_name = param.args['this'].args['this']            
             
-
             # Handle single expression case
             if 'expression' in param.args:
                 expr = param.args['expression']

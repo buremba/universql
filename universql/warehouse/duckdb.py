@@ -150,26 +150,34 @@ class DuckDBExecutor(Executor):
             return f"Run locally on DuckDB: {cost}"
 
     def execute_raw(self, raw_query: str, catalog_executor: Executor, is_raw : bool = False) -> None:
-        try:
-            logger.info(
-                f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(raw_query)}")
-            
-            if is_raw:
-                self.catalog.duckdb.execute(raw_query)
-            else:
-                self.catalog.emulator.execute(raw_query)
-            self.is_last_raw = is_raw
-        except duckdb.HTTPException as e:
-            if e.status_code == 403:
-                raise QueryError(f"Access denied: {e.args[0]}")
-            else:
-                raise QueryError(f"Error when pulling data from filesystem in DuckDB: {e.args[0]}")
-        except duckdb.Error as e:
-            raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
-        except duckdb.duckdb.DatabaseError as e:
-            raise QueryError(f"Unable to run the query locally on DuckDB. {str(e)}")
-        except snowflake.connector.ProgrammingError as e:
-            raise QueryError(f"Unable to run the query locally on DuckDB. {e.msg}")
+        
+        queries = None
+        if isinstance(raw_query, List) == False:
+            queries = [raw_query]
+        else:
+            queries = raw_query
+        
+        for query in queries:
+            try:
+                logger.info(
+                    f"[{self.catalog.session_id}] Executing query on DuckDB:\n{prepend_to_lines(query)}")
+                
+                if is_raw:
+                    self.catalog.duckdb.execute(query)
+                else:
+                    self.catalog.emulator.execute(query)
+                self.is_last_raw = is_raw
+            except duckdb.HTTPException as e:
+                if e.status_code == 403:
+                    raise QueryError(f"Access denied: {e.args[0]}")
+                else:
+                    raise QueryError(f"Error when pulling data from filesystem in DuckDB: {e.args[0]}")
+            except duckdb.Error as e:
+                raise QueryError(f"Unable to run the query locally on DuckDB. {e.args}")
+            except duckdb.duckdb.DatabaseError as e:
+                raise QueryError(f"Unable to run the query locally on DuckDB. {str(e)}")
+            except snowflake.connector.ProgrammingError as e:
+                raise QueryError(f"Unable to run the query locally on DuckDB. {e.msg}")
 
     def _register_db_sql(self, db_name):
         if self.catalog.context.get('motherduck_token') is not None:
@@ -183,6 +191,8 @@ class DuckDBExecutor(Executor):
             return f'ATTACH IF NOT EXISTS \'{duckdb_path}\' AS {sqlglot.exp.parse_identifier(db_name).sql()}'
 
     def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
+        print("ast INCOMING")
+        pp(ast)
         self._sync_catalog(locations)
         final_ast = ast.transform(self.fix_snowflake_to_duckdb_types)
 
@@ -238,11 +248,6 @@ class DuckDBExecutor(Executor):
             None)
 
     def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables) -> typing.Optional[Locations]:
-        if not catalog_executor.is_warm():
-            # since duckdb doesn't implement auth layer,
-            # force the catalog to perform auth before executing any query
-            catalog_executor.test()
-
         if isinstance(ast, Create) or isinstance(ast, Insert):
             if isinstance(ast.this, Schema):
                 destination_table = ast.this.this
