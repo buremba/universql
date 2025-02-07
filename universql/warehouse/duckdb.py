@@ -116,7 +116,7 @@ class DuckDBCatalog(ICatalog):
         if match is not None:
             return TableType.ICEBERG
 
-        raise NotSupportedError
+        raise NotSupportedError(f"The table reference in DuckDB is not supported: {table_exists[0]}")
 
     def register_locations(self, tables: Locations):
         raise Exception("Unsupported operation")
