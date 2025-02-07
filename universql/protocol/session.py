@@ -20,8 +20,7 @@ from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon, 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
     prepend_to_lines, parse_compute, QueryError, full_qualifier
-from universql.plugin import Executor, Tables, ICatalog, COMPUTES, TRANSFORMS, UniversqlPlugin
-
+from universql.plugin import Executor, Tables, ICatalog, COMPUTES, PLUGINS, UniversqlPlugin, UQuery
 
 logger = logging.getLogger("💡")
 
@@ -42,7 +41,7 @@ class UniverSQLSession:
         self.computes = {"snowflake": self.catalog_executor}
         self.processing = False
         self.metadata_db = None
-        self.transforms : List[UniversqlPlugin] = [transform(self.catalog_executor) for transform in TRANSFORMS]
+        self.plugins : List[UniversqlPlugin] = [plugin(self) for plugin in PLUGINS]
 
 
     def _get_iceberg_catalog(self):
@@ -111,8 +110,18 @@ class UniverSQLSession:
 
         last_executor = None
 
+        plugin_hooks = []
+        for plugin in self.plugins:
+            try:
+                plugin_hooks.append(plugin.start_query(queries, raw_query))
+            except Exception as e:
+                print_exc(10)
+                message = f"Unable to call start_query on plugin {plugin.__class__}"
+                logger.error(message, exc_info=e)
+                raise QueryError(f"{message}: {str(e)}")
+
         if queries is None:
-            last_executor = self.perform_query(self.catalog_executor, raw_query)
+            last_executor = self.perform_query(self.catalog_executor, raw_query, plugin_hooks)
         else:
             last_error = None
             for ast in queries:
@@ -129,7 +138,7 @@ class UniverSQLSession:
                         last_executor = target_compute(self, compute).executor()
                         self.computes[compute_name] = last_executor
                     try:
-                        last_executor = self.perform_query(last_executor, raw_query, ast=ast)
+                        last_executor = self.perform_query(last_executor, raw_query, plugin_hooks, ast=ast)
                         break
                     except QueryError as e:
                         logger.warning(f"Unable to run query: {e.message}")
@@ -145,7 +154,16 @@ class UniverSQLSession:
                 f"[{self.session_id}] {last_executor.get_query_log(query_duration)} 🚀 "
                 f"({get_friendly_time_since(start_time, performance_counter)})")
 
-        return last_executor.get_as_table()
+        table = last_executor.get_as_table()
+        for hook in plugin_hooks:
+            try:
+                hook.end(table)
+            except Exception as e:
+                print_exc(10)
+                message = f"Unable to end query execution on plugin {hook.__class__}"
+                logger.error(message, exc_info=e)
+                raise QueryError(f"{message}: {str(e)}")
+        return table
 
     def _find_tables(self, ast: sqlglot.exp.Expression, cte_aliases=None):
         if cte_aliases is None:
@@ -159,7 +177,7 @@ class UniverSQLSession:
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
                     yield full_qualifier(expression, self.credentials), cte_aliases
 
-    def perform_query(self, alternative_executor: Executor, raw_query, ast=None) -> Executor:
+    def perform_query(self, alternative_executor: Executor, raw_query, plugin_hooks : List[UQuery], ast=None) -> Executor:
         if ast is not None and alternative_executor != self.catalog_executor:
             must_run_on_catalog = False
             if isinstance(ast, Create):
@@ -180,29 +198,21 @@ class UniverSQLSession:
                     locations = self.get_table_paths_from_catalog(alternative_executor.catalog, tables_list)
                 with sentry_sdk.start_span(op=op_name, name="Execute query"):
                     current_ast = ast
-                    for transform in self.transforms:
+                    for plugin_hook in plugin_hooks:
                         try:
-                            current_ast = transform.transform_sql(current_ast, alternative_executor)
+                            current_ast = plugin_hook.transform_ast(ast, alternative_executor)
                         except Exception as e:
                             print_exc(10)
-                            message = f"Unable to perform transformation {transform.__class__}"
-                            logger.error(message, exc_info=e)
-                            raise QueryError(f"{message}: {str(e)}")
-                    for transform in self.transforms:
-                        try:
-                            transform.pre_execute(current_ast, alternative_executor)
-                        except Exception as e:
-                            print_exc(10)
-                            message = f"Unable to perform transformation {transform.__class__}"
+                            message = f"Unable to tranform_ast on plugin {plugin_hook.__class__}"
                             logger.error(message, exc_info=e)
                             raise QueryError(f"{message}: {str(e)}")
                     new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
-                    for transform in self.transforms:
+                    for plugin_hook in plugin_hooks:
                         try:
-                             transform.post_execute(current_ast, new_locations, alternative_executor)
+                            plugin_hook.post_execute(new_locations, alternative_executor)
                         except Exception as e:
                             print_exc(10)
-                            message = f"Unable to perform transformation {transform.__class__}"
+                            message = f"Unable to post_execute on plugin {plugin_hook.__class__}"
                             logger.error(message, exc_info=e)
                             raise QueryError(f"{message}: {str(e)}")
                 if new_locations is not None:

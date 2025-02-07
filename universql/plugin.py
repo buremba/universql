@@ -39,13 +39,16 @@ class ICatalog(ABC):
 
 T = typing.TypeVar('T', bound=ICatalog)
 
+
 def _track_call(method):
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         # Mark that the method was called on this instance.
         self._warm = True
         return method(self, *args, **kwargs)
+
     return wrapper
+
 
 class Executor(typing.Protocol[T]):
 
@@ -85,26 +88,35 @@ class Executor(typing.Protocol[T]):
         pass
 
 
-class UniversqlPlugin:
+class UQuery:
+    def __init__(self, ast: typing.Optional[List[sqlglot.exp.Expression]], raw_query: str):
+        self.ast = ast
+        self.raw_query = raw_query
+
+    def transform_ast(self, ast: sqlglot.exp.Expression, target_executor: Executor) -> Expression:
+        return ast
+
+    def post_execute(self, locations: typing.Optional[Locations], target_executor: Executor):
+        pass
+
+    def end(self, table : pyarrow.Table):
+        pass
+
+
+class UniversqlPlugin(ABC):
     def __init__(self,
-                 source_executor: Executor
+                 session: "universql.protocol.session.UniverSQLSession"
                  ):
-        self.source_executor = source_executor
+        self.session = session
 
-    def transform_sql(self, expression: Expression, target_executor: Executor) -> Expression:
-        return expression
-
-    def post_execute(self, expression: Expression, locations : typing.Optional[Locations], target_executor: Executor):
-        pass
-
-    def pre_execute(self, expression: Expression, target_executor: Executor):
-        pass
+    def start_query(self, ast: typing.Optional[List[sqlglot.exp.Expression]], raw_query : str) -> UQuery:
+        return UQuery(ast, raw_query)
 
 
 # {"duckdb": DuckdbCatalog ..}
 COMPUTES = {}
 # [method]
-TRANSFORMS = []
+PLUGINS = []
 # apps to be installed
 APPS = []
 
@@ -123,7 +135,7 @@ def register(name: typing.Optional[str] = None):
                     raise SystemError("name is required for catalogs")
                 COMPUTES[name] = cls
             elif issubclass(cls, UniversqlPlugin) and cls is not UniversqlPlugin:
-                TRANSFORMS.append(cls)
+                PLUGINS.append(cls)
         elif inspect.isfunction(cls):
             signature = inspect.signature(cls)
             if len(signature.parameters) == 1 and signature.parameters.values().__iter__().__next__().annotation is FastAPI:
