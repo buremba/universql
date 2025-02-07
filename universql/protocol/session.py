@@ -188,7 +188,23 @@ class UniverSQLSession:
                             message = f"Unable to perform transformation {transform.__class__}"
                             logger.error(message, exc_info=e)
                             raise QueryError(f"{message}: {str(e)}")
+                    for transform in self.transforms:
+                        try:
+                            current_ast = transform.pre_execute(current_ast, alternative_executor)
+                        except Exception as e:
+                            print_exc(10)
+                            message = f"Unable to perform transformation {transform.__class__}"
+                            logger.error(message, exc_info=e)
+                            raise QueryError(f"{message}: {str(e)}")
                     new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
+                    for transform in self.transforms:
+                        try:
+                            current_ast = transform.post_execute(current_ast, new_locations, alternative_executor)
+                        except Exception as e:
+                            print_exc(10)
+                            message = f"Unable to perform transformation {transform.__class__}"
+                            logger.error(message, exc_info=e)
+                            raise QueryError(f"{message}: {str(e)}")
                 if new_locations is not None:
                     with sentry_sdk.start_span(op=op_name, name="Register new locations"):
                         self.catalog.register_locations(new_locations)

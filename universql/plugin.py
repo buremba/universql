@@ -94,6 +94,12 @@ class UniversqlPlugin:
     def transform_sql(self, expression: Expression, target_executor: Executor) -> Expression:
         return expression
 
+    def post_execute(self, expression: Expression, locations : typing.Optional[Locations], target_executor: Executor):
+        pass
+
+    def pre_execute(self, expression: Expression, target_executor: Executor):
+        pass
+
 
 # {"duckdb": DuckdbCatalog ..}
 COMPUTES = {}
