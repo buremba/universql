@@ -190,7 +190,7 @@ class UniverSQLSession:
                             raise QueryError(f"{message}: {str(e)}")
                     for transform in self.transforms:
                         try:
-                            current_ast = transform.pre_execute(current_ast, alternative_executor)
+                            transform.pre_execute(current_ast, alternative_executor)
                         except Exception as e:
                             print_exc(10)
                             message = f"Unable to perform transformation {transform.__class__}"
@@ -199,7 +199,7 @@ class UniverSQLSession:
                     new_locations = alternative_executor.execute(current_ast, self.catalog_executor, locations)
                     for transform in self.transforms:
                         try:
-                            current_ast = transform.post_execute(current_ast, new_locations, alternative_executor)
+                             transform.post_execute(current_ast, new_locations, alternative_executor)
                         except Exception as e:
                             print_exc(10)
                             message = f"Unable to perform transformation {transform.__class__}"

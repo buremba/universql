@@ -7,6 +7,7 @@ from string import Template
 from typing import List, Sequence, Any
 
 import duckdb
+import fsspec
 import pyiceberg.table
 import snowflake
 import sqlglot
@@ -14,6 +15,7 @@ from duckdb.duckdb import NotSupportedError
 from fakesnow import macros, info_schema
 from fakesnow.conn import FakeSnowflakeConnection
 from fakesnow.cursor import FakeSnowflakeCursor
+from fsspec.asyn import AsyncFileSystem
 from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
@@ -76,7 +78,10 @@ class DuckDBCatalog(ICatalog):
         fake_snowflake_conn.database_set = True
         fake_snowflake_conn.schema_set = True
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
-        self._register_data_lake(session.context)
+        self.filesystems = self.get_filesystems(session.context)
+        for filesystem in self.filesystems:
+            self.duckdb.register_filesystem(filesystem)
+
 
     def _get_table_location(self, table: sqlglot.exp.Table) -> typing.Optional[TableType]:
         def get_identifier(is_quoted):
@@ -116,11 +121,13 @@ class DuckDBCatalog(ICatalog):
     def register_locations(self, tables: Locations):
         raise Exception("Unsupported operation")
 
-    def _register_data_lake(self, args: dict):
+    def get_filesystems(self, args: dict) -> List[fsspec.AbstractFileSystem]:
+        filesystems = []
         if args.get('aws_profile') is not None or self.account.cloud == 'aws':
-            self.duckdb.register_filesystem(s3(args))
+            filesystems.append(s3(args))
         if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
-            self.duckdb.register_filesystem(gcs(args))
+            filesystems.append(gcs(args))
+        return filesystems
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         native_tables = {}
