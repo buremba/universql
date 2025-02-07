@@ -350,6 +350,7 @@ DISALLOWED_PARAMS_BY_FORMAT_COPY = {
 
 class SnowflakeQueryTransformer(UQuery):
     
+    
     def transform_ast(self, expression: Expression, target_executor: DuckDBExecutor) -> Expression:
 
         if not isinstance(expression, sqlglot.exp.Copy):
