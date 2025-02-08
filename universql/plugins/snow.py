@@ -362,18 +362,10 @@ class SnowflakeQueryTransformer(UQuery):
             return expression
 
         files_list = self._find_files(expression)
-        print("files_list INCOMING")
-        pp(files_list)
         processed_file_data_copy = self.get_file_info_copy(files_list, expression)
         
-        print("processed_file_data INCOMING")
-        pp(processed_file_data_copy)
         credentials = self._get_credentials_for_copy(processed_file_data_copy, target_executor)
-        print("credentials INCOMING")
-        pp(credentials)
         final_ast = self.transform_copy_into_insert_into_select(expression, processed_file_data_copy)
-        print("final_ast INCOMING")
-        pp(final_ast)
         return final_ast
 
     def transform_copy_into_insert_into_select(self, expression, copy_data):
@@ -667,8 +659,7 @@ class SnowflakeQueryTransformer(UQuery):
             else:
                 all_converted_properties = all_converted_properties | converted_properties
         # need to check for storage provider somewhere else
-        # print("metadata INCOMING")
-        # pp(metadata)
+
         # first_url = metadata.get("URL",[""])
         # if first_url.startswith("s3:"):
         #     metadata["storage_provider"] = "Amazon S3"
