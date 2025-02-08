@@ -111,7 +111,7 @@ class UniversqlPlugin(ABC):
         self.session = session
 
     def start_query(self, ast: typing.Optional[List[sqlglot.exp.Expression]], raw_query : str) -> UQuery:
-        return UQuery(self, ast, raw_query)
+        return UQuery(self.session, ast, raw_query)
 
 
 # {"duckdb": DuckdbCatalog ..}
