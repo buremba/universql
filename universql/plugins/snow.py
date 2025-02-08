@@ -45,7 +45,7 @@ class SnowflakeStageUniversqlPlugin(UniversqlPlugin):
         super().__init__(session)
 
     def start_query(self, ast: typing.Optional[List[sqlglot.exp.Expression]], raw_query: str) -> UQuery:
-        return StageTransformer(ast, raw_query)
+        return StageTransformer(self.session, ast, raw_query)
 
 
 # @register()
