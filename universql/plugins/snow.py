@@ -301,7 +301,7 @@ SNOWFLAKE_DEFAULT_COPY_PARAMETERS = {
 
 DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'PARQUET']
 
-DISALLOWED_PARAMS_BY_FORMAT_COPY = {
+DISALLOWED_PARAMS_BY_FORMAT = {
     "JSON": {
         "ignore_errors": ["ALWAYS_REMOVE"],
         "nullstr": ["ALWAYS_REMOVE"],
@@ -362,10 +362,10 @@ class SnowflakeQueryTransformer(UQuery):
             return expression
 
         files_list = self._find_files(expression)
-        processed_file_data_copy = self.get_file_info_copy(files_list, expression)
+        processed_file_data = self.get_file_info(files_list, expression)
         
-        credentials = self._get_credentials_for_copy(processed_file_data_copy, target_executor)
-        final_ast = self.transform_copy_into_insert_into_select(expression, processed_file_data_copy)
+        credentials = self._get_credentials_for(processed_file_data, target_executor)
+        final_ast = self.transform_copy_into_insert_into_select(expression, processed_file_data)
         return final_ast
 
     def transform_copy_into_insert_into_select(self, expression, copy_data):
@@ -503,7 +503,7 @@ class SnowflakeQueryTransformer(UQuery):
                 return full_string[1:i]
         return full_string[1:i]
     
-    def get_file_info_copy(self, files, ast):
+    def get_file_info(self, files, ast):
         copy_data = {
             "files": {},
             "file_parameters": {}
@@ -515,7 +515,7 @@ class SnowflakeQueryTransformer(UQuery):
         cursor = self.source_executor().catalog.cursor()
         
         for file in files:        
-            raw_duckdb_copy_params = self.get_duckdb_copy_params_copy(file, specified_copy_params, cursor, "SNOWFLAKE")
+            raw_duckdb_copy_params = self.get_duckdb_copy_params(file, specified_copy_params, cursor, "SNOWFLAKE")
             raw_duckdb_copy_params["METADATA"] = raw_duckdb_copy_params["METADATA"] | file
             copy_data["files"][file["object_name"]] = raw_duckdb_copy_params["METADATA"]
             if copy_data["file_parameters"] == {}:
@@ -550,7 +550,7 @@ class SnowflakeQueryTransformer(UQuery):
                 print(f"{param_name} expressions")
         return params
 
-    def _get_credentials_for_copy(self, copy_data, target_executor):
+    def _get_credentials_for(self, copy_data, target_executor):
         s3_access_key_id = copy_data.get("s3_access_key_id")
         s3_secret_access_key = copy_data.get("s3_secret_access_key")
         if s3_access_key_id is None or s3_secret_access_key is None:
@@ -572,7 +572,7 @@ class SnowflakeQueryTransformer(UQuery):
             result[property_name] = property_value
         return result
     
-    def get_duckdb_copy_params_copy(self, file, file_format_params, cursor, catalog_type):
+    def get_duckdb_copy_params(self, file, file_format_params, cursor, catalog_type):
         """
         Retrieves and processes Snowflake file metadata.
 
@@ -624,11 +624,11 @@ class SnowflakeQueryTransformer(UQuery):
                 property_info["snowflake_property_value"] = property_value
                 copy_params[property_name] = property_info
                 
-        duckdb_data = self.convert_to_duckdb_properties_copy(copy_params)
+        duckdb_data = self.convert_to_duckdb_properties(copy_params)
 
         return duckdb_data
     
-    def convert_to_duckdb_properties_copy(self, copy_properties):
+    def convert_to_duckdb_properties(self, copy_properties):
         """
         Maps Snowflake stage properties to DuckDB file reading options.
 
@@ -648,7 +648,7 @@ class SnowflakeQueryTransformer(UQuery):
         # pp(copy_properties)
 
         for snowflake_property_name, snowflake_property_info in copy_properties.items():
-            converted_properties = self.convert_properties_copy(
+            converted_properties = self.convert_properties(
                 file_format, snowflake_property_name, snowflake_property_info)
             duckdb_property_name, property_values = next(
                 iter(converted_properties.items()))
@@ -669,7 +669,7 @@ class SnowflakeQueryTransformer(UQuery):
         all_converted_properties["METADATA"] = metadata
         return all_converted_properties    
 
-    def convert_properties_copy(self, file_format, snowflake_property_name, snowflake_property_info):
+    def convert_properties(self, file_format, snowflake_property_name, snowflake_property_info):
 
         no_match = {
             "duckdb_property_name": None,
@@ -683,14 +683,14 @@ class SnowflakeQueryTransformer(UQuery):
             "duckdb_property_type": duckdb_property_type
         } | snowflake_property_info | {"snowflake_property_name": snowflake_property_name}
         if duckdb_property_name is not None:
-            value = self._format_value_for_duckdb_copy(
+            value = self._format_value_for_duckdb(
                 file_format, snowflake_property_name, properties)
             properties["duckdb_property_value"] = value
         else:
             properties["duckdb_property_value"] = None
         return {duckdb_property_name: properties}
 
-    def _format_value_for_duckdb_copy(self, file_format, snowflake_property_name, data):
+    def _format_value_for_duckdb(self, file_format, snowflake_property_name, data):
         snowflake_type = data["snowflake_property_type"]
         duckdb_type = data["duckdb_property_type"]
         snowflake_value = data["snowflake_property_value"]
@@ -754,7 +754,7 @@ class SnowflakeQueryTransformer(UQuery):
         """
 
         converted_params = []
-        params = self.apply_param_post_processing_copy(params)
+        params = self.apply_param_post_processing(params)
 
         for property_name, property_info in params.items():
             if property_name == "dateformat" and property_info["duckdb_property_value"] == 'AUTO':
@@ -781,9 +781,9 @@ class SnowflakeQueryTransformer(UQuery):
             converted_params.append(converted_param)
         return converted_params
     
-    def apply_param_post_processing_copy(self, params):
+    def apply_param_post_processing(self, params):
         format = self.get_file_format(params)
-        params = self._remove_problematic_params_copy(params, format)
+        params = self._remove_problematic_params(params, format)
         params = self._add_required_params(params, format)
         params = self._add_empty_field_as_null_to_nullstr(params)
         return params
@@ -791,10 +791,10 @@ class SnowflakeQueryTransformer(UQuery):
     def get_file_format(self, params):
         return params["format"]["duckdb_property_value"]
 
-    def _remove_problematic_params_copy(self, params, format):
+    def _remove_problematic_params(self, params, format):
 
-        disallowed_params = DISALLOWED_PARAMS_BY_FORMAT_COPY.get(
-            format.upper(), {}) | DISALLOWED_PARAMS_BY_FORMAT_COPY.get("ALL_FORMATS", {})
+        disallowed_params = DISALLOWED_PARAMS_BY_FORMAT.get(
+            format.upper(), {}) | DISALLOWED_PARAMS_BY_FORMAT.get("ALL_FORMATS", {})
 
         for disallowed_param, disallowed_values in disallowed_params.items():
             if disallowed_values[0] in ("ALWAYS_REMOVE"):
