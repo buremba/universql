@@ -89,7 +89,8 @@ class Executor(typing.Protocol[T]):
 
 
 class UQuery:
-    def __init__(self, ast: typing.Optional[List[sqlglot.exp.Expression]], raw_query: str):
+    def __init__(self, session: "universql.protocol.session.UniverSQLSession", ast: typing.Optional[List[sqlglot.exp.Expression]], raw_query: str):
+        self.session = session
         self.ast = ast
         self.raw_query = raw_query
 
@@ -110,7 +111,7 @@ class UniversqlPlugin(ABC):
         self.session = session
 
     def start_query(self, ast: typing.Optional[List[sqlglot.exp.Expression]], raw_query : str) -> UQuery:
-        return UQuery(ast, raw_query)
+        return UQuery(self, ast, raw_query)
 
 
 # {"duckdb": DuckdbCatalog ..}

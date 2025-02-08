@@ -111,7 +111,7 @@ class DuckDBCatalog(ICatalog):
         if table_exists[0] is None:
             return TableType.LOCAL
 
-        match = re.search(r"CREATE VIEW (?:["']?[\w]+\.){1,3}[\w]+ AS SELECT \* FROM iceberg_scan\((['"])([a-zA-Z0-9+.-]+:\/\/[a-zA-Z0-9\/_.-]+)\1\);",
+        match = re.search(r"CREATE VIEW (?:[\"']?[\w]+\.){1,3}[\w]+ AS SELECT \* FROM iceberg_scan\((['\"])([a-zA-Z0-9+.-]+:\/\/[a-zA-Z0-9\/_.-]+)\1\);",
                           table_exists[0])
         if match is not None:
             return TableType.ICEBERG
