@@ -112,3 +112,6 @@ venv/*
 .env
 universql.metadata.sqlite
 credentials/
+
+one_off_tests
+copy_files_for_claude.py
