@@ -1,10 +1,12 @@
 import os
-
+import configparser
+from pathlib import Path
 import aiobotocore
 import gcsfs
 import s3fs
 from fsspec.core import logger
 from fsspec.utils import setup_logging
+from pprint import pp
 
 from universql.lake.fsspec_util import MonitoredSimpleCacheFileSystem
 
@@ -22,7 +24,6 @@ def s3(context: dict):
         )
 
     return s3_file_system
-
 
 def gcs(context: dict):
     cache_storage = context.get('cache_directory')
@@ -52,3 +53,47 @@ def iceberg(context: dict):
             cache_storage=directory,
         )
     return io
+
+def get_aws_credentials(profile_name: str = None) -> dict:
+    """
+    Reads AWS credentials following standard AWS credential resolution
+    Returns dict with aws_access_key_id and aws_secret_access_key
+    
+    Args:
+        profile_name (str): The AWS profile name to use. Defaults to 'default'
+    """
+    
+    profile_name = profile_name if profile_name is not None else "default"
+    credentials = {}
+    
+    # Check for credentials file location
+    credentials_path = os.environ.get('AWS_SHARED_CREDENTIALS_FILE')
+    if not credentials_path:
+        credentials_path = os.path.join(str(Path.home()), '.aws', 'credentials')
+        
+    # Check for config file location
+    config_path = os.environ.get('AWS_CONFIG_FILE')
+    if not config_path:
+        config_path = os.path.join(str(Path.home()), '.aws', 'config')
+        
+    config = configparser.ConfigParser()
+    
+    # Read both files if they exist
+    for path in [credentials_path, config_path]:
+        if os.path.exists(path):
+            config.read(path)
+            
+            # Config file uses 'profile name' instead of just 'name'
+            profile_prefix = 'profile ' if path == config_path else ''
+            section_name = f"{profile_prefix}{profile_name}"
+            
+            if section_name in config:
+                profile = config[section_name]
+                if 'aws_access_key_id' in profile:
+                    credentials['aws_access_key_id'] = profile.get('aws_access_key_id')
+                if 'aws_secret_access_key' in profile:
+                    credentials['aws_secret_access_key'] = profile.get('aws_secret_access_key')
+                if 'aws_session_token' in profile:
+                    credentials['aws_session_token'] = profile.get('aws_session_token')
+    
+    return credentials
