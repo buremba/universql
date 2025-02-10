@@ -111,7 +111,7 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, metrics_p
             logger.info(f"Using the SSL keyfile and certfile for {LOCALHOSTCOMPUTING_COM}. DNS resolves to {data}")
             if "127.0.0.1" not in data[2]:
                 logger.error(
-                    f"The DNS setting for f{LOCALHOSTCOMPUTING_COM} doesn't point to localhost, refusing to start. Please update UniverSQL.")
+                    f"The DNS setting for {LOCALHOSTCOMPUTING_COM} doesn't point to localhost, refusing to start. Please update UniverSQL.")
                 sys.exit(1)
         except socket.gaierror as e:
             logger.warning(f"Unable to resolve DNS for {LOCALHOSTCOMPUTING_COM}, you're not connected to the internet")

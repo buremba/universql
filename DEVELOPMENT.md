@@ -4,7 +4,24 @@
 act push --container-architecture linux/amd64 --secret-file .env.act --workflows ./.github/workflows/test.yml --insecure-secrets
 ```
 
-# [DRAFT] Transformers
+# Update certs
+
+1. Start [the instance](https://console.cloud.google.com/compute/instancesDetail/zones/us-central1-a/instances/instance-20240709-162937?inv=1&invt=AbpNfQ&project=jinjat-demo)
+
+2. Connect and update the certs
+```bash
+gcloud compute ssh --zone "us-central1-a" "instance-20240709-162937" --project "jinjat-demo"
+```
+
+Update IP on DNS: https://dash.cloudflare.com/09f0f68ebdbed47d203725997d4cfbdb/localhostcomputing.com/dns/records
+
+```bash
+sudo certbot certonly --standalone --domains localhostcomputing.com
+```
+
+3. Update the [util.py](/universql/util.py)
+
+# Plugins
 
 If you would like to enable custom logic inside Universql,  to support transition in between different dialects or just 
 ```bash
