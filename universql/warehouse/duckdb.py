@@ -22,7 +22,7 @@ from snowflake.connector.options import pyarrow
 from sqlglot.expressions import Insert, Create, Drop, Properties, TemporaryProperty, Schema, Table, Property, \
     Var, Literal, IcebergProperty, Use, ColumnDef, DataType, Copy
 
-from universql.lake.cloud import s3, gcs, in_lambda
+from universql.lake.cloud import s3, gcs, in_lambda, get_aws_credentials
 from universql.protocol.session import UniverSQLSession
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
@@ -79,9 +79,9 @@ class DuckDBCatalog(ICatalog):
         fake_snowflake_conn.schema_set = True
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
         self.filesystems = self.get_filesystems(session.context)
+        self.default_credentials = self.get_default_credentials(session.context)
         for filesystem in self.filesystems:
             self.duckdb.register_filesystem(filesystem)
-
 
     def _get_table_location(self, table: sqlglot.exp.Table) -> typing.Optional[TableType]:
         def get_identifier(is_quoted):
@@ -128,6 +128,18 @@ class DuckDBCatalog(ICatalog):
         if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
             filesystems.append(gcs(args))
         return filesystems
+    
+    def get_default_credentials(self, args: dict):
+        default_credentials = []
+        aws_profile = args.get('aws_profile')
+        if aws_profile is not None or self.account.cloud == 'aws':
+            aws_credentials = get_aws_credentials(aws_profile)
+            if aws_credentials != {}:
+                default_credentials.append({"aws_credentials": aws_credentials})
+            else:
+                profile_name = aws_profile if aws_profile is not None else "default"
+                raise Exception(f"Unable to find credentials for the profile \"{profile_name}\" in your credentials file")
+        return default_credentials
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         native_tables = {}

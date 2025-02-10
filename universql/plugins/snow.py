@@ -357,9 +357,11 @@ class SnowflakeQueryTransformer(UQuery):
         return self.session.catalog_executor
     
     def transform_ast(self, expression: Expression, target_executor: DuckDBExecutor) -> Expression:
-
         if not isinstance(expression, sqlglot.exp.Copy):
             return expression
+        
+        print("target_executor.default_credentials INCOMING")
+        pp(target_executor.default_credentials)
 
         files_list = self._find_files(expression)
         processed_file_data = self.get_file_info(files_list, expression)
