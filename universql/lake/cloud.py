@@ -14,9 +14,17 @@ in_lambda = os.environ.get('AWS_EXECUTION_ENV') is not None
 
 
 def s3(context: dict):
+    
     cache_storage = context.get('cache_directory')
-    session = aiobotocore.session.AioSession(profile=context.get("aws_profile"))
+    
+    aws_credentials = get_aws_credentials(context.get("aws_profile")).get("aws_credentials")
+
+    session = aiobotocore.session.AioSession()
+    
     s3_file_system = s3fs.S3FileSystem(session=session)
+    s3_file_system._s3 = None
+    s3_file_system.key = aws_credentials["aws_access_key_id"]
+    s3_file_system.secret = aws_credentials["aws_secret_access_key"]
     if context.get("max_cache_size", "0") != "0":
         s3_file_system = MonitoredSimpleCacheFileSystem(
             fs=s3_file_system,
@@ -96,4 +104,4 @@ def get_aws_credentials(profile_name: str = None) -> dict:
                 if 'aws_session_token' in profile:
                     credentials['aws_session_token'] = profile.get('aws_session_token')
     
-    return credentials
+    return {"aws_credentials": credentials}

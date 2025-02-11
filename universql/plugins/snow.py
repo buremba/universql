@@ -13,6 +13,9 @@ from universql.warehouse.duckdb import DuckDBExecutor
 from universql.warehouse.snowflake import SnowflakeExecutor, SnowflakeCatalog
 from universql.util import full_qualifier
 from pprint import pp
+from copy import deepcopy
+
+
 
 
 DEFAULT_CREDENTIALS_LOCATIONS = {
@@ -360,16 +363,48 @@ class SnowflakeQueryTransformer(UQuery):
         if not isinstance(expression, sqlglot.exp.Copy):
             return expression
         
-        print("target_executor.default_credentials INCOMING")
-        pp(target_executor.default_credentials)
 
         files_list = self._find_files(expression)
         processed_file_data = self.get_file_info(files_list, expression)
         
-        credentials = self._get_credentials_for(processed_file_data, target_executor)
+        query_credentials = self._get_credentials_for(processed_file_data, target_executor)
+
+        self._set_aws_credentials(target_executor, query_credentials)
         final_ast = self.transform_copy_into_insert_into_select(expression, processed_file_data)
         return final_ast
 
+    def _set_credentials(self, target_executor, query_credentials):
+        aws_default_credentials = target_executor.catalog.default_credentials.get("aws_credentials")
+        aws_query_credentials = query_credentials.get("aws_credentials")
+        if aws_query_credentials is not None or aws_default_credentials is not None:
+            self._set_aws_credentials(target_executor, query_credentials)
+            
+    def _set_aws_credentials(self, target_executor, query_credentials):
+        current_credentials = target_executor.catalog.current_credentials.get("aws_credentials")
+        default_credentials = target_executor.catalog.default_credentials.get("aws_credentials")
+        aws_query_credentials = query_credentials.get("aws_credentials")
+        new_credentials = None
+        
+        try:
+            if current_credentials == default_credentials:
+                if aws_query_credentials is None:
+                    return
+                new_credentials = deepcopy(aws_query_credentials)
+            else:
+                if aws_query_credentials == current_credentials:
+                    return
+                new_credentials = deepcopy(default_credentials)             
+                   
+            s3_filesystems = [x for x in target_executor.catalog.filesystems if "s3" in x.protocol]
+            for s3_file_system in s3_filesystems:
+                s3_file_system.fs._s3 = None
+                s3_file_system.fs.key = new_credentials.get("aws_access_key_id")
+                s3_file_system.fs.secret = new_credentials.get("aws_secret_access_key")
+                target_executor.catalog.current_credentials["aws_credentials"] = deepcopy(new_credentials)  
+           
+        except Exception as e:
+            print(f"There was a problem: {e}")
+                
     def transform_copy_into_insert_into_select(self, expression, copy_data):
         """
         Transforms Snowflake COPY commands to DuckDB-compatible file reading operations.
@@ -556,10 +591,12 @@ class SnowflakeQueryTransformer(UQuery):
         s3_access_key_id = copy_data.get("s3_access_key_id")
         s3_secret_access_key = copy_data.get("s3_secret_access_key")
         if s3_access_key_id is None or s3_secret_access_key is None:
-            return None
+            return {}
         return {
-            's3_access_key_id': s3_access_key_id,
-            's3_secret_access_key':s3_secret_access_key
+            "aws_credentials": {
+                'aws_access_key_id': s3_access_key_id,
+                'aws_secret_access_key':s3_secret_access_key
+            }
         }
 
     def _iterate_through_expressions(self, expressions):

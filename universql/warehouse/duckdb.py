@@ -28,6 +28,8 @@ from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
 from universql.plugin import ICatalog, Executor, Locations, Tables, register
 from pprint import pp
+from copy import deepcopy
+
 
 # remove later
 import shutil
@@ -80,6 +82,7 @@ class DuckDBCatalog(ICatalog):
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
         self.filesystems = self.get_filesystems(session.context)
         self.default_credentials = self.get_default_credentials(session.context)
+        self.current_credentials = deepcopy(self.default_credentials)
         for filesystem in self.filesystems:
             self.duckdb.register_filesystem(filesystem)
 
@@ -130,12 +133,12 @@ class DuckDBCatalog(ICatalog):
         return filesystems
     
     def get_default_credentials(self, args: dict):
-        default_credentials = []
+        default_credentials = {}
         aws_profile = args.get('aws_profile')
         if aws_profile is not None or self.account.cloud == 'aws':
             aws_credentials = get_aws_credentials(aws_profile)
             if aws_credentials != {}:
-                default_credentials.append({"aws_credentials": aws_credentials})
+                default_credentials["aws_credentials"] = aws_credentials
             else:
                 profile_name = aws_profile if aws_profile is not None else "default"
                 raise Exception(f"Unable to find credentials for the profile \"{profile_name}\" in your credentials file")
