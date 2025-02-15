@@ -141,8 +141,8 @@ class UniverSQLSession:
                         last_executor = self.perform_query(last_executor, raw_query, plugin_hooks, ast=ast)
                         break
                     except QueryError as e:
-                        logger.warning(f"Unable to run query: {e.message}")
                         last_error = e
+                        logger.warning(f"Unable to run query: {e.message}")
 
             performance_counter = time.perf_counter()
             query_duration = performance_counter - start_time

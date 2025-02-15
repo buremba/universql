@@ -37,18 +37,6 @@ logger = logging.getLogger("🧵")
 
 app = FastAPI()
 
-sentry_sdk.init(
-    dsn="https://7dd8ba359188efce454c24defced2f13@o29344.ingest.us.sentry.io/4508141310836736",
-    # Set traces_sample_rate to 1.0 to capture 100%
-    # of transactions for tracing.
-    traces_sample_rate=1.0,
-    debug=False,
-    # Set profiles_sample_rate to 1.0 to profile 100%
-    # of sampled transactions.
-    # We recommend adjusting this value in production.
-    profiles_sample_rate=0,
-)
-
 sessions = {}
 query_results = {}
 

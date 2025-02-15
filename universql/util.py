@@ -13,6 +13,7 @@ from typing import List, Tuple
 
 import humanize
 import psutil
+import sentry_sdk
 import sqlglot
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
@@ -20,6 +21,17 @@ from starlette.requests import Request
 logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)s %(name)s %(levelname)-6s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 
+sentry_sdk.init(
+    dsn="https://7dd8ba359188efce454c24defced2f13@o29344.ingest.us.sentry.io/4508141310836736",
+    # Set traces_sample_rate to 1.0 to capture 100%
+    # of transactions for tracing.
+    traces_sample_rate=1.0,
+    debug=False,
+    # Set profiles_sample_rate to 1.0 to profile 100%
+    # of sampled transactions.
+    # We recommend adjusting this value in production.
+    profiles_sample_rate=0,
+)
 
 class Compute(Enum):
     LOCAL = "local"

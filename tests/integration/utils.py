@@ -4,7 +4,7 @@ import socketserver
 import threading
 from contextlib import contextmanager
 from itertools import product
-from typing import Generator
+from typing import Generator, Optional
 
 import pyarrow
 import pytest
@@ -187,7 +187,9 @@ def compare_results(snowflake_result: pyarrow.Table, universql_result: pyarrow.T
     print("Results match perfectly!")
 
 
-def _set_connection_name(connection_dict={}):
+def _set_connection_name(connection_dict : Optional[dict]):
+    if connection_dict is None:
+        return None
     snowflake_connection_name = connection_dict.get("snowflake_connection_name", SNOWFLAKE_CONNECTION_NAME)
     logger.info(f"Using the {snowflake_connection_name} connection")
     return snowflake_connection_name

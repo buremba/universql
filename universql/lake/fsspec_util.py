@@ -85,7 +85,8 @@ def get_friendly_disk_usage(storage: str, debug=False) -> str:
     last_free = usage.free
     return message
 
-ICEBERG_FILE_REGEX = re.compile('(?i).*/(data|metadata)/.*\.(parquet|avro|json)$')
+# iceberg files don't ever change, we can cache them locally to speed up the queries.
+ICEBERG_FILE_REGEX = re.compile('(?i)^(?:data/|metadata/)?(?:(?=.*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}).*\.parquet|.*\.avro|.*metadata\.json)$')
 
 class MonitoredSimpleCacheFileSystem(SimpleCacheFileSystem):
 
@@ -106,31 +107,31 @@ class MonitoredSimpleCacheFileSystem(SimpleCacheFileSystem):
     # def glob(self, path):
     #     return [self._strip_protocol(path)]
 
-    def get_file(self, path, lpath, **kwargs):
-        """
-        Overridden method to manage the local caching process manually.
-        Downloads the remote file to `lpath + '.tmp'` and then renames it to `lpath`.
-        """
-
-        # If the final file already exists and we are not forcing re-download, skip
-        if os.path.exists(lpath):
-            return
-
-        tmp_path = lpath + ".tmp"
-
-        # In case a previous failed download left a stale tmp file
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
-        # Ensure the target directory for lpath exists
-        os.makedirs(os.path.dirname(lpath), exist_ok=True)
-
-        # Open the remote file and download to the temporary local file
-        with self.fs.open(path, 'rb') as source, open(tmp_path, 'wb') as target:
-            shutil.copyfileobj(source, target)
-
-        # Atomically move the temporary file to the final location
-        os.rename(tmp_path, lpath)
+    # def get_file(self, path, lpath, **kwargs):
+    #     """
+    #     Overridden method to manage the local caching process manually.
+    #     Downloads the remote file to `lpath + '.tmp'` and then renames it to `lpath`.
+    #     """
+    #
+    #     # If the final file already exists and we are not forcing re-download, skip
+    #     if os.path.exists(lpath):
+    #         return
+    #
+    #     tmp_path = lpath + ".tmp"
+    #
+    #     # In case a previous failed download left a stale tmp file
+    #     if os.path.exists(tmp_path):
+    #         os.remove(tmp_path)
+    #
+    #     # Ensure the target directory for lpath exists
+    #     os.makedirs(os.path.dirname(lpath), exist_ok=True)
+    #
+    #     # Open the remote file and download to the temporary local file
+    #     with self.fs.open(path, 'rb') as source, open(tmp_path, 'wb') as target:
+    #         shutil.copyfileobj(source, target)
+    #
+    #     # Atomically move the temporary file to the final location
+    #     os.rename(tmp_path, lpath)
 
     def size(self, path):
         cached_file = self._check_file(self._strip_protocol(path))
@@ -144,9 +145,9 @@ class MonitoredSimpleCacheFileSystem(SimpleCacheFileSystem):
         Open a file. If the file's path does not match the cache regex, bypass the
         caching and read directly from the underlying filesystem.
         """
-        if not ICEBERG_FILE_REGEX.search(path):
-            # bypass caching.
-            return self.fs.open(path, mode=mode, **kwargs)
+        # if not ICEBERG_FILE_REGEX.search(path):
+        #     # bypass caching.
+        #     return self.fs.open(path, mode=mode, **kwargs)
 
         return super().open(path, mode=mode, **kwargs)
 

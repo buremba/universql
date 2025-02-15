@@ -16,5 +16,9 @@ jobs:
         run: |
           export SNOWFLAKE_CONNECTIONS=$(printf '%s' "$SNOWFLAKE_CONNECTIONS_BASE64" | base64 -d | tr '\r' '\n')
           snow --version
-          snow connection test
-          snow sql -f /resources/dwh-benchmark/clickbench.sql
+          snow connection test --environment ci-aws-us-east-1
+          python run_benchmark.py /resources/dwh-benchmark/clickbench.sql > /resources/dwh-benchmark/results.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icebergbench
+          path: /resources/dwh-benchmark
