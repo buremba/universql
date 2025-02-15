@@ -20,9 +20,8 @@ sets up [filesystem](https://duckdb.org/docs/guides/python/filesystems.html) tha
 
 # Use Cases
 
-* Smart caching for your Snowflake queries, reducing the compute costs. UniverSQL optimize the query and re-uses the cache across multiple runs, better than Snowflake's [result cache](https://docs.snowflake.com/en/user-guide/querying-persisted-results). 
+* Run your Snowflake ETL workloads on cloud or local compute without changing your code.  UniverSQL automatically converts your Snowflake SQL to DuckDB SQL so you can save money without making changes.
 * Query local files without any need to upload them to Snowflake for prototyping and only upload them when you want to publish data on cloud.
-* Utilize your hardware for running queries faster on small datasets and run queries on your data even when you don't have internet connectivity.
 * Use DuckDB warehouse for managed and on-premise Polaris Catalog. If you pass a Polaris account (`--account` parameter), UniverSQL will use embedded DuckDB as local warehouse.
 
 # Getting Started
@@ -45,6 +44,7 @@ If your Snowflake account (`snowflake --account`) is a Polaris Catalog, UniverSQ
 [Install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and [configure](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) AWS CLI.
 If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
 By default, UniverSQL uses your default AWS profile, you can pass `--aws-profile` option to `universql` to use a different profile than the default profile.
+With copy commands, you can also [specify the credentials in your query](https://docs.snowflake.com/en/sql-reference/sql/copy-into-table) 
 
 ###### Google Cloud
 
@@ -110,7 +110,7 @@ docker compose up
 * Snowflake SQL API implementation to handle the Snowflake connections, acting as a proxy between DuckDB and Snowflake.
   * You can connect UniverSQL using Snowflake Python Connector, Snowflake JDBC, ODBC or any other Snowflake client.
   * UniverSQL uses Snowflake Arrow integration to fetch the data from Snowflake and convert it to DuckDB relation.
-* [SQLGlot](https://sqlglot.com) and [Fakesnow](https://github.com/tekumara/fakesnow) for query translation from Snowflake to DuckDB,
+* [SQLGlot](https://sqlglot.com), [Fakesnow](https://github.com/tekumara/fakesnow), and UniverSQL's [custom logic](https://github.com/buremba/universql/blob/main/universql/plugins/snow.py) for query translation from Snowflake to DuckDB,
 * [Snowflake Iceberg tables](https://docs.snowflake.com/en/user-guide/tables-iceberg) and [Polaris](https://other-docs.snowflake.com/en/polaris/overview) as data catalog, depending on `--account' you proxy to.
 * Your local disk for the storage with direct access to data lakes (S3, GCS) for the cloud storage.
 * [DuckDB](https://duckdb.org) as local compute engine.
@@ -166,6 +166,37 @@ Options:
   [BETA] Check out docs at https://github.com/buremba/universql and let me
   know if you have any cool use-case on Github!
 ```
+# What is supported
+* Select, Insert, Update, Delete commands on Snowflake Iceberg tables and temp tables
+* Copy commands (see below)
+
+## Copy commands
+UniverSQL allows you to run your ETL on DuckDB by convertsing your Snowflake copy commands into DuckDB INSERT INTO SELECT commands enabling you to read data from Amazon S3 (other cloud providers coming soon) into Snowflake Iceberg tables and your own temporary tables.  You can use Snowflake stages for this or specify the credentials yourself.
+
+### Things to consider
+* DuckDB currently supports reading from CSV, AVRO, and Parquet formats.
+* We use the credentials associated with the profile you specified, or the credentials specified in the query.  If your Snowflake stages require different credentials specify them in the queries.
+
+There are some differences in how UniverSQL handles copy commands due to DuckDB's currently functionality.  The following parameters are supported:
+* TYPE
+* RECORD_DELIMITER
+* FIELD_DELIMITER
+* SKIP_HEADER
+* PARSE_HEADER
+* DATE_FORMAT
+* TIMERSTAMP_FORMAT
+* ESCAPE
+* FIELD_OPTIONALLY_ENCLOSED_BY
+* NULL_IF
+* COMPRESSION
+* ERROR_ON_COLUMN_COUNT_MISMATCH
+* EMPTY_FIELD_AS_NULL
+* ON_ERROR (CONTINUE or ABORT_STATEMENT)
+* URL
+* AWS_ROLE
+* AWS_EXTERNAL_ID
+
+These can be converted to DuckDB properties directly.  There are some things we can support via workarounds if we build it in (e.g. we could support pattern by running an INDEX request ourselves and excluding the files using REGEX).  If there is demand we will build it.  Additionally, you are welcome to contribute to the repository if there's something you want to see added.
 
 # Limitations
 
