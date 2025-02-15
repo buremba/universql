@@ -299,7 +299,7 @@ SNOWFLAKE_DEFAULT_COPY_PARAMETERS = {
     'USE_VECTORIZED_SCANNER': {"snowflake_property_type": "Boolean", "snowflake_property_value": "FALSE"}
 }
 
-DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'AVRO', 'PARQUET']
+DUCKDB_SUPPORTED_FILE_TYPES = ['CSV', 'JSON', 'PARQUET']
 
 DISALLOWED_PARAMS_BY_FORMAT = {
     "JSON": {
