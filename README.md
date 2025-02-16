@@ -43,7 +43,7 @@ If your Snowflake account (`snowflake --account`) is a Polaris Catalog, UniverSQ
 
 [Install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and [configure](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html#sso-configure-profile-token-auto-sso) AWS CLI.
 If you would like to use AWS client id / secret, you can use `aws configure` to set them up.
-By default, UniverSQL uses your default AWS profile, you can pass `--aws-profile` option to `universql` to use a different profile than the default profile.
+By default, UniverSQL uses your default AWS profile, you can pass `--aws-profile` option to `universql` to use a different profile than the default profile.  UniverSQL will use the region specified in the profile when reading data from S3.
 With copy commands, you can also [specify the credentials in your query](https://docs.snowflake.com/en/sql-reference/sql/copy-into-table) 
 
 ###### Google Cloud
