@@ -248,6 +248,8 @@ class DuckDBExecutor(Executor):
 
     def execute(self, ast: sqlglot.exp.Expression, catalog_executor: Executor, locations: Tables) -> typing.Optional[
         Locations]:
+        cache_directory = self.catalog.context.get('cache_directory')
+
         if not catalog_executor.is_warm():
             # since duckdb doesn't implement auth layer,
             # force the catalog to perform auth before executing any query
@@ -354,22 +356,26 @@ class DuckDBExecutor(Executor):
                     if not is_temp:
                         return {destination_table: ast.expression}
             elif isinstance(ast, Insert):
+                print("it is an insert")
                 table_type = self.catalog._get_table_location(destination_table)
-                if table_type == TableType.ICEBERG:
-                    namespace = self.catalog.iceberg_catalog.properties.get('namespace')
-                    try:
-                        iceberg_table = self.catalog.iceberg_catalog.load_table((namespace, full_table))
-                    except NoSuchTableError as e:
-                        raise QueryError(f"Error accessing catalog {e.args}")
-                    self.execute_raw(self._sync_and_transform_query(ast.expression, locations).sql(dialect="duckdb"),
-                                     catalog_executor)
-                    table = self.get_as_table()
-                    iceberg_table.append(table)
-                elif table_type.LOCAL:
-                    self.execute_raw(self._sync_and_transform_query(ast, locations).sql(dialect="duckdb"),
-                                     catalog_executor)
-                else:
-                    raise QueryError("Unable to determine table type")
+                try:
+                    if table_type == TableType.ICEBERG:
+                        namespace = self.catalog.iceberg_catalog.properties.get('namespace')
+                        try:
+                            iceberg_table = self.catalog.iceberg_catalog.load_table((namespace, full_table))
+                        except NoSuchTableError as e:
+                            raise QueryError(f"Error accessing catalog {e.args}")
+                        self.execute_raw(self._sync_and_transform_query(ast.expression, locations).sql(dialect="duckdb"),
+                                        catalog_executor)
+                        table = self.get_as_table()
+                        iceberg_table.append(table)
+                    elif table_type.LOCAL:
+                        self.execute_raw(self._sync_and_transform_query(ast, locations).sql(dialect="duckdb"),
+                                        catalog_executor)
+                    else:
+                        raise QueryError("Unable to determine table type")
+                finally:
+                    self._destroy_cache(cache_directory)
         elif isinstance(ast, Drop):
             delete_table = ast.this
             self.catalog.iceberg_catalog.drop_table(delete_table.sql())
@@ -392,12 +398,11 @@ class DuckDBExecutor(Executor):
             self.catalog.emulator.execute(ast.sql(dialect="snowflake"))
             catalog_executor.catalog.clear_cache()
         elif isinstance(ast, Copy):
+            print("it is a copy")
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
 
             insert_into_select_ast = sqlglot.parse_one(sql, dialect='duckdb')
             # refactor soon
-            cache_directory = self.catalog.context.get('cache_directory')
-
             try:
                 self.execute_raw(sql, catalog_executor, is_raw=isinstance(ast, Copy))
             finally:
