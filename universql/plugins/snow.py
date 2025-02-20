@@ -693,7 +693,7 @@ class SnowflakeQueryTransformer(UQuery):
     def _format_value_for_duckdb(self, file_format, snowflake_property_name, data):
         snowflake_type = data["snowflake_property_type"]
         duckdb_type = data["duckdb_property_type"]
-        snowflake_value = data["snowflake_property_value"]
+        snowflake_value = str(data["snowflake_property_value"])
         if snowflake_property_name in ["date_format", "timestamp_format"]:
             duckdb_value = snowflake_value
             for snowflake_datetime_component, duckdb_datetime_component in SNOWFLAKE_TO_DUCKDB_DATETIME_MAPPINGS.items():
