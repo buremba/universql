@@ -3,17 +3,19 @@ import os
 import socketserver
 import threading
 from contextlib import contextmanager
-from itertools import product
 from typing import Generator, Optional
 
 import pyarrow
 import pytest
 from click.testing import CliRunner
+from dotenv import load_dotenv
 from snowflake.connector import connect as snowflake_connect, SnowflakeConnection
 from snowflake.connector.config_manager import CONFIG_MANAGER
 from snowflake.connector.constants import CONNECTIONS_FILE
 
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 from universql.util import LOCALHOSTCOMPUTING_COM
 

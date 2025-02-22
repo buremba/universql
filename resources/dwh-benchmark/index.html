@@ -333,6 +333,18 @@
         let filesLoaded = 0;
         const totalFiles = 2;
 
+        // Initialize selectors object
+        let selectors = {
+            "system": {},
+            "type": {},
+            "machine": {},
+            "cluster_size": {},
+            "metric": "hot",
+            "queries": [],
+        };
+
+        let theme = 'light';
+
         function updateLoadingProgress() {
             filesLoaded++;
             const progress = (filesLoaded / totalFiles) * 100;
@@ -817,6 +829,100 @@
         if (ratio == 1) {
             elem.style.fontWeight = 'bold';
         }
+    }
+
+    function initializeBenchmark() {
+        // Initialize theme
+        document.getElementById('toggle-light').addEventListener('click', e => setTheme('light'));
+        document.getElementById('toggle-dark').addEventListener('click', e => setTheme('dark'));
+
+        let new_theme = window.localStorage.getItem('theme');
+        if (new_theme && new_theme != theme) {
+            setTheme(new_theme);
+        }
+
+        // Initialize selectors
+        let systems = document.getElementById('selectors_system');
+        let types = document.getElementById('selectors_type');
+        let machines = document.getElementById('selectors_machine');
+        let cluster_sizes = document.getElementById('selectors_cluster_size');
+
+        let unique_systems = [...new Set(data.map(elem => elem.system))];
+
+        // Generate system selectors
+        unique_systems.map(elem => {
+            let selector = document.createElement('a');
+            selector.className = 'selector selector-active';
+            selector.appendChild(document.createTextNode(elem));
+            systems.appendChild(selector);
+            if (!(elem in selectors.system)) { selectors.system[elem] = data.some(entry => entry.system == elem && !entry.hide); }
+            selector.addEventListener('click', e => toggle(e, elem, selectors.system));
+
+            // Highlighting summary rows and table columns on hovering over the system selector
+            selector.addEventListener('mouseover', e => {
+                [...document.querySelectorAll('.summary-row')].map(row => {
+                    row.className = row.dataset.system == elem ? 'summary-row summary-row-hilite' : 'summary-row' });
+                [...document.querySelectorAll('.th-entry')].map(th => {
+                    th.className = th.dataset.system == elem ? 'th-entry th-entry-hilite' : 'th-entry' });
+            });
+            selector.addEventListener('mouseout', e => {
+                [...document.querySelectorAll('.summary-row')].map(row => { row.className = 'summary-row' });
+                [...document.querySelectorAll('.th-entry')].map(row => { row.className = 'th-entry' });
+            });
+        });
+
+        // Generate type selectors
+        [...new Set(data.map(elem => elem.tags).flat())].map(elem => {
+            let selector = document.createElement('a');
+            selector.className = 'selector selector-active';
+            selector.appendChild(document.createTextNode(elem));
+            types.appendChild(selector);
+            if (!(elem in selectors.type)) { selectors.type[elem] = true; }
+            selector.addEventListener('click', e => toggle(e, elem, selectors.type));
+        });
+
+        // Generate machine selectors
+        [...new Set(data.map(elem => elem.machine))].map(elem => {
+            let selector = document.createElement('a');
+            selector.className = 'selector selector-active';
+            selector.appendChild(document.createTextNode(elem));
+            machines.appendChild(selector);
+            if (!(elem in selectors.machine)) { selectors.machine[elem] = true; }
+            selector.addEventListener('click', e => toggle(e, elem, selectors.machine));
+        });
+
+        // Generate cluster size selectors
+        [...new Set(data.map(elem => elem.cluster_size))].sort(
+            (a, b) => ((typeof(b) === 'number') - (typeof(a) === 'number')) || (a - b)).map(elem => {
+            let selector = document.createElement('a');
+            selector.className = 'selector selector-active';
+            selector.appendChild(document.createTextNode(elem));
+            cluster_sizes.appendChild(selector);
+            if (!(elem in selectors.cluster_size)) { selectors.cluster_size[elem] = true; }
+            selector.addEventListener('click', e => toggle(e, elem, selectors.cluster_size));
+        });
+
+        // Add event listeners for selector controls
+        document.getElementById('select-all-systems').addEventListener('click', e => toggleAll(e, selectors.system));
+        document.getElementById('select-all-types').addEventListener('click', e => toggleAll(e, selectors.type));
+        document.getElementById('select-all-machines').addEventListener('click', e => toggleAll(e, selectors.machine));
+        document.getElementById('select-all-cluster-sizes').addEventListener('click', e => toggleAll(e, selectors.cluster_size));
+
+        [...document.getElementById('selectors_run').querySelectorAll('a')].map(elem => elem.addEventListener('click', e => {
+            [...e.target.parentElement.querySelectorAll('a')].map(elem => { elem.className = elem == e.target ? 'selector selector-active' : 'selector' });
+        }));
+
+        // Add event listeners for metric selectors
+        document.getElementById('selector-metric-cold').addEventListener('click', e => { selectors.metric = 'cold'; render(); updateHistory(); });
+        document.getElementById('selector-metric-hot').addEventListener('click', e => { selectors.metric = 'hot'; render(); updateHistory(); });
+        document.getElementById('selector-metric-load').addEventListener('click', e => { selectors.metric = 'load'; render(); updateHistory(); });
+        document.getElementById('selector-metric-size').addEventListener('click', e => { selectors.metric = 'size'; render(); updateHistory(); });
+
+        // Initialize queries
+        selectors.queries = [...data[0].result.keys()].map(k => true);
+
+        // Initial render
+        render();
     }
 
     function render() {

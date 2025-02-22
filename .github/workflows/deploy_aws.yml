@@ -17,7 +17,6 @@ jobs:
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
-
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -26,16 +25,16 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
-
+        with:
+          registry-type: public
       - name: Build, tag, and push image to Amazon ECR
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: universql
+          ECR_REGISTRY: public.ecr.aws/m5p8n9s4/universql
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f snowflake.aws.lambda.Dockerfile --push .
-
+          docker build -t $ECR_REGISTRY:$IMAGE_TAG -f snowflake.aws.lambda.Dockerfile --push .
       - uses: int128/deploy-lambda-action@v1
         with:
           function-name: universql-server
-          image-uri: 730335382627.dkr.ecr.us-east-1.amazonaws.com/universql:latest
+          image-uri: public.ecr.aws/m5p8n9s4/universql:latest
+          #image-uri: 730335382627.dkr.ecr.us-east-1.amazonaws.com/universql:latest

@@ -15,7 +15,6 @@ from duckdb.duckdb import NotSupportedError
 from fakesnow import macros, info_schema
 from fakesnow.conn import FakeSnowflakeConnection
 from fakesnow.cursor import FakeSnowflakeCursor
-from fsspec.asyn import AsyncFileSystem
 from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.io import LOCATION
 from snowflake.connector.options import pyarrow
@@ -27,10 +26,6 @@ from universql.protocol.session import UniverSQLSession
 from universql.protocol.utils import DuckDBFunctions, get_field_from_duckdb
 from universql.util import prepend_to_lines, QueryError, calculate_script_cost, parse_snowflake_account, full_qualifier
 from universql.plugin import ICatalog, Executor, Locations, Tables, register
-from pprint import pp
-
-# remove later
-import shutil
 
 logger = logging.getLogger("🐥")
 
@@ -193,8 +188,9 @@ class DuckDBExecutor(Executor):
 
     def _sync_and_transform_query(self, ast: sqlglot.exp.Expression, locations: Tables) -> sqlglot.exp.Expression:
         self._sync_catalog(locations)
-        final_ast = ast.transform(self.fix_snowflake_to_duckdb_types)
-
+        final_ast = (ast
+                     .transform(self.fix_snowflake_to_duckdb_types)
+                     .transform(self.remove_snowflake_table_references))
         return final_ast
 
     def _sync_catalog(self, locations: Tables):
@@ -354,6 +350,7 @@ class DuckDBExecutor(Executor):
                     if not is_temp:
                         return {destination_table: ast.expression}
             elif isinstance(ast, Insert):
+                query = self._sync_and_transform_query(ast.expression, locations)
                 table_type = self.catalog._get_table_location(destination_table)
                 if table_type == TableType.ICEBERG:
                     namespace = self.catalog.iceberg_catalog.properties.get('namespace')
@@ -361,12 +358,12 @@ class DuckDBExecutor(Executor):
                         iceberg_table = self.catalog.iceberg_catalog.load_table((namespace, full_table))
                     except NoSuchTableError as e:
                         raise QueryError(f"Error accessing catalog {e.args}")
-                    self.execute_raw(self._sync_and_transform_query(ast.expression, locations).sql(dialect="duckdb"),
+                    self.execute_raw(query.sql(dialect="duckdb"),
                                      catalog_executor)
                     table = self.get_as_table()
                     iceberg_table.append(table)
-                elif table_type.LOCAL:
-                    self.execute_raw(self._sync_and_transform_query(ast, locations).sql(dialect="duckdb"),
+                elif table_type == TableType.LOCAL:
+                    self.execute_raw(query.sql(dialect="duckdb"),
                                      catalog_executor)
                 else:
                     raise QueryError("Unable to determine table type")
@@ -398,17 +395,11 @@ class DuckDBExecutor(Executor):
             # refactor soon
             cache_directory = self.catalog.context.get('cache_directory')
 
-            try:
-                self.execute_raw(sql, catalog_executor, is_raw=isinstance(ast, Copy))
-            finally:
-                self._destroy_cache(cache_directory)
+            self.execute_raw(sql, catalog_executor, is_raw=isinstance(ast, Copy))
         else:
             sql = self._sync_and_transform_query(ast, locations).sql(dialect="duckdb", pretty=True)
             self.execute_raw(sql, catalog_executor, is_raw=isinstance(ast, Copy))
         return None
-
-    def _destroy_cache(self, cache_directory):
-        shutil.rmtree(cache_directory)
 
     def get_raw_table(self):
         if self.is_last_raw:
@@ -428,6 +419,14 @@ class DuckDBExecutor(Executor):
 
     def close(self):
         self.catalog.emulator.close()
+
+    @staticmethod
+    def remove_snowflake_table_references(
+            expression: sqlglot.exp.Expression) -> sqlglot.exp.Expression:
+        # replace table(func()) with func() as it's not required in duckdb
+        if isinstance(expression, sqlglot.exp.Anonymous) and expression.this == 'table':
+            return expression.expressions[0]
+        return expression
 
     @staticmethod
     def fix_snowflake_to_duckdb_types(
