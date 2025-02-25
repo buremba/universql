@@ -21,7 +21,7 @@ class PolarisCatalog(ICatalog):
         raise SnowflakeError(self.session_id, "Polaris doesn't support direct execution")
 
     def __init__(self, session : UniverSQLSession, compute: dict):
-        super().__init__(session, compute)
+        super().__init__(session)
         current_database = session.credentials.get('database')
         if current_database is None:
             raise SnowflakeError(session.session_id, "No database/catalog provided, unable to connect to Polaris catalog")

@@ -38,8 +38,8 @@ class TableType(Enum):
 @register(name="duckdb")
 class DuckDBCatalog(ICatalog):
 
-    def __init__(self, session: UniverSQLSession, compute: dict):
-        super().__init__(session, compute)
+    def __init__(self, session: UniverSQLSession):
+        super().__init__(session)
         duck_config = {
             'temp_directory': os.path.join(session.context.get('cache_directory'), "duckdb-staging"),
             # 'lock_configuration': 'true',
@@ -358,8 +358,7 @@ class DuckDBExecutor(Executor):
                         iceberg_table = self.catalog.iceberg_catalog.load_table((namespace, full_table))
                     except NoSuchTableError as e:
                         raise QueryError(f"Error accessing catalog {e.args}")
-                    self.execute_raw(query.sql(dialect="duckdb"),
-                                     catalog_executor)
+                    self.execute_raw(query.sql(dialect="duckdb"), catalog_executor)
                     table = self.get_as_table()
                     iceberg_table.append(table)
                 elif table_type == TableType.LOCAL:

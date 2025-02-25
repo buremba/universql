@@ -17,11 +17,10 @@ Tables = typing.Dict[sqlglot.exp.Table, pyiceberg.table.Table | None]
 
 
 class ICatalog(ABC):
-    def __init__(self, session: "universql.protocol.session.UniverSQLSession", compute: dict):
+    def __init__(self, session: "universql.protocol.session.UniverSQLSession"):
         self.context = session.context
         self.session_id = session.session_id
         self.credentials = session.credentials
-        self.compute = compute
         self.iceberg_catalog = session.iceberg_catalog
 
     @abstractmethod
@@ -62,6 +61,9 @@ class Executor(typing.Protocol[T]):
 
     def is_warm(self):
         return getattr(self, '_warm', False)
+
+    def insert(self, table: sqlglot.exp.Table, data: pyarrow.Table):
+        raise NotImplementedError()
 
     @abstractmethod
     def execute(self, ast: sqlglot.exp.Expression, catalog_executor: "Executor", locations: Tables) -> \

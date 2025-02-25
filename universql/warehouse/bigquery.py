@@ -81,8 +81,8 @@ class BigQueryIcebergExecutor(Executor):
 @register(name="bigquery")
 class BigQueryCatalog(ICatalog):
 
-    def __init__(self, session : UniverSQLSession, compute: dict):
-        super().__init__(session, compute)
+    def __init__(self, session : UniverSQLSession):
+        super().__init__(session)
         self.tables = None
 
     def register_locations(self, tables: Locations):

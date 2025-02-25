@@ -7,6 +7,7 @@ from snowflake.connector.constants import FIELD_TYPES, FIELD_NAME_TO_ID
 from snowflake.connector.cursor import ResultMetadataV2
 
 
+
 class DuckDBFunctions:
     @staticmethod
     def register(db: duckdb.DuckDBPyConnection):
@@ -246,3 +247,5 @@ def get_field_from_duckdb(column: list[str], arrow_table: Table, idx: int) -> ty
 
     field = pa.field(field_name, type=pa_type, nullable=True, metadata=metadata)
     return value, field
+
+

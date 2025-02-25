@@ -42,15 +42,14 @@ Summary.__init__ = summary_init
 @register(name="snowflake")
 class SnowflakeCatalog(ICatalog):
 
-    def __init__(self, session : UniverSQLSession, compute):
-        super().__init__(session, compute)
+    def __init__(self, session : UniverSQLSession):
+        super().__init__(session)
         if session.context.get('account') is not None:
             session.credentials["account"] = session.context.get('account')
         if SNOWFLAKE_HOST is not None:
             session.credentials["host"] = SNOWFLAKE_HOST
 
         self.databases = {}
-        session.credentials["warehouse"] = compute.get('warehouse', str(uuid4()))
         # lazily create
         self._cursor = None
 

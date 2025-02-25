@@ -6,7 +6,6 @@ import base64
 import os
 import signal
 import threading
-from threading import Thread
 from traceback import print_exc
 
 from typing import Any
@@ -25,19 +24,16 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, HTMLResponse
 
 from universql.agent.cloudflared import get_cloudflare_url
-from universql.lake.fsspec_util import get_friendly_disk_usage
 from universql.plugin import APPS
 from universql.util import unpack_request_body, session_from_request, parameters, \
-    print_dict_as_markdown_table, QueryError, LOCALHOSTCOMPUTING_COM
+    print_dict_as_markdown_table, QueryError, LOCALHOSTCOMPUTING_COM, current_context
 from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
-from universql.protocol.session import UniverSQLSession
+from universql.protocol.session import UniverSQLSession, sessions, harakiri, kill_event
 
 logger = logging.getLogger("🧵")
 
 app = FastAPI()
-
-sessions = {}
 query_results = {}
 
 # register all warehouses and plugins
@@ -50,19 +46,6 @@ for module in [
     "universql.plugins.ui",
 ]:
     __import__(module)
-
-context = click.get_current_context(silent=True)
-if context is None:
-    # set log level
-    logging.getLogger().setLevel(logging.INFO)
-
-    # not running through CLI
-    from universql.main import snowflake, get_context_params
-
-    current_context = get_context_params(snowflake)
-    logger.info(f"Context is {current_context}")
-else:
-    current_context = context.params
 
 
 @app.post("/session/v1/login-request")
@@ -360,55 +343,6 @@ async def query_monitoring_query(request: Request) -> JSONResponse:
     return JSONResponse({"data": {"queries": [{"status": "SUCCESS"}]}, "success": True})
 
 
-ENABLE_DEBUG_WATCH_TOWER = False
-WATCH_TOWER_SCHEDULE_SECONDS = 2
-kill_event = threading.Event()
-
-
-def watch_tower(cache_directory, **kwargs):
-    while True:
-        kill_event.wait(timeout=WATCH_TOWER_SCHEDULE_SECONDS)
-        if kill_event.is_set():
-            break
-        processing_sessions = sum(session.processing for token, session in sessions.items())
-        if ENABLE_DEBUG_WATCH_TOWER or processing_sessions > 0:
-            try:
-                import psutil
-                process = psutil.Process()
-                cpu_percent = f"[CPU: {'%.1f' % psutil.cpu_percent()}%]"
-                memory_percent = f"[Memory: {'%.1f' % process.memory_percent()}%]"
-            except:
-                memory_percent = ""
-                cpu_percent = ""
-
-            disk_info = get_friendly_disk_usage(cache_directory, debug=ENABLE_DEBUG_WATCH_TOWER)
-            logger.info(f"Currently {len(sessions)} sessions running {processing_sessions} queries "
-                        f"| System: {cpu_percent} {memory_percent} [Disk: {disk_info}] ")
-
-
-thread = Thread(target=watch_tower, kwargs=current_context)
-thread.daemon = True
-thread.start()
-
-
-# If the user intends to kill the server, not wait for DuckDB to gracefully shutdown.
-# It's nice to treat the Duck better giving it time but user's time is more valuable than the duck's.
-def harakiri(sig, frame):
-    print("Killing the server, bye!")
-    kill_event.set()
-    os.kill(os.getpid(), signal.SIGKILL)
-
-
-# last_intent_to_kill = time.time()
-# def graceful_shutdown(_, frame):
-#     global last_intent_to_kill
-#     processing_sessions = sum(session.processing for token, session in sessions.items())
-#     if processing_sessions == 0 or (time.time() - last_intent_to_kill) < 5000:
-#         harakiri(signal, frame)
-#     else:
-#         print(f'Repeat sigint to confirm killing {processing_sessions} running queries.')
-#         last_intent_to_kill = time.time()
-
 @app.on_event("shutdown")
 async def shutdown_event():
     kill_event.set()
@@ -418,8 +352,7 @@ async def shutdown_event():
 
 @app.on_event("startup")
 async def startup_event():
-    context = current_context
-    params = {k: v for k, v in context.items() if
+    params = {k: v for k, v in current_context.items() if
               v is not None and k not in ["host", "port"]}
     click.secho(yaml.dump(params).strip())
     if threading.current_thread() is threading.main_thread():
@@ -427,11 +360,11 @@ async def startup_event():
             signal.signal(signal.SIGINT, harakiri)
         except Exception as e:
             logger.warning("Failed to set signal handler for SIGINT: %s", str(e))
-    host = context.get('host')
-    tunnel = context.get('tunnel')
-    port = context.get('port')
+    host = current_context.get('host')
+    tunnel = current_context.get('tunnel')
+    port = current_context.get('port')
     if tunnel == "cloudflared":
-        metrics_port = context.get('metrics_port')
+        metrics_port = current_context.get('metrics_port')
         click.secho(f" * Traffic stats available on http://127.0.0.1:{metrics_port}/metrics")
         host_port = host = get_cloudflare_url(metrics_port)
         port = 443

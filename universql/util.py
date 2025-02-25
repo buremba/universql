@@ -1,4 +1,3 @@
-import base64
 import datetime
 import gzip
 import json
@@ -11,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Tuple
 
+import click
 import humanize
 import psutil
 import sentry_sdk
@@ -340,6 +340,16 @@ def print_dict_as_markdown_table(input_dict, footer_message: Tuple[str], column_
         ["│ " + message.ljust(92) + '│' for message in footer_message]) + '\n'
     return result + footer + top_bottom_line
 
+def get_context_params(endpoint):
+    env_vars = {}
+    for param in endpoint.params:
+        if param.default is not None:
+            env_vars[param.name] = str(param.default)
+        if param.envvar is not None:
+            env_value = os.getenv(param.envvar, None)
+            if env_value is not None:
+                env_vars[param.name] = env_value
+    return env_vars
 
 def time_me(func):
     def wrapper(*args, **kwargs):
@@ -361,7 +371,6 @@ def remove_nulls_from_dict(input_dict):
 
 
 TOTAL_MEMORY_SIZE = psutil.virtual_memory().total
-
 
 def calculate_script_cost(duration_second, electricity_rate=0.15, pc_lifetime_years=5):
     execution_time_hours = duration_second / (60 * 60)  # Convert ms to hours
@@ -398,31 +407,6 @@ def calculate_script_cost(duration_second, electricity_rate=0.15, pc_lifetime_ye
 
 
 pattern = r'(\w+)(?:\(([^)]*)\))'
-
-
-def parse_compute(warehouse):
-    if warehouse is not None:
-        matches = re.findall(pattern, warehouse)
-        if len(matches) == 0:
-            matches = (('duckdb', ''), ('snowflake', f'warehouse={warehouse}'))
-    else:
-        # try locally if warehouse is not provided
-        matches = (('duckdb', ''),)
-
-    result = []
-    for func_name, args_str in matches:
-        args = {}
-        if args_str:
-            for arg in args_str.split(','):
-                if '=' in arg:
-                    key, warehouse = arg.split('=', 1)
-                    args[key.strip()] = warehouse.strip()
-                else:
-                    args[arg.strip()] = None  # Handle arguments without '='
-        result.append({'name': func_name, 'args': args})
-    return result
-
-
 DEFAULTS = {
     "max_memory": sizeof_fmt(TOTAL_MEMORY_SIZE * 0.8),
     "max_cache_size": sizeof_fmt(psutil.disk_usage("./").free * 0.8)
@@ -493,3 +477,17 @@ def load_catalogs():
             __import__(module_path)
         except Exception as e:
             print(f"Failed to load {module_path}: {e}")
+
+current_context = None
+
+def initialize_context():
+    context = click.get_current_context(silent=True)
+    if context is None:
+        # set log level
+        logging.getLogger().setLevel(logging.INFO)
+
+        # not running through CLI
+        from universql.main import snowflake
+        globals()["current_context"] = get_context_params(snowflake)
+    else:
+        globals()["current_context"] = context.params

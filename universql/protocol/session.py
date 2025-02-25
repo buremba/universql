@@ -1,12 +1,14 @@
 import logging
-import os
+from universql.lake.fsspec_util import get_friendly_disk_usage
 import tempfile
 import time
 from string import Template
 from traceback import print_exc
 from typing import List
 from urllib.parse import urlparse, parse_qs
-
+import os
+import signal
+import threading
 import pyarrow
 import pyiceberg.table
 import sentry_sdk
@@ -19,10 +21,12 @@ from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon, 
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
 from universql.util import get_friendly_time_since, \
-    prepend_to_lines, parse_compute, QueryError, full_qualifier
+    prepend_to_lines, QueryError, full_qualifier, current_context
 from universql.plugin import Executor, Tables, ICatalog, COMPUTES, PLUGINS, UniversqlPlugin, UQuery
 
 logger = logging.getLogger("💡")
+sessions = {}
+
 
 class UniverSQLSession:
     def __init__(self, context, session_id, credentials: dict, session_parameters: dict):
@@ -30,19 +34,13 @@ class UniverSQLSession:
         self.credentials = credentials
         self.session_parameters = [{"name": item[0], "value": item[1]} for item in session_parameters.items()]
         self.session_id = session_id
-        self.compute_plan = parse_compute(self.credentials.get("warehouse"))
-
-        snowflake_computes = filter(lambda x: x.get("name") == 'snowflake', self.compute_plan)
-        first_catalog_compute = next(snowflake_computes, {}).get('args')
-        self.allowed_to_run_compute_on_catalog = first_catalog_compute is not None
         self.iceberg_catalog = self._get_iceberg_catalog()
-        self.catalog = COMPUTES["snowflake"](self, first_catalog_compute or {})
+        self.catalog = COMPUTES["snowflake"](self)
         self.catalog_executor = self.catalog.executor()
-        self.computes = {"snowflake": self.catalog_executor}
         self.processing = False
         self.metadata_db = None
-        self.plugins : List[UniversqlPlugin] = [plugin(self) for plugin in PLUGINS]
-
+        self.plugins: List[UniversqlPlugin] = [plugin(self) for plugin in PLUGINS]
+        self.query_history = []
 
     def _get_iceberg_catalog(self):
         iceberg_catalog = self.context.get('universql_catalog')
@@ -82,21 +80,8 @@ class UniverSQLSession:
 
     def _must_run_on_catalog(self, tables, ast):
         queries_that_doesnt_need_warehouse = ["show"]
-        if ast.name in queries_that_doesnt_need_warehouse \
-                or ast.key in queries_that_doesnt_need_warehouse:
-            return True
-        for table in tables:
-            if (len(table.parts) == 1 and self.credentials.get('schema') == "information_schema"
-                    or len(table.parts) > 1 and isinstance(table.parts[-2].this, str) and
-                    table.parts[-2].this.lower() == 'information_schema'
-                    or len(table.parts) > 2 and isinstance(table.parts[-3].this, str)
-                    and table.parts[-3].this.lower() == "snowflake"):
-                logger.info(f"[{self.session_id}] Skipping local execution, found {table.sql()}")
-                if not self.allowed_to_run_compute_on_catalog:
-                    raise QueryError(
-                        f"Set warehouse (SET WAREHOUSE warehouse_name) to query {table.sql()}. Can't run the query outside of Snowflake")
-                return True
-        return False
+        return ast.name in queries_that_doesnt_need_warehouse \
+                or ast.key in queries_that_doesnt_need_warehouse
 
     def _do_query(self, start_time: float, raw_query: str) -> pyarrow.Table:
         with sentry_sdk.start_span(op="sqlglot", name="Parsing query"):
@@ -104,9 +89,7 @@ class UniverSQLSession:
                 queries = sqlglot.parse(raw_query, read="snowflake")
             except ParseError as e:
                 queries = None
-                has_snowflake = any(compute.get('name') == 'snowflake' for compute in self.compute_plan)
-                if not has_snowflake:
-                    raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
+                raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
 
         last_executor = None
 
@@ -124,25 +107,13 @@ class UniverSQLSession:
             last_executor = self.perform_query(self.catalog_executor, raw_query, plugin_hooks)
         else:
             last_error = None
+            target_compute = COMPUTES.get('duckdb')
+
             for ast in queries:
                 if isinstance(ast, Semicolon) and ast.this is None:
                     continue
-                for compute in self.compute_plan:
-                    last_error = None
-                    compute_name = compute.get('name')
-                    last_executor = self.computes.get(compute_name)
-                    if last_executor is None:
-                        target_compute = COMPUTES.get(compute_name)
-                        if target_compute is None:
-                            raise QueryError(f"Unknown compute found: {compute_name}")
-                        last_executor = target_compute(self, compute).executor()
-                        self.computes[compute_name] = last_executor
-                    try:
-                        last_executor = self.perform_query(last_executor, raw_query, plugin_hooks, ast=ast)
-                        break
-                    except QueryError as e:
-                        last_error = e
-                        logger.warning(f"Unable to run query: {e.message}")
+                last_executor = target_compute(self).executor()
+                last_executor = self.perform_query(last_executor, raw_query, plugin_hooks, ast=ast)
 
             performance_counter = time.perf_counter()
             query_duration = performance_counter - start_time
@@ -177,7 +148,8 @@ class UniverSQLSession:
                 if expression.catalog or expression.db or str(expression.this.this) not in cte_aliases:
                     yield full_qualifier(expression, self.credentials), cte_aliases
 
-    def perform_query(self, alternative_executor: Executor, raw_query, plugin_hooks : List[UQuery], ast=None) -> Executor:
+    def perform_query(self, alternative_executor: Executor, raw_query, plugin_hooks: List[UQuery],
+                      ast=None) -> Executor:
         if ast is not None and alternative_executor != self.catalog_executor:
             must_run_on_catalog = False
             if isinstance(ast, Create):
@@ -279,3 +251,52 @@ class UniverSQLSession:
             else:
                 raise Exception(f"Unknown table type {table}")
         return locations | cached_tables
+
+
+ENABLE_DEBUG_WATCH_TOWER = False
+WATCH_TOWER_SCHEDULE_SECONDS = 2
+kill_event = threading.Event()
+
+
+def watch_tower(cache_directory, **kwargs):
+    while True:
+        kill_event.wait(timeout=WATCH_TOWER_SCHEDULE_SECONDS)
+        if kill_event.is_set():
+            break
+        processing_sessions = sum(session.processing for token, session in sessions.items())
+        if ENABLE_DEBUG_WATCH_TOWER or processing_sessions > 0:
+            try:
+                import psutil
+                process = psutil.Process()
+                cpu_percent = f"[CPU: {'%.1f' % psutil.cpu_percent()}%]"
+                memory_percent = f"[Memory: {'%.1f' % process.memory_percent()}%]"
+            except:
+                memory_percent = ""
+                cpu_percent = ""
+
+            disk_info = get_friendly_disk_usage(cache_directory, debug=ENABLE_DEBUG_WATCH_TOWER)
+            logger.info(f"Currently {len(sessions)} sessions running {processing_sessions} queries "
+                        f"| System: {cpu_percent} {memory_percent} [Disk: {disk_info}] ")
+
+
+thread = threading.Thread(target=watch_tower, kwargs=current_context)
+thread.daemon = True
+thread.start()
+
+
+# If the user intends to kill the server, not wait for DuckDB to gracefully shutdown.
+# It's nice to treat the Duck better giving it time but user's time is more valuable than the duck's.
+def harakiri(sig, frame):
+    print("Killing the server, bye!")
+    kill_event.set()
+    os.kill(os.getpid(), signal.SIGKILL)
+
+# last_intent_to_kill = time.time()
+# def graceful_shutdown(_, frame):
+#     global last_intent_to_kill
+#     processing_sessions = sum(session.processing for token, session in sessions.items())
+#     if processing_sessions == 0 or (time.time() - last_intent_to_kill) < 5000:
+#         harakiri(signal, frame)
+#     else:
+#         print(f'Repeat sigint to confirm killing {processing_sessions} running queries.')
+#         last_intent_to_kill = time.time()

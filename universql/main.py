@@ -15,7 +15,7 @@ from requests import RequestException
 
 from universql.agent.cloudflared import start_cloudflared
 from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, LOCALHOSTCOMPUTING_COM, \
-    DEFAULTS
+    DEFAULTS, initialize_context
 
 logger = logging.getLogger("🏠")
 
@@ -126,6 +126,7 @@ def snowflake(host, port, ssl_keyfile, ssl_certfile, account, catalog, metrics_p
         logger.error("Ngrok is not supported yet. Please use cloudflared.")
         sys.exit(1)
 
+    initialize_context()
     if host == LOCALHOSTCOMPUTING_COM or ssl_certfile is not None or os.getenv('USE_LOCALCOMPUTING_COM') == '1':
         with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:
             cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
@@ -164,17 +165,6 @@ class EndpointFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return record.getMessage().find(self._path) == -1
 
-
-def get_context_params(endpoint):
-    env_vars = {}
-    for param in endpoint.params:
-        if param.default is not None:
-            env_vars[param.name] = str(param.default)
-        if param.envvar is not None:
-            env_value = os.getenv(param.envvar, None)
-            if env_value is not None:
-                env_vars[param.name] = env_value
-    return env_vars
 
 
 uvicorn_logger = logging.getLogger("uvicorn.access")

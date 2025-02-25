@@ -11,8 +11,8 @@ from universql.plugin import ICatalog, Executor, Locations, Tables, register
 
 @register(name="redshift")
 class RedshiftCatalog(ICatalog):
-    def __init__(self, session: UniverSQLSession, compute: dict):
-        super().__init__(session, compute)
+    def __init__(self, session: UniverSQLSession):
+        super().__init__(session)
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:
         raise UnsupportedOperationException("BigQuery does not support registering tables")
