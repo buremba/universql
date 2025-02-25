@@ -36,6 +36,7 @@ class UniverSQLSession:
         self.session_id = session_id
         self.iceberg_catalog = self._get_iceberg_catalog()
         self.catalog = COMPUTES["snowflake"](self)
+        self.target_compute = COMPUTES["duckdb"](self)
         self.catalog_executor = self.catalog.executor()
         self.processing = False
         self.metadata_db = None
@@ -107,12 +108,11 @@ class UniverSQLSession:
             last_executor = self.perform_query(self.catalog_executor, raw_query, plugin_hooks)
         else:
             last_error = None
-            target_compute = COMPUTES.get('duckdb')
 
             for ast in queries:
                 if isinstance(ast, Semicolon) and ast.this is None:
                     continue
-                last_executor = target_compute(self).executor()
+                last_executor = self.target_compute.executor()
                 last_executor = self.perform_query(last_executor, raw_query, plugin_hooks, ast=ast)
 
             performance_counter = time.perf_counter()
