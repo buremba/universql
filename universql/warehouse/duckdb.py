@@ -350,9 +350,9 @@ class DuckDBExecutor(Executor):
                     if not is_temp:
                         return {destination_table: ast.expression}
             elif isinstance(ast, Insert):
-                query = self._sync_and_transform_query(ast.expression, locations)
                 table_type = self.catalog._get_table_location(destination_table)
                 if table_type == TableType.ICEBERG:
+                    query = self._sync_and_transform_query(ast.expression, locations)
                     namespace = self.catalog.iceberg_catalog.properties.get('namespace')
                     try:
                         iceberg_table = self.catalog.iceberg_catalog.load_table((namespace, full_table))
@@ -362,6 +362,7 @@ class DuckDBExecutor(Executor):
                     table = self.get_as_table()
                     iceberg_table.append(table)
                 elif table_type == TableType.LOCAL:
+                    query = self._sync_and_transform_query(ast, locations)
                     self.execute_raw(query.sql(dialect="duckdb"),
                                      catalog_executor)
                 else:
