@@ -112,7 +112,7 @@ def universql_connection(**properties) -> SnowflakeConnection:
         print(f"Reusing existing server running on port {server_cache[account]} for account {account}")
     else:
         from universql.main import snowflake
-        with socketserver.TCPServer(("localhost", 0), None) as s:
+        with socketserver.TCPServer(("127.0.0.1", 0), None) as s:
             free_port = s.server_address[1]
 
         def start_universql():

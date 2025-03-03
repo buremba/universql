@@ -351,6 +351,11 @@ class DuckDBExecutor(Executor):
                         return {destination_table: ast.expression}
             elif isinstance(ast, Insert):
                 table_type = self.catalog._get_table_location(destination_table)
+                # if table_type is None:
+                #     tt = catalog_executor.catalog.get_table_paths([destination_table])
+                #     table_type = tt[destination_table]
+                if table_type is None:
+                    raise QueryError(f"Duckdb can only INSERT INTO tables that is created within the session. {destination_table} is not created in this session")
                 if table_type == TableType.ICEBERG:
                     query = self._sync_and_transform_query(ast.expression, locations)
                     namespace = self.catalog.iceberg_catalog.properties.get('namespace')
