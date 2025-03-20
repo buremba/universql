@@ -32,7 +32,7 @@ duckdb-engine = "^0.13.2"
 
 # GCS
 gcsfs = "^2024.6.1"
-google-cloud-bigquery = "^3.25.0"
+google-cloud-bigquery = "^3.30.0"
 # AWS
 s3fs = "^2024.6.1"
 aws-cdk-lib = "^2.162.0"
