@@ -14,7 +14,7 @@ python = ">=3.11,<3.13"
 duckdb = "^1.1.3"
 fastapi = "^0.111.0"
 uvicorn = "^0.30.1"
-snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], version = "^3.12.0"}
+snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], version = "^3.14.0"}
 # same with fakesnow
 sqlglot = "~25.34.0"
 fsspec = "^2024.6.1"
