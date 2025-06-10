@@ -1,6 +1,5 @@
+import asyncio
 import datetime
-import enum
-import re
 import uuid
 
 import dateutil.parser
@@ -11,13 +10,29 @@ import logging
 import os
 import random
 import socket
-import socketserver
 import struct
-from typing import Dict, List, Optional, Tuple, Iterator
+from typing import Dict, List, Optional
+
+import pyarrow
+import sqlglot
 
 from universql.protocol.session import Sessions, UniverSQLSession
+from universql.warehouse.postgresql import PyPgType, PostgresqlCatalog
 
-logger = logging.getLogger(__name__)
+# register all warehouses and plugins
+for module in [
+    "universql.warehouse.duckdb",
+    "universql.warehouse.postgresql",
+    "universql.plugins.ui",
+]:
+    __import__(module)
+
+logger = logging.getLogger("🐘")
+
+logging.getLogger('postgresql.connector.proxy').setLevel(logging.DEBUG)
+# SQLGlot doesn't recognize postgresql key for dialect
+sqlglot.dialects.Dialect.classes['postgresql'] = sqlglot.dialects.Dialect.classes['postgres']
+
 
 NULL_BYTE = b"\x00"
 
@@ -119,59 +134,109 @@ def _micros_since_2000(dt):
     return int(micros)
 
 
-class BVType(enum.Enum):
-    NULL = 0
-    BIGINT = 1
-    BOOL = 2
-    BYTES = 3
-    DATE = 4
-    FLOAT = 5
-    INTEGER = 6
-    INTERVAL = 7
-    JSON = 8
-    DECIMAL = 9
-    TEXT = 10
-    TIME = 11
-    TIMESTAMP = 12
-    UNKNOWN = 13
-    ARRAY = 14
-    INTEGERARRAY = 15
-    STRINGARRAY = 16
+def _arrow_type_to_bvtype(arrow_type: pyarrow.DataType) -> PyPgType:
+    """Convert PyArrow type to BVType for PostgreSQL compatibility."""
+    if pyarrow.types.is_null(arrow_type):
+        return PyPgType.NULL
+    elif pyarrow.types.is_boolean(arrow_type):
+        return PyPgType.BOOL
+    elif pyarrow.types.is_integer(arrow_type):
+        if arrow_type.bit_width <= 32:
+            return PyPgType.INTEGER
+        else:
+            return PyPgType.BIGINT
+    elif pyarrow.types.is_floating(arrow_type):
+        return PyPgType.FLOAT
+    elif pyarrow.types.is_decimal(arrow_type):
+        return PyPgType.DECIMAL
+    elif pyarrow.types.is_string(arrow_type) or pyarrow.types.is_large_string(arrow_type):
+        return PyPgType.TEXT
+    elif pyarrow.types.is_binary(arrow_type) or pyarrow.types.is_large_binary(arrow_type):
+        return PyPgType.BYTES
+    elif pyarrow.types.is_date(arrow_type):
+        return PyPgType.DATE
+    elif pyarrow.types.is_time(arrow_type):
+        return PyPgType.TIME
+    elif pyarrow.types.is_timestamp(arrow_type):
+        return PyPgType.TIMESTAMP
+    elif pyarrow.types.is_duration(arrow_type):
+        return PyPgType.INTERVAL
+    elif pyarrow.types.is_list(arrow_type) or pyarrow.types.is_large_list(arrow_type):
+        # Check if it's a list of integers or strings
+        value_type = arrow_type.value_type
+        if pyarrow.types.is_integer(value_type):
+            return PyPgType.INTEGERARRAY
+        elif pyarrow.types.is_string(value_type):
+            return PyPgType.STRINGARRAY
+        else:
+            return PyPgType.ARRAY
+    elif pyarrow.types.is_struct(arrow_type) or pyarrow.types.is_map(arrow_type):
+        return PyPgType.JSON
+    else:
+        # Default to TEXT for unknown types
+        return PyPgType.TEXT
+
+
+def _has_results(query_result) -> bool:
+    """Check if a query result has results, handling both PyArrow Tables and DuckDBQueryResult objects."""
+    if hasattr(query_result, 'schema') and hasattr(query_result, 'num_columns'):
+        # PyArrow Table - check if it has columns and meaningful content
+        # Empty tables or tables with no columns should not be considered as having results
+        return query_result.num_columns > 0 and query_result.num_rows > 0
+    elif hasattr(query_result, 'has_results'):
+        # DuckDBQueryResult or similar custom objects
+        return query_result.has_results()
+    else:
+        # Fallback - assume it has results
+        return True
+
+
+def _get_status(query_result) -> str:
+    """Get status from query result, handling both PyArrow Tables and DuckDBQueryResult objects."""
+    if hasattr(query_result, 'schema') and hasattr(query_result, 'num_columns'):
+        # PyArrow Table - return a default SELECT status
+        return "SELECT"
+    elif hasattr(query_result, 'status'):
+        # DuckDBQueryResult or similar custom objects
+        return query_result.status()
+    else:
+        # Fallback
+        return "UNKNOWN"
 
 
 PG_UNKNOWN = (705, str)
 BVTYPE_TO_PGTYPE = {
-    BVType.NULL: (-1, lambda v: None),
-    BVType.ARRAY: (2277, lambda v: "{" + ",".join(v) + "}", None),
-    BVType.BIGINT: (20, str, lambda r: int.to_bytes(r, 8, "big")),
-    BVType.BOOL: (
+    PyPgType.NULL: (-1, lambda v: None),
+    PyPgType.ARRAY: (2277, lambda v: "{" + ",".join(v) + "}", None),
+    PyPgType.BIGINT: (20, str, lambda r: int.to_bytes(r, 8, "big")),
+    PyPgType.BOOL: (
         16,
         lambda v: "true" if v else "false",
         lambda r: b"\x01" if r else b"\x00",
     ),
-    BVType.BYTES: (17, lambda v: "\\x" + v.hex(), lambda r: r),
-    BVType.DATE: (
+    PyPgType.BYTES: (17, lambda v: "\\x" + v.hex(), lambda r: r),
+    PyPgType.DATE: (
         1082,
         lambda v: v.isoformat(),
         lambda r: int.to_bytes((r.toordinal() - 730120), 4, "big"),
     ),
-    BVType.DECIMAL: (1700, str),
-    BVType.FLOAT: (701, str, lambda r: struct.pack("!d", r)),
-    BVType.INTEGER: (23, str, lambda r: int.to_bytes(r, 4, "big")),
-    BVType.INTEGERARRAY: (1007, lambda v: "{" + ",".join(v) + "}"),
-    BVType.INTERVAL: (
+    PyPgType.DECIMAL: (1700, str),
+    PyPgType.FLOAT: (701, str, lambda r: struct.pack("!d", r)),
+    PyPgType.INTEGER: (23, str, lambda r: int.to_bytes(r, 4, "big")),
+    PyPgType.INTEGERARRAY: (1007, lambda v: "{" + ",".join(str(x) for x in v) + "}"),
+    PyPgType.INTERVAL: (
         1186,
         lambda v: f"{v.days} days {v.seconds} seconds {v.microseconds} microseconds",
     ),
-    BVType.JSON: (114, lambda v: json.dumps(v)),
-    BVType.STRINGARRAY: (1009, lambda v: "{" + ",".join(v) + "}"),
-    BVType.TEXT: (25, str, lambda r: r.encode("utf-8")),
-    BVType.TIME: (
+    PyPgType.JSON: (114, lambda v: json.dumps(v)),
+    PyPgType.STRINGARRAY: (1009, lambda v: "{" + ",".join(v) + "}"),
+    PyPgType.TEXT: (25, str, lambda r: r.encode("utf-8")),
+    PyPgType.TIME: (
         1083,
         lambda v: v.isoformat(),
         lambda r: int.to_bytes(_time_to_microseconds(r), 8, "big"),
     ),
-    BVType.TIMESTAMP: (
+    PyPgType.TIMESTAMP: (
         1114,
         lambda v: v.isoformat().replace("T", " "),
         lambda r: int.to_bytes(_micros_since_2000(r), 8, "big"),
@@ -225,6 +290,32 @@ class BVBuffer(object):
         return self.stream.getvalue()
 
 
+class AsyncBVBuffer(object):
+    """Async version of BVBuffer for reading from asyncio streams."""
+
+    def __init__(self, reader: asyncio.StreamReader):
+        self.reader = reader
+
+    async def read_bytes(self, n) -> bytes:
+        data = await self.reader.readexactly(n)
+        return data
+
+    async def read_byte(self) -> bytes:
+        return await self.read_bytes(1)
+
+    async def read_int16(self) -> int:
+        data = await self.read_bytes(2)
+        return struct.unpack("!h", data)[0]
+
+    async def read_uint32(self) -> int:
+        data = await self.read_bytes(4)
+        return struct.unpack("!I", data)[0]
+
+    async def read_int32(self) -> int:
+        data = await self.read_bytes(4)
+        return struct.unpack("!i", data)[0]
+
+
 class BVContext:
     def __init__(
             self, session: UniverSQLSession, params: Dict[str, str]
@@ -239,10 +330,9 @@ class BVContext:
         self.has_error = False
         self.authenticated = False
         self.salt = None
+        self.auth_type = None  # Track what type of authentication we requested
 
-    def get_hashed_password(self, auth: dict) -> str:
-        user = self.params["user"]
-        password = auth[user]
+    def get_hashed_password(self, user: str, password: str) -> str:
         first = hashlib.md5(password.encode("utf-8") + user.encode("utf-8")).hexdigest()
         return "md5" + hashlib.md5(first.encode("utf-8") + self.salt).hexdigest()
 
@@ -257,7 +347,7 @@ class BVContext:
                 return TransactionStatus.IN_TRANSACTION
         return TransactionStatus.IDLE
 
-    def describe_portal(self, name: str) :
+    def describe_portal(self, name: str):
         stmt, params, result_fmt = self.portals[name]
         sql, param_oids = self.stmts[stmt]
         # todo: parse params? LIMIT 0?
@@ -265,7 +355,7 @@ class BVContext:
         self.result_cache[name] = query_result
         return query_result
 
-    def describe_statement(self, name: str) :
+    def describe_statement(self, name: str):
         sql, param_oids = self.stmts[name]
         params = []
         for typeoid in param_oids:
@@ -276,7 +366,7 @@ class BVContext:
                 raise Exception(f"Unsupported parameter type: {typeoid}")
         return self.execute_sql(sql, params)
 
-    def execute_portal(self, name: str) :
+    def execute_portal(self, name: str):
         if name in self.result_cache:
             query_result = self.result_cache[name]
             del self.result_cache[name]
@@ -309,144 +399,377 @@ class BVContext:
         if self.has_error:
             self.has_error = False
 
+    def execute_sql(self, sql: str, params=None, result_fmt=None):
+        """Execute SQL using the UniversSQL session"""
+        return self.session.do_query(sql)
 
-class BuenaVistaHandler(socketserver.StreamRequestHandler):
-    def handle(self):
-        self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True)
-        self.r = BVBuffer(self.rfile)
+
+async def send_row_description(query_result, writer: asyncio.StreamWriter):
+    buf = BVBuffer()
+
+    # Handle PyArrow Table
+    if hasattr(query_result, 'schema') and hasattr(query_result, 'num_columns'):
+        num_columns = query_result.num_columns
+        for i in range(num_columns):
+            field = query_result.schema.field(i)
+            name = field.name
+            bvtype = _arrow_type_to_bvtype(field.type)
+            oid = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)[0]
+            buf.write_string(name)
+            fmt = 0  # Default to text format for PyArrow tables
+            buf.write_bytes(struct.pack("!ihihih", 0, 0, oid, 0, -1, fmt))
+    else:
+        # Handle DuckDBQueryResult or similar objects
+        num_columns = query_result.column_count()
+        for i in range(num_columns):
+            name, bvtype = query_result.column(i)
+            oid = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)[0]
+            buf.write_string(name)
+            fmt = query_result.result_format[i] if query_result.result_format else 0
+            buf.write_bytes(struct.pack("!ihihih", 0, 0, oid, 0, -1, fmt))
+
+    out = buf.get_value()
+    sig = struct.pack(
+        "!cih",
+        ServerResponse.ROW_DESCRIPTION,
+        len(out) + 6,
+        num_columns,
+    )
+    writer.write(sig + out)
+    await writer.drain()
+
+
+async def send_data_rows(query_result, writer: asyncio.StreamWriter, limit: int = 0) -> int:
+    cnt = 0
+    converters = []
+
+    # Handle PyArrow Table
+    if hasattr(query_result, 'schema') and hasattr(query_result, 'num_columns'):
+        num_columns = query_result.num_columns
+        num_rows = query_result.num_rows
+
+        # Setup converters for PyArrow table
+        for i in range(num_columns):
+            field = query_result.schema.field(i)
+            bvtype = _arrow_type_to_bvtype(field.type)
+            pgtype = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)
+            # Default to text format for PyArrow tables
+            converters.append((pgtype[1], True))
+
+        # Convert to row-wise format
+        for row_idx in range(num_rows):
+            buf = BVBuffer()
+            for col_idx in range(num_columns):
+                column_array = query_result.column(col_idx)
+                r = column_array[row_idx].as_py()  # Convert PyArrow scalar to Python value
+
+                if r is None:
+                    buf.write_int32(-1)
+                else:
+                    converter, do_encode = converters[col_idx]
+                    v = converter(r)
+                    if do_encode:
+                        v = v.encode("utf-8")
+                    buf.write_int32(len(v))
+                    buf.write_bytes(v)
+
+            out = buf.get_value()
+            row_sig = struct.pack(
+                "!cih",
+                ServerResponse.DATA_ROW,
+                len(out) + 6,
+                num_columns,
+            )
+            writer.write(row_sig + out)
+            cnt += 1
+            if limit > 0 and cnt >= limit:
+                break
+    else:
+        # Handle DuckDBQueryResult or similar objects
+        num_columns = query_result.column_count()
+        for i in range(num_columns):
+            bvtype = query_result.column(i)[1]
+            pgtype = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)
+            if not query_result.result_format or query_result.result_format[i] == 0:
+                converters.append((pgtype[1], True))
+            else:
+                converters.append((pgtype[2], False))
+
+        for row in query_result.rows():
+            buf = BVBuffer()
+            for j in range(num_columns):
+                r = row[j]
+                if r is None:
+                    buf.write_int32(-1)
+                else:
+                    converter, do_encode = converters[j]
+                    v = converter(r)
+                    if do_encode:
+                        v = v.encode("utf-8")
+                    buf.write_int32(len(v))
+                    buf.write_bytes(v)
+            out = buf.get_value()
+            row_sig = struct.pack(
+                "!cih",
+                ServerResponse.DATA_ROW,
+                len(out) + 6,
+                num_columns,
+            )
+            writer.write(row_sig + out)
+            cnt += 1
+            if limit > 0 and cnt >= limit:
+                break
+    await writer.drain()
+    return cnt
+
+
+async def send_parameter_description(param_oids: List[int], writer: asyncio.StreamWriter):
+    buf = BVBuffer()
+    for oid in param_oids:
+        buf.write_int32(oid)
+    out = buf.get_value()
+    sig = struct.pack(
+        "!cih",
+        ServerResponse.PARAMETER_DESCRIPTION,
+        len(out) + 6,
+        len(param_oids),
+    )
+    writer.write(sig + out)
+    await writer.drain()
+
+
+async def send_error(exception, writer: asyncio.StreamWriter, ctx: Optional[BVContext] = None):
+    estr = str(exception)
+    logger.error(estr)
+    buf = BVBuffer()
+    buf.write_byte(b"M")
+    buf.write_string(estr)
+    buf.write_byte(NULL_BYTE)
+    out = buf.get_value()
+    err_sig = struct.pack("!ci", ServerResponse.ERROR_RESPONSE, len(out) + 4)
+    writer.write(err_sig + out)
+    await writer.drain()
+    if ctx:
+        ctx.mark_error()
+
+
+class PostgresqlHandler:
+    """Async PostgreSQL protocol handler."""
+
+    def __init__(self, server: 'PostgresqlServer'):
+        self.server = server
+
+    async def handle_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        """Handle a single PostgreSQL client connection."""
+        # Set TCP_NODELAY for better latency
+        writer.get_extra_info('socket').setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True)
+        
+        r = AsyncBVBuffer(reader)
         ctx = None
         try:
-            ctx = self.handle_startup()
+            ctx = await self.handle_startup(r, writer)
             if ctx:
                 self.server.ctxts[ctx.process_id] = ctx
+            
             while ctx:
-                type_code = self.r.read_byte()
+                try:
+                    type_code = await r.read_byte()
+                except asyncio.IncompleteReadError:
+                    # Client disconnected
+                    break
+                    
                 if not type_code or type_code == ClientCommand.TERMINATE:
                     # we're done
                     break
 
-                msglen = self.r.read_uint32()
+                msglen = await r.read_uint32()
                 if msglen > 4:
-                    payload = self.r.read_bytes(msglen - 4)
+                    payload = await r.read_bytes(msglen - 4)
                 else:
                     payload = None
 
                 if not ctx.authenticated:
                     if type_code == ClientCommand.PASSWORD_MESSAGE:
-                        self.handle_md5_password(ctx, payload)
+                        # Check what type of authentication we requested
+                        if ctx.auth_type == 'plain':
+                            # We requested plain-text password
+                            await self.handle_plain_password(ctx, payload, writer)
+                        else:
+                            # We requested MD5 password (or default)
+                            await self.handle_md5_password(ctx, payload, writer)
                     else:
                         raise Exception("Not authenticated")
                 elif type_code == ClientCommand.QUERY:
-                    self.handle_query(ctx, payload)
+                    await self.handle_query(ctx, payload, writer)
                 elif type_code == ClientCommand.PARSE:
-                    self.handle_parse(ctx, payload)
+                    await self.handle_parse(ctx, payload, writer)
                 elif type_code == ClientCommand.BIND:
-                    self.handle_bind(ctx, payload)
+                    await self.handle_bind(ctx, payload, writer)
                 elif type_code == ClientCommand.DESCRIBE:
-                    self.handle_describe(ctx, payload)
+                    await self.handle_describe(ctx, payload, writer)
                 elif type_code == ClientCommand.EXECUTE:
-                    self.handle_execute(ctx, payload)
+                    await self.handle_execute(ctx, payload, writer)
                 elif type_code == ClientCommand.CLOSE:
-                    self.handle_close(ctx, payload)
+                    await self.handle_close(ctx, payload, writer)
                 elif type_code == ClientCommand.SYNC:
                     ctx.sync()
-                    self.send_ready_for_query(ctx)
+                    await self.send_ready_for_query(ctx, writer)
                 elif type_code == ClientCommand.FLUSH:
                     ctx.flush()
                 else:
                     raise Exception("Unknown type_code: %s" % type_code)
         except Exception as e:
             logger.exception(e)
-            self.send_error(e)
+            await send_error(e, writer)
+        finally:
+            if ctx:
+                self.server.sessions.close_session(ctx.session.session_id)
+                if ctx.process_id in self.server.ctxts:
+                    del self.server.ctxts[ctx.process_id]
+            writer.close()
+            await writer.wait_closed()
 
-        if ctx:
-            self.server.conn.close_session(ctx.session)
-            del self.server.ctxts[ctx.process_id]
-            ctx = None
-
-    def handle_startup(self) -> BVContext:
-        msglen = self.r.read_uint32() - 4
-        code = self.r.read_uint32()
+    async def handle_startup(self, r: AsyncBVBuffer, writer: asyncio.StreamWriter) -> BVContext:
+        msglen = await r.read_uint32() - 4
+        code = await r.read_uint32()
         if code == 80877103:  ## SSL request
-            self.send_notice()
-            return self.handle_startup()
+            await self.send_notice(writer)
+            return await self.handle_startup(r, writer)
         elif code == 196608:  # Protocol 3.0
             msg = [
                 x.decode("utf-8")
-                for x in self.r.read_bytes(msglen - 4).split(NULL_BYTE)
+                for x in (await r.read_bytes(msglen - 4)).split(NULL_BYTE)
             ]
             params = dict(zip(msg[::2], msg[1::2]))
             logger.info("Client connection params: %s", params)
-            session = UniverSQLSession({}, str(uuid.uuid4()), "postgresql", {}, {})
+
+            from universql.util import current_context
+
+            # Extract PostgreSQL connection parameters from the parsed URL
+            credentials = {}
+            
+            # Get URL credentials if available
+            url_credentials = current_context.get('url')
+            if url_credentials:
+                # Only include PostgreSQL connection parameters, exclude scheme and other non-DB params
+                pg_params = ['host', 'port', 'database', 'user', 'password', 'sslmode', 'sslcert', 'sslkey', 'sslrootcert']
+                for key in pg_params:
+                    if key in url_credentials and url_credentials[key] is not None:
+                        credentials[key] = url_credentials[key]
+            
+            # Override with client-provided parameters if present
+            if "user" in params:
+                credentials["user"] = params["user"]
+            if "database" in params:
+                credentials["database"] = params["database"]
+            if "application_name" in params:
+                credentials["application_name"] = params["application_name"]
+
+            # Create session with proper context and credentials
+            session = UniverSQLSession(current_context, str(uuid.uuid4()), "postgresql", "postgresql", credentials, {})
             self.server.sessions.register_session(session)
             ctx = BVContext(session, params)
-            self.send_auth_request(ctx)
+            await self.send_authentication_md5(ctx, writer)
             return ctx
         elif code == 80877102:  ## Cancel request
-            process_id, secret_key = self.r.read_uint32(), self.r.read_uint32()
+            process_id, secret_key = await r.read_uint32(), await r.read_uint32()
             ctx = self.server.ctxts.get(process_id)
             if ctx and ctx.secret_key == secret_key:
-                self.server.conn.close_session(ctx.session)
+                self.server.sessions.close_session(ctx.session.session_id)
                 del self.server.ctxts[ctx.process_id]
             return None
         else:
             raise Exception(f"Unsupported startup message: {code}")
 
-    def send_auth_request(self, ctx: BVContext):
-        if self.server.auth is None:
-            self.send_authentication_ok()
-            self.handle_post_auth(ctx)
-        else:
-            self.send_authentication_md5(ctx)
-
-    def send_authentication_ok(self):
-        self.wfile.write(
+    async def send_authentication_ok(self, writer: asyncio.StreamWriter):
+        writer.write(
             struct.pack("!cii", ServerResponse.AUTHENTICATION_REQUEST, 8, 0)
         )
+        await writer.drain()
 
-    def send_authentication_md5(self, ctx: BVContext):
-        ctx.salt = os.urandom(4)
-        self.wfile.write(
-            struct.pack("!cii", ServerResponse.AUTHENTICATION_REQUEST, 12, 5)
-        )
-        self.wfile.write(ctx.salt)
-
-    def handle_md5_password(self, ctx: BVContext, payload: bytes):
-        client_side = payload.decode("utf-8").rstrip("\x00")
-        server_side = ctx.get_hashed_password(self.server.auth)
-        if client_side == server_side:
-            self.send_authentication_ok()
-            self.handle_post_auth(ctx)
+    async def send_authentication_md5(self, ctx: BVContext, writer: asyncio.StreamWriter):
+        # If we don't have a password from the URL, request plain-text password instead of MD5
+        # This allows us to capture the actual password for backend authentication
+        if not ctx.session.credentials.get('password'):
+            # Request plain-text password (authentication type 3)
+            ctx.auth_type = 'plain'
+            writer.write(
+                struct.pack("!cii", ServerResponse.AUTHENTICATION_REQUEST, 8, 3)
+            )
         else:
-            self.send_error("Invalid password")
+            # We have password from URL, proceed with MD5 authentication
+            ctx.auth_type = 'md5'
+            ctx.salt = os.urandom(4)
+            writer.write(
+                struct.pack("!cii", ServerResponse.AUTHENTICATION_REQUEST, 12, 5)
+            )
+            writer.write(ctx.salt)
+        await writer.drain()
 
-    def handle_post_auth(self, ctx: BVContext):
-        self.send_parameter_status(self.server.conn.parameters())
-        self.send_backend_key_data(ctx)
-        self.send_ready_for_query(ctx)
+    async def handle_md5_password(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+        # Extract the password from the client request
+        client_password_hash = payload.decode("utf-8").rstrip("\x00")
+        
+        # Store the password hash for potential backend use
+        ctx.session.credentials['password_hash'] = client_password_hash
+        logger.debug("Password hash captured from client authentication")
+        
+        # Accept the authentication at proxy level
+        await self.send_authentication_ok(writer)
+        await self.handle_post_auth(ctx, writer)
+
+    async def handle_plain_password(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+        # Extract plain-text password from client request
+        plain_password = payload.decode("utf-8").rstrip("\x00")
+        
+        # Store the plain password for backend authentication
+        ctx.session.credentials['password'] = plain_password
+        logger.debug("Plain-text password captured from client authentication")
+        
+        # Accept the authentication at proxy level
+        await self.send_authentication_ok(writer)
+        await self.handle_post_auth(ctx, writer)
+
+    async def handle_post_auth(self, ctx: BVContext, writer: asyncio.StreamWriter):
+        await self.send_parameter_status({
+            "server_version": "universql",
+            "client_encoding": "UTF8",
+            "DateStyle": "ISO",
+        }, writer)
+        await self.send_backend_key_data(ctx, writer)
+        await self.send_ready_for_query(ctx, writer)
         ctx.authenticated = True
         return
 
-    def handle_query(self, ctx: BVContext, payload: bytes):
+    async def handle_query(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handle query")
         decoded = payload.decode("utf-8").rstrip("\x00")
+        logger.debug(f"Executing SQL: {decoded!r}")
         try:
-            query_result = ctx.session.do_query(decoded)
+            # Execute query in a thread pool to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            query_result = await loop.run_in_executor(None, ctx.session.do_query, decoded)
+            logger.debug(f"Query result type: {type(query_result)}")
         except Exception as e:
-            self.send_error(e)
-            self.send_ready_for_query(ctx)
+            logger.error(f"Error executing query: {e}")
+            await send_error(e, writer)
+            await self.send_ready_for_query(ctx, writer)
             return
 
-        if query_result.has_results():
-            self.send_row_description(query_result)
-            row_count = self.send_data_rows(query_result)
-            self.send_command_complete("SELECT %d\x00" % row_count)
+        if _has_results(query_result):
+            logger.debug("Query has results, sending row description")
+            await send_row_description(query_result, writer)
+            logger.debug("Sending data rows")
+            row_count = await send_data_rows(query_result, writer)
+            logger.debug(f"Sent {row_count} rows, sending command complete")
+            await self.send_command_complete("SELECT %d\x00" % row_count, writer)
         else:
-            status = query_result.status()
-            self.send_command_complete(f"{status}\x00")
-        self.send_ready_for_query(ctx)
+            status = _get_status(query_result)
+            logger.debug(f"Query has no results, status: {status}")
+            await self.send_command_complete(f"{status}\x00", writer)
+        await self.send_ready_for_query(ctx, writer)
 
-    def handle_parse(self, ctx: BVContext, payload: bytes):
+    async def handle_parse(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling parse")
         ba = bytearray(payload)
         stmt_idx = ba.index(NULL_BYTE)
@@ -460,9 +783,9 @@ class BuenaVistaHandler(socketserver.StreamRequestHandler):
         for i in range(num_params):
             param_oids.append(buf.read_int32())
         ctx.add_statement(stmt, sql, param_oids)
-        self.send_parse_complete()
+        await self.send_parse_complete(writer)
 
-    def handle_bind(self, ctx: BVContext, payload: bytes):
+    async def handle_bind(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling bind")
         ba = bytearray(payload)
         portal_idx = ba.index(NULL_BYTE)
@@ -513,34 +836,36 @@ class BuenaVistaHandler(socketserver.StreamRequestHandler):
         for i in range(num_result_formats):
             result_formats.append(buf.read_int16())
         ctx.add_portal(portal, stmt, params, result_formats)
-        self.send_bind_complete()
+        await self.send_bind_complete(writer)
 
-    def handle_describe(self, ctx: BVContext, payload: bytes):
+    async def handle_describe(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling describe")
         ba = bytearray(payload)
         describe_type = ba[0]
         if describe_type == ord("P"):
             portal = ba[1: len(ba) - 1].decode("utf-8")
             try:
-                query_result = ctx.describe_portal(portal)
+                loop = asyncio.get_event_loop()
+                query_result = await loop.run_in_executor(None, ctx.describe_portal, portal)
             except Exception as e:
-                self.send_error(e, ctx)
+                await send_error(e, writer, ctx)
                 return
         elif describe_type == ord("S"):
             stmt = ba[1: len(ba) - 1].decode("utf-8")
             try:
-                query_result = ctx.describe_statement(stmt)
+                loop = asyncio.get_event_loop()
+                query_result = await loop.run_in_executor(None, ctx.describe_statement, stmt)
             except Exception as e:
-                self.send_error(e, ctx)
+                await send_error(e, writer, ctx)
                 return
             param_oids = ctx.stmts[stmt][1]
-            self.send_paramter_description(param_oids)
+            await send_parameter_description(param_oids, writer)
         else:
             raise Exception(f"Unknown describe type: {describe_type}")
-        if query_result.has_results():
-            self.send_row_description(query_result)
+        if _has_results(query_result):
+            await send_row_description(query_result, writer)
 
-    def handle_execute(self, ctx: BVContext, payload: bytes):
+    async def handle_execute(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling execute")
         if ctx.has_error:
             logger.info("Skipping execute due to previous error")
@@ -551,25 +876,26 @@ class BuenaVistaHandler(socketserver.StreamRequestHandler):
         limit = struct.unpack("!i", ba[portal_idx + 1: portal_idx + 5])[0]
         query_result = None
         try:
-            query_result = ctx.execute_portal(portal)
+            loop = asyncio.get_event_loop()
+            query_result = await loop.run_in_executor(None, ctx.execute_portal, portal)
         except Exception as e:
-            self.send_error(e, ctx)
+            await send_error(e, writer, ctx)
             return
-        if query_result.has_results():
-            row_count = self.send_data_rows(query_result, limit)
+        if _has_results(query_result):
+            row_count = await send_data_rows(query_result, writer, limit)
             if limit == 0 or row_count < limit:
-                self.send_command_complete("SELECT %d\x00" % row_count)
+                await self.send_command_complete("SELECT %d\x00" % row_count, writer)
             else:
                 # add result back to the cache, so they'll
                 # be picked up on text call
                 ctx.result_cache[portal] = query_result
-                self.send_portal_suspend()
+                await self.send_portal_suspend(writer)
 
         else:
-            status = query_result.status()
-            self.send_command_complete(f"{status}\x00")
+            status = _get_status(query_result)
+            await self.send_command_complete(f"{status}\x00", writer)
 
-    def handle_close(self, ctx: BVContext, payload: bytes):
+    async def handle_close(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling close")
         close_type = payload[0]
         if close_type == ord("S"):
@@ -578,92 +904,14 @@ class BuenaVistaHandler(socketserver.StreamRequestHandler):
             ctx.close_portal(payload[1:-1].decode("utf-8"))
         else:
             raise Exception(f"Unknown close type: {close_type}")
-        self.send_close_complete()
+        await self.send_close_complete(writer)
 
-    def send_paramter_description(self, param_oids: List[int]):
-        buf = BVBuffer()
-        for oid in param_oids:
-            buf.write_int32(oid)
-        out = buf.get_value()
-        sig = struct.pack(
-            "!cih",
-            ServerResponse.PARAMETER_DESCRIPTION,
-            len(out) + 6,
-            len(param_oids),
-        )
-        self.wfile.write(sig + out)
+    async def send_notice(self, writer: asyncio.StreamWriter):
+        writer.write(ServerResponse.NOTICE_RESPONSE)
+        await writer.drain()
 
-    def send_row_description(self, query_result):
-        buf = BVBuffer()
-        for i in range(query_result.column_count()):
-            name, bvtype = query_result.column(i)
-            oid = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)[0]
-            buf.write_string(name)
-            fmt = query_result.result_format[i] if query_result.result_format else 0
-            buf.write_bytes(struct.pack("!ihihih", 0, 0, oid, 0, -1, fmt))
-        out = buf.get_value()
-        sig = struct.pack(
-            "!cih",
-            ServerResponse.ROW_DESCRIPTION,
-            len(out) + 6,
-            query_result.column_count(),
-        )
-        self.wfile.write(sig + out)
-
-    def send_data_rows(self, query_result, limit: int = 0) -> int:
-        cnt = 0
-        converters = []
-        for i in range(query_result.column_count()):
-            bvtype = query_result.column(i)[1]
-            pgtype = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)
-            if not query_result.result_format or query_result.result_format[i] == 0:
-                converters.append((pgtype[1], True))
-            else:
-                converters.append((pgtype[2], False))
-        for row in query_result.rows():
-            buf = BVBuffer()
-            for j in range(query_result.column_count()):
-                r = row[j]
-                if r is None:
-                    buf.write_int32(-1)
-                else:
-                    converter, do_encode = converters[j]
-                    v = converter(r)
-                    if do_encode:
-                        v = v.encode("utf-8")
-                    buf.write_int32(len(v))
-                    buf.write_bytes(v)
-            out = buf.get_value()
-            row_sig = struct.pack(
-                "!cih",
-                ServerResponse.DATA_ROW,
-                len(out) + 6,
-                query_result.column_count(),
-            )
-            self.wfile.write(row_sig + out)
-            cnt += 1
-            if limit > 0 and cnt >= limit:
-                break
-        return cnt
-
-    def send_error(self, exception, ctx: Optional[BVContext] = None):
-        estr = str(exception)
-        logger.error(estr)
-        buf = BVBuffer()
-        buf.write_byte(b"M")
-        buf.write_string(estr)
-        buf.write_byte(NULL_BYTE)
-        out = buf.get_value()
-        err_sig = struct.pack("!ci", ServerResponse.ERROR_RESPONSE, len(out) + 4)
-        self.wfile.write(err_sig + out)
-        if ctx:
-            ctx.mark_error()
-
-    def send_notice(self):
-        self.wfile.write(ServerResponse.NOTICE_RESPONSE)
-
-    def send_backend_key_data(self, ctx):
-        self.wfile.write(
+    async def send_backend_key_data(self, ctx, writer: asyncio.StreamWriter):
+        writer.write(
             struct.pack(
                 "!ciII",
                 ServerResponse.BACKEND_KEY_DATA,
@@ -672,53 +920,89 @@ class BuenaVistaHandler(socketserver.StreamRequestHandler):
                 ctx.secret_key,
             )
         )
+        await writer.drain()
 
-    def send_ready_for_query(self, ctx: Optional[BVContext]):
+    async def send_ready_for_query(self, ctx: Optional[BVContext], writer: asyncio.StreamWriter):
         logger.debug("Sending ready for query")
         status = ctx.transaction_status() if ctx else TransactionStatus.IDLE
-        self.wfile.write(struct.pack("!cic", ServerResponse.READY_FOR_QUERY, 5, status))
+        writer.write(struct.pack("!cic", ServerResponse.READY_FOR_QUERY, 5, status))
+        await writer.drain()
 
-    def send_parameter_status(self, params: Dict[str, str]):
+    async def send_parameter_status(self, params: Dict[str, str], writer: asyncio.StreamWriter):
         for name, value in params.items():
             buf = BVBuffer()
             buf.write_string(name)
             buf.write_string(value)
             out = buf.get_value()
             psig = struct.pack("!ci", ServerResponse.PARAMETER_STATUS, len(out) + 4)
-            self.wfile.write(psig + out)
+            writer.write(psig + out)
+        await writer.drain()
 
-    def send_parse_complete(self):
-        self.wfile.write(struct.pack("!ci", ServerResponse.PARSE_COMPLETE, 4))
+    async def send_parse_complete(self, writer: asyncio.StreamWriter):
+        writer.write(struct.pack("!ci", ServerResponse.PARSE_COMPLETE, 4))
+        await writer.drain()
 
-    def send_bind_complete(self):
-        self.wfile.write(struct.pack("!ci", ServerResponse.BIND_COMPLETE, 4))
+    async def send_bind_complete(self, writer: asyncio.StreamWriter):
+        writer.write(struct.pack("!ci", ServerResponse.BIND_COMPLETE, 4))
+        await writer.drain()
 
-    def send_close_complete(self):
-        self.wfile.write(struct.pack("!ci", ServerResponse.CLOSE_COMPLETE, 4))
+    async def send_close_complete(self, writer: asyncio.StreamWriter):
+        writer.write(struct.pack("!ci", ServerResponse.CLOSE_COMPLETE, 4))
+        await writer.drain()
 
-    def send_portal_suspend(self):
-        self.wfile.write(struct.pack("!ci", ServerResponse.PORTAL_SUSPENDED, 4))
+    async def send_portal_suspend(self, writer: asyncio.StreamWriter):
+        writer.write(struct.pack("!ci", ServerResponse.PORTAL_SUSPENDED, 4))
+        await writer.drain()
 
-    def send_command_complete(self, tag: str):
+    async def send_command_complete(self, tag: str, writer: asyncio.StreamWriter):
         buf = BVBuffer()
         buf.write_bytes(
             struct.pack("!ci", ServerResponse.COMMAND_COMPLETE, len(tag) + 4)
         )
         buf.write_bytes(tag.encode())
         out = buf.get_value()
-        self.wfile.write(out)
+        writer.write(out)
+        await writer.drain()
 
-class BuenaVistaServer(socketserver.ThreadingTCPServer):
-    """A Python socketserver for the Buena Vista Postgres proxy."""
 
-    allow_reuse_address = True
+class PostgresqlServer:
+    """Async PostgreSQL server using asyncio."""
 
-    def __init__(
-            self,
-            server_address,
-            auth: Optional[Dict[str, str]] = None,
-    ):
-        super().__init__(server_address, BuenaVistaHandler)
+    def __init__(self, host='0.0.0.0', port=5432):
+        self.host = host
+        self.port = port
         self.sessions = Sessions()
         self.ctxts = {}
-        self.auth = auth
+        self.handler = PostgresqlHandler(self)
+        self.server = None
+
+    async def start(self):
+        """Start the async PostgreSQL server."""
+        self.server = await asyncio.start_server(
+            self.handler.handle_connection,
+            self.host,
+            self.port,
+            reuse_address=True,
+            reuse_port=True
+        )
+        
+        addr = self.server.sockets[0].getsockname()
+        logger.info(f"PostgreSQL server started on {addr[0]}:{addr[1]}")
+        
+        async with self.server:
+            await self.server.serve_forever()
+
+    async def stop(self):
+        """Stop the async PostgreSQL server."""
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
+            logger.info("PostgreSQL server stopped")
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.stop()

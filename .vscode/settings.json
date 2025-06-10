@@ -1,0 +1,10 @@
+{
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "."
+    ],
+    "python.testing.envFile": "${workspaceFolder}/.env",
+    "python.linting.mypyEnabled": true
+
+}

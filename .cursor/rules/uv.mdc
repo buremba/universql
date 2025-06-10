@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Always use `uv` to install Python packages (e.g., `uv pip install <package>`) instead of `pip`.
+- Always use `uv` to run Python scripts and tests (`uv run pytest`) or commands (e.g., `uv python <script.py>`) instead of `python` or `python3`, or `pytest`.
+- This projects installs a package called "spile", the [main.py](mdc:universql/main.py) is the entryfile. When you create a Python file, you should ask the user if the tests need to be created and executed before considering the task is done.

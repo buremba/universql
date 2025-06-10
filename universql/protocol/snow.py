@@ -8,7 +8,7 @@ import signal
 import threading
 from traceback import print_exc
 
-from typing import Any
+from typing import Any, List
 from uuid import uuid4
 
 import click
@@ -25,13 +25,15 @@ from starlette.responses import JSONResponse, Response, HTMLResponse
 
 from universql.agent.cloudflared import get_cloudflare_url
 from universql.plugin import APPS
-from universql.util import unpack_request_body, session_from_request, parameters, \
+from universql.util import unpack_request_body, parameters, \
     print_dict_as_markdown_table, QueryError, LOCALHOSTCOMPUTING_COM, current_context
 from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
-from universql.protocol.session import UniverSQLSession, sessions, harakiri, kill_event
+from universql.protocol.session import UniverSQLSession, harakiri, kill_event, Sessions
 
 logger = logging.getLogger("🧵")
+
+sessions = Sessions()
 
 app = FastAPI()
 query_results = {}
@@ -43,11 +45,26 @@ for module in [
     "universql.warehouse.snowflake",
     "universql.warehouse.redshift",
     "universql.plugins.snow",
-    # "universql.plugins.ui",
-    "universql.plugins.saas.server",
+    "universql.plugins.ui",
 ]:
     __import__(module)
 
+
+def session_from_request(request: Request):
+    """
+    Get a request's relevant session
+    """
+    auth = request.headers.get("Authorization")
+    if not auth:
+        raise HTTPException(status_code=401, detail="Session token not found in the request data.")
+    if not auth.startswith('Snowflake Token="'):
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+    token = auth[17:-1]
+    session = sessions.get_session(token)
+    if session is None:
+        raise HTTPException(status_code=401,
+                            detail="User must login again to access the service. Maybe server restarted? Restarting Universql aborts all the concurrent sessions.")
+    return session
 
 @app.post("/session/v1/login-request")
 async def login_request(request: Request) -> JSONResponse:
@@ -76,8 +93,8 @@ async def login_request(request: Request) -> JSONResponse:
     token = str(uuid4())
     message = None
     try:
-        session = UniverSQLSession(current_context, token, credentials, login_data.get("SESSION_PARAMETERS"))
-        sessions[session.session_id] = session
+        session = UniverSQLSession(current_context, token, "snowflake", "duckdb", credentials, login_data.get("SESSION_PARAMETERS"))
+        sessions.register_session(session)
     except QueryError as e:
         message = e.message
 
@@ -123,13 +140,12 @@ async def login_request(request: Request) -> JSONResponse:
 async def delete_session(request: Request):
     if request.query_params.get("delete") == "true":
         try:
-            session = session_from_request(sessions, request)
+            session = session_from_request(request)
         except HTTPException as e:
             if e.status_code == 401:
                 # most likely the server has started
                 return JSONResponse({"success": True})
-
-        del sessions[session.session_id]
+        sessions.close_session(session.session_id)
         logger.info(f"[{session.session_id}] Session closed, cleaning up resources.")
         session.close()
         return JSONResponse({"success": True})
@@ -146,7 +162,7 @@ async def telemetry_request(request: Request) -> JSONResponse:
 @app.post("/session/heartbeat")
 async def session_heartbeat(request: Request) -> JSONResponse:
     try:
-        session_from_request(sessions, request)
+        session_from_request(request)
     except HTTPException as e:
         if e.status_code == 401:
             # most likely the server has started
@@ -191,7 +207,7 @@ async def query_request(request: Request) -> JSONResponse:
     query_id = str(uuid4())
     query = None
     try:
-        session = session_from_request(sessions, request)
+        session = session_from_request(request)
         body = await unpack_request_body(request)
         query = body["sqlText"]
         queryResultFormat = "arrow"
@@ -347,8 +363,7 @@ async def query_monitoring_query(request: Request) -> JSONResponse:
 @app.on_event("shutdown")
 async def shutdown_event():
     kill_event.set()
-    for token, session in sessions.items():
-        session.close()
+    sessions.exit()
 
 
 @app.on_event("startup")

@@ -1,60 +1,75 @@
-[tool.poetry]
+[project]
 name = "universql"
 version = "0.1"
 description = ""
-authors = ["Burak Kabakcı <emrekabakci@gmail.com>"]
+authors = [
+    { name = "Burak Kabakcı", email = "emrekabakci@gmail.com" }
+]
 readme = "README.md"
-license = "Apache 2.0"
+license = { text = "Apache 2.0" }
 keywords = ["dbt", "server", "streamlit", "git", "refine", "data-app", "snowflake"]
-documentation = "https://github.com/buremba/universql"
-repository = "https://github.com/buremba/universql"
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "duckdb>=1.1.3,<2.0.0",
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn>=0.30.1,<1.0.0",
+    "snowflake-connector-python[pandas,secure-local-storage]==3.14.1",
+    "sqlglot>=25.34.0,<25.35.0",
+    "fsspec>=2024.6.1,<2025.0.0",
+    "click>7",
+    "pyiceberg[glue,sql-sqlite]>=0.7.1,<0.8.0",
+    "fakesnow>=0.9.27,<1.0.0",
+    "humanize>=4.10.0,<5.0.0",
+    "mangum>=0.19.0,<1.0.0",
+    "pyarrow>=17.0.0,<18.0.0",
+    "psutil>=6.0.0,<7.0.0",
+    "sqlalchemy>=2.0.35,<3.0.0",
+    "duckdb-engine>=0.13.2,<1.0.0",
+    "gcsfs>=2024.6.1,<2025.0.0",
+    "google-cloud-bigquery>=3.25.0,<4.0.0",
+    "s3fs>=2024.6.1,<2025.0.0",
+    "aws-cdk-lib>=2.162.0,<3.0.0",
+    "sentry-sdk[fastapi]>=2.17.0,<3.0.0",
+    "aws-cdk-aws-codestar-alpha>=2.162.1a0,<3.0.0",
+    "marimo>=0.10.9,<1.0.0",
+    "copilotkit>=0.1.44,<1.0.0",
+    "chainlit>=2.5.5",
+    "aiosqlite>=0.21.0",
+    "greenlet>=3.2.0",
+    "openai>=1.77.0",
+    "psycopg2>=2.9.10",
+    "mysql-mimic>=2.6.4",
+    "py-pglite>=0.1.0",
+    "sqlmodel>=0.0.22",
+    "fastmcp>=2.7.1",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.11,<3.13"
-duckdb = "^1.1.3"
-fastapi = "^0.111.0"
-uvicorn = "^0.30.1"
-snowflake-connector-python = {extras = ["pandas", "secure-local-storage"], version = "^3.12.0"}
-# same with fakesnow
-sqlglot = "~25.34.0"
-fsspec = "^2024.6.1"
-click = ">7"
-pyiceberg = {extras = ["glue", "sql-sqlite"], version = "^0.7.1"}
-#pyiceberg = { git = "https://github.com/buremba/iceberg-python", branch = "main", develop = true, extras = ["glue"] }
-fakesnow = "^0.9.27"
-humanize = "^4.10.0"
-mangum = "^0.19.0"
-pyarrow = "^17.0.0"
-psutil = "^6.0.0"
-# once we get rid of from pyiceberg.catalog.sql import SqlCatalog, remove it
-sqlalchemy = "^2.0.35"
-duckdb-engine = "^0.13.2"
+[project.urls]
+Documentation = "https://github.com/buremba/universql"
+Repository = "https://github.com/buremba/universql"
 
-# GCS
-gcsfs = "^2024.6.1"
-google-cloud-bigquery = "^3.25.0"
-# AWS
-s3fs = "^2024.6.1"
-aws-cdk-lib = "^2.162.0"
-sentry-sdk = {extras = ["fastapi"], version = "^2.17.0"}
-aws-cdk-aws-codestar-alpha = "^2.162.1a0"
-marimo = "^0.10.9"
+[dependency-groups]
+dev = [
+    "pylint>=2.11.1",
+    "pystray>=0.19.5,<1.0.0",
+    "networkx>=3.3,<4.0",
+    "streamlit>=1.38.0,<2.0.0",
+    "st-link-analysis>=0.3.0,<1.0.0",
+    "shandy-sqlfmt>=0.17.0,<1.0.0",
+    "streamlit-ace>=0.1.1,<1.0.0",
+    "pytest-randomly>=3.15.0,<4.0.0",
+    "pytest>=8.2.0,<9.0.0",
+]
 
-
-[tool.poetry.dev-dependencies]
-pylint = ">=2.11.1"
-pystray = "^0.19.5"
-networkx = "^3.3"
-streamlit = "^1.38.0"
-st-link-analysis = "^0.3.0"
-shandy-sqlfmt = "^0.17.0"
-streamlit-ace = "^0.1.1"
-pytest-randomly = "^3.15.0"
-pytest = "^8.2.0"
+[project.scripts]
+universql = "universql.main:cli"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.scripts]
-universql = 'universql.main:cli'

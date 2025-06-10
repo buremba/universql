@@ -17,6 +17,8 @@ import sentry_sdk
 import sqlglot
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
+import requests
+from requests.exceptions import RequestException
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)s %(name)s %(levelname)-6s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
@@ -284,22 +286,6 @@ class SnowflakeError(QueryError):
                 'success': False, 'headers': None}
 
 
-def session_from_request(sessions: List[str], request: Request):
-    """
-    Get a request's relevant session
-    """
-    auth = request.headers.get("Authorization")
-    if not auth:
-        raise HTTPException(status_code=401, detail="Session token not found in the request data.")
-    if not auth.startswith('Snowflake Token="'):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header")
-    token = auth[17:-1]
-    if token not in sessions:
-        raise HTTPException(status_code=401,
-                            detail="User must login again to access the service. Maybe server restarted? Restarting Universql aborts all the concurrent sessions.")
-    return sessions[token]
-
-
 def pprint_secs(secs):
     """Format seconds in a human readable form."""
     now = time.time()
@@ -491,3 +477,30 @@ def initialize_context():
         globals()["current_context"] = get_context_params(snowflake)
     else:
         globals()["current_context"] = context.params
+
+def detect_catalog_type(account: str, catalog: str = None) -> str:
+    """Detect the catalog type (snowflake or polaris) for a given account.
+    
+    Args:
+        account: The Snowflake account identifier
+        catalog: Optional catalog type. If provided, it will be returned as is.
+        
+    Returns:
+        The detected catalog type (snowflake or polaris)
+        
+    Raises:
+        QueryError: If unable to connect to the account
+    """
+    if catalog is not None:
+        return catalog
+        
+    try:
+        polaris_server_check = requests.get(
+            f"https://{account}.snowflakecomputing.com/polaris/api/catalog/v1/oauth/tokens")
+        is_polaris = polaris_server_check.status_code == 405
+        return Catalog.POLARIS.value if is_polaris else Catalog.SNOWFLAKE.value
+    except RequestException as e:
+        error_message = (
+            f"Unable to find Snowflake account (https://{account}.snowflakecomputing.com), make sure if you have access to the Snowflake account. (maybe need VPN access?) \n"
+            f"You can set `--catalog` property to avoid this error. \n {str(e.args)}")
+        raise QueryError(error_message)

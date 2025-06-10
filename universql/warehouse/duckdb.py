@@ -49,7 +49,6 @@ class DuckDBCatalog(ICatalog):
             duck_config["max_memory"] = session.context.get('max_memory')
         if session.context.get('max_cache_size') != "0" and "max_temp_directory_size" in session.context:
             duck_config['max_temp_directory_size'] = session.context.get('max_cache_size')
-        self.account = parse_snowflake_account(session.context.get('account'))
         database_path = self.context.get('database_path')
         if database_path is not None:
             database = Template(database_path).substitute({'session_id': session.session_id})
@@ -73,7 +72,7 @@ class DuckDBCatalog(ICatalog):
         fake_snowflake_conn.database_set = True
         fake_snowflake_conn.schema_set = True
         self.emulator = FakeSnowflakeCursor(fake_snowflake_conn, self.duckdb)
-        self.filesystems = self.get_filesystems(session.context)
+        self.filesystems = self.get_filesystems(session)
         for filesystem in self.filesystems:
             self.duckdb.register_filesystem(filesystem)
 
@@ -116,12 +115,16 @@ class DuckDBCatalog(ICatalog):
     def register_locations(self, tables: Locations):
         raise Exception("Unsupported operation")
 
-    def get_filesystems(self, args: dict) -> List[fsspec.AbstractFileSystem]:
+    def get_filesystems(self, session : UniverSQLSession) -> List[fsspec.AbstractFileSystem]:
         filesystems = []
-        if args.get('aws_profile') is not None or self.account.cloud == 'aws':
-            filesystems.append(s3(args))
-        if args.get('gcp_project') is not None or self.account.cloud == 'gcp':
-            filesystems.append(gcs(args))
+
+        if session.base_engine == 'snowflake':
+            account = parse_snowflake_account(session.context.get('account'))
+            if session.context.get('aws_profile') is not None or account.cloud == 'aws':
+                filesystems.append(s3(session.context))
+            if session.context.get('gcp_project') is not None or account.cloud == 'gcp':
+                filesystems.append(gcs(session.context))
+
         return filesystems
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]) -> Tables:

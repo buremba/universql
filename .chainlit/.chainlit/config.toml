@@ -1,0 +1,36 @@
+[project]
+enable_telemetry = false
+
+[UI]
+name = "Travel Agent"
+cot = "full"
+
+[features.mcp.sse]
+enabled = true
+
+[features.mcp.stdio]
+    enabled = true
+    allowed_executables = [ "npx", "uvx" ]
+
+[UI.theme]
+  #layout = "wide"
+  #font_family = "Inter, sans-serif"
+  # Override default MUI light theme. (Check theme.ts)
+  [UI.theme.light]
+      #background = "#FAFAFA"
+      #paper = "#FFFFFF"
+
+      [UI.theme.light.primary]
+          #main = "#F80061"
+          #dark = "#980039"
+          #light = "#FFE7EB"
+
+  # Override default MUI dark theme. (Check theme.ts)
+  [UI.theme.dark]
+      #background = "#FAFAFA"
+      #paper = "#FFFFFF"
+
+      [UI.theme.dark.primary]
+          #main = "#F80061"
+          #dark = "#980039"
+          #light = "#FFE7EB"

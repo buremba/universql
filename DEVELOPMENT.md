@@ -19,7 +19,13 @@ Update IP on DNS: https://dash.cloudflare.com/09f0f68ebdbed47d203725997d4cfbdb/l
 sudo certbot certonly --standalone --domains localhostcomputing.com
 ```
 
-3. Update the [util.py](/universql/util.py)
+3. Extract the folling keys and update the [util.py](/universql/util.py)
+
+```
+Successfully received certificate.
+Certificate is saved at: /etc/letsencrypt/live/localhostcomputing.com/fullchain.pem
+Key is saved at:         /etc/letsencrypt/live/localhostcomputing.com/privkey.pem
+```
 
 # Plugins
 

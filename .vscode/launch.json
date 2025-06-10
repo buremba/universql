@@ -1,0 +1,64 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "universql snowflake lt51601.europe-west2.gcp",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "universql.main",
+            "console": "integratedTerminal",
+            "args": "snowflake --account lt51601.europe-west2.gcp",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "universql postgresql neon",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "universql.main",
+            "console": "integratedTerminal",
+            "args": "postgresql --url 'postgresql://ep-twilight-forest-a5oq7pl9-pooler.us-east-2.aws.neon.tech?sslmode=require'",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "PostgreSQL Tests - Debug Mode",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "console": "integratedTerminal",
+            "args": [
+                "tests/integration/test_postgresql.py",
+                "-v",
+                "--tb=long",
+                "-s",
+                "--log-cli-level=DEBUG"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "MAX_CON_RETRY_ATTEMPTS": "15",
+                "PYTEST_CURRENT_TEST": "1",
+                "POSTGRESQL_URL": "postgresql://ep-little-breeze-a5cahw7k-pooler.us-east-2.aws.neon.tech:5432/spiledb?user=spiledb_owner&password=npg_cvQ7bdzpR1XY&sslmode=require"
+            }
+        },
+        {
+            "name": "PostgreSQL Tests - Working Tests Only",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "console": "integratedTerminal",
+            "args": [
+                "tests/integration/test_postgresql.py::TestPostgreSQLConnectivity",
+                "tests/integration/test_postgresql.py::TestPostgreSQLSelect::test_simple_select",
+                "tests/integration/test_postgresql.py::TestPostgreSQLSelect::test_multiple_rows",
+                "tests/integration/test_postgresql.py::TestPostgreSQLSelect::test_null_values",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "MAX_CON_RETRY_ATTEMPTS": "15",
+                "POSTGRESQL_URL": "postgresql://ep-little-breeze-a5cahw7k-pooler.us-east-2.aws.neon.tech:5432/spiledb?user=spiledb_owner&password=npg_cvQ7bdzpR1XY&sslmode=require"
+            }
+        }
+    ]
+}

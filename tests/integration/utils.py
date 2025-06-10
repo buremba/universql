@@ -154,30 +154,30 @@ def execute_query(conn, query: str) -> pyarrow.Table:
         cur.close()
 
 
-def compare_results(snowflake_result: pyarrow.Table, universql_result: pyarrow.Table):
+def compare_results(base_result: pyarrow.Table, universql_result: pyarrow.Table):
     # Compare schemas
-    if snowflake_result.schema != universql_result.schema:
+    if base_result.schema != universql_result.schema:
         schema_diff = []
-        for field1, field2 in zip(snowflake_result.schema, universql_result.schema):
+        for field1, field2 in zip(base_result.schema, universql_result.schema):
             if field1.name != field2.name and field1.type != field2.type:
                 schema_diff.append(f"Expected field {field1}, but got {field2}")
-        if len(snowflake_result.schema) != len(universql_result.schema):
+        if len(base_result.schema) != len(universql_result.schema):
             schema_diff.append(f"Schema lengths differ: "
-                               f"Snowflake={len(snowflake_result.schema)} "
+                               f"Snowflake={len(base_result.schema)} "
                                f"Universql={len(universql_result.schema)}")
         if len(schema_diff) > 0:
             raise pytest.fail("Schema mismatch:\n" + "\n".join(schema_diff))
 
     # Compare row counts
-    if snowflake_result.num_rows != universql_result.num_rows:
-        raise pytest.fail(f"Row count mismatch: Snowflake={snowflake_result.num_rows} "
+    if base_result.num_rows != universql_result.num_rows:
+        raise pytest.fail(f"Row count mismatch: Snowflake={base_result.num_rows} "
                           f"Universql={universql_result.num_rows}")
 
     # Compare data row by row and column by column
     data_diff = []
-    for row_index in range(snowflake_result.num_rows):
-        for col_index in range(snowflake_result.num_columns):
-            value1 = snowflake_result.column(col_index)[row_index].as_py()
+    for row_index in range(base_result.num_rows):
+        for col_index in range(base_result.num_columns):
+            value1 = base_result.column(col_index)[row_index].as_py()
             value2 = universql_result.column(col_index)[row_index].as_py()
             if value1 != value2:
                 data_diff.append(f"Row {row_index}, Column {col_index}: "

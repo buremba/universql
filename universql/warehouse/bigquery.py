@@ -90,5 +90,6 @@ class BigQueryCatalog(ICatalog):
 
     def get_table_paths(self, tables: List[sqlglot.exp.Table]):
         raise UnsupportedOperationException("BigQuery does not support registering tables")
+
     def executor(self) -> Executor:
         return BigQueryIcebergExecutor(self)

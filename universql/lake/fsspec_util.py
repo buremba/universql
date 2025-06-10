@@ -5,6 +5,7 @@ import re
 import shutil
 from datetime import timedelta, datetime
 from functools import wraps
+from typing import Optional
 
 import psutil
 from fsspec.implementations.cache_mapper import AbstractCacheMapper
@@ -66,10 +67,10 @@ last_free = None
 first_free = None
 
 
-def get_friendly_disk_usage(storage: str, debug=False) -> str:
+def get_friendly_disk_usage(storage: Optional[str], debug=False) -> str:
     global last_free
     global first_free
-    if not os.path.exists(storage):
+    if storage is None or not os.path.exists(storage) :
         return ''
     usage = psutil.disk_usage(storage)
     if first_free is None:

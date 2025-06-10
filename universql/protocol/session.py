@@ -4,7 +4,7 @@ import tempfile
 import time
 from string import Template
 from traceback import print_exc
-from typing import List
+from typing import List, Any, Optional
 from urllib.parse import urlparse, parse_qs
 import os
 import signal
@@ -16,7 +16,7 @@ import sqlglot
 from pyiceberg.catalog import PY_CATALOG_IMPL, load_catalog, TYPE
 from pyiceberg.exceptions import TableAlreadyExistsError, NoSuchNamespaceError
 from pyiceberg.io import PY_IO_IMPL
-from sqlglot import ParseError
+from sqlglot import ParseError, Expression
 from sqlglot.expressions import Create, Identifier, DDL, Query, Use, Semicolon, Copy
 
 from universql.lake.cloud import CACHE_DIRECTORY_KEY, MAX_CACHE_SIZE
@@ -25,18 +25,21 @@ from universql.util import get_friendly_time_since, \
 from universql.plugin import Executor, Tables, ICatalog, COMPUTES, PLUGINS, UniversqlPlugin, UQuery
 
 logger = logging.getLogger("💡")
-sessions = {}
 
+SQLGLOT_DIALECT_REWRITES = {
+    "postgresql": "postgres",
+}
 
 class UniverSQLSession:
-    def __init__(self, context, session_id, credentials: dict, session_parameters: dict):
+    def __init__(self, context, session_id, base_engine: str, target_engine : str, credentials: dict, session_parameters: dict):
         self.context = context
+        self.base_engine = base_engine
         self.credentials = credentials
         self.session_parameters = [{"name": item[0], "value": item[1]} for item in session_parameters.items()]
         self.session_id = session_id
         self.iceberg_catalog = self._get_iceberg_catalog()
-        self.catalog = COMPUTES["snowflake"](self)
-        self.target_compute = COMPUTES["duckdb"](self)
+        self.catalog = COMPUTES[base_engine](self)
+        self.target_compute = COMPUTES[target_engine](self)
         self.catalog_executor = self.catalog.executor()
         self.processing = False
         self.metadata_db = None
@@ -85,16 +88,8 @@ class UniverSQLSession:
                 or ast.key in queries_that_doesnt_need_warehouse
 
     def _do_query(self, start_time: float, raw_query: str) -> pyarrow.Table:
-        with sentry_sdk.start_span(op="sqlglot", name="Parsing query"):
-            try:
-                queries = sqlglot.parse(raw_query, read="snowflake")
-            except ParseError as e:
-                queries = None
-                raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
-
-        last_executor = None
-
         plugin_hooks = []
+        queries, last_executor = self._do_query_transpile(start_time, raw_query, plugin_hooks)
         for plugin in self.plugins:
             try:
                 plugin_hooks.append(plugin.start_query(queries, raw_query))
@@ -103,6 +98,30 @@ class UniverSQLSession:
                 message = f"Unable to call start_query on plugin {plugin.__class__}"
                 logger.error(message, exc_info=e)
                 raise QueryError(f"{message}: {str(e)}")
+        table = last_executor.get_as_table()
+        for hook in plugin_hooks:
+            try:
+                hook.end(table)
+            except Exception as e:
+                print_exc(10)
+                message = f"Unable to end query execution on plugin {hook.__class__}"
+                logger.error(message, exc_info=e)
+                raise QueryError(f"{message}: {str(e)}")
+        return table
+
+
+    def in_transaction(self):
+        return False
+
+    def _do_query_transpile(self, start_time: float, raw_query: str, plugin_hooks: List[UQuery]) -> tuple[list[Expression], Executor | None]:
+        with sentry_sdk.start_span(op="sqlglot", name="Parsing query"):
+            try:
+                queries = sqlglot.parse(raw_query, read=self.base_engine)
+            except ParseError as e:
+                queries = None
+                raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
+
+        last_executor = None
 
         if queries is None:
             last_executor = self.perform_query(self.catalog_executor, raw_query, plugin_hooks)
@@ -125,16 +144,7 @@ class UniverSQLSession:
                 f"[{self.session_id}] {last_executor.get_query_log(query_duration)} 🚀 "
                 f"({get_friendly_time_since(start_time, performance_counter)})")
 
-        table = last_executor.get_as_table()
-        for hook in plugin_hooks:
-            try:
-                hook.end(table)
-            except Exception as e:
-                print_exc(10)
-                message = f"Unable to end query execution on plugin {hook.__class__}"
-                logger.error(message, exc_info=e)
-                raise QueryError(f"{message}: {str(e)}")
-        return table
+        return queries, last_executor
 
     def _find_tables(self, ast: sqlglot.exp.Expression, cte_aliases=None):
         if cte_aliases is None:
@@ -192,7 +202,7 @@ class UniverSQLSession:
                         self.catalog.register_locations(new_locations)
                 return alternative_executor
 
-        with sentry_sdk.start_span(name="Execute query on Snowflake"):
+        with sentry_sdk.start_span(name="Execute query on target database"):
             last_executor = self.catalog_executor
             if ast is None:
                 last_executor.execute_raw(raw_query, self.catalog_executor)
@@ -225,20 +235,13 @@ class UniverSQLSession:
             table_path = alternative_catalog.get_table_paths([full_qualifier_]).get(full_qualifier_, False)
             if table_path is None or isinstance(table_path, pyarrow.Table):
                 continue
-            # try:
-            #     namespace = self.iceberg_catalog.properties.get('namespace')
-            #     table_ref = table.sql(dialect="snowflake")
-            #     logger.info(f"Looking up table {table_ref} in namespace {namespace}")
-            #     iceberg_table = self.iceberg_catalog.load_table((namespace, table_ref))
-            #     cached_tables[table] = iceberg_table
-            # except NoSuchTableError:
             not_existed.append(table)
 
         locations = self.catalog.get_table_paths(not_existed)
         for table_ast, table in locations.items():
             if isinstance(table, pyiceberg.table.Table):
                 namespace = self.iceberg_catalog.properties.get('namespace')
-                table_name = table_ast.sql(dialect="snowflake")
+                table_name = table_ast.sql(dialect=self.base_engine)
                 try:
                     iceberg_table = self.iceberg_catalog.register_table((namespace, table_name),
                                                                         table.metadata_location)
@@ -252,13 +255,31 @@ class UniverSQLSession:
                 raise Exception(f"Unknown table type {table}")
         return locations | cached_tables
 
+class Sessions:
+    def __init__(self):
+        self._sessions = {}
+
+    def register_session(self, session : UniverSQLSession):
+        self._sessions[session.session_id] = session
+
+    def get_session(self, id: str) -> Optional[UniverSQLSession]:
+        return self._sessions.get(id)
+
+    def close_session(self, session_id: str):
+        session = self._sessions[session_id]
+        del self._sessions[session_id]
+        session.close()
+
+    def exit(self):
+        for token, session in self._sessions.items():
+            session.close()
 
 ENABLE_DEBUG_WATCH_TOWER = False
 WATCH_TOWER_SCHEDULE_SECONDS = 2
 kill_event = threading.Event()
 
 
-def watch_tower(cache_directory, **kwargs):
+def watch_tower(**kwargs):
     while True:
         kill_event.wait(timeout=WATCH_TOWER_SCHEDULE_SECONDS)
         if kill_event.is_set():
@@ -274,14 +295,14 @@ def watch_tower(cache_directory, **kwargs):
                 memory_percent = ""
                 cpu_percent = ""
 
-            disk_info = get_friendly_disk_usage(cache_directory, debug=ENABLE_DEBUG_WATCH_TOWER)
+            disk_info = get_friendly_disk_usage(kwargs.get('cache_directory'), debug=ENABLE_DEBUG_WATCH_TOWER)
             logger.info(f"Currently {len(sessions)} sessions running {processing_sessions} queries "
                         f"| System: {cpu_percent} {memory_percent} [Disk: {disk_info}] ")
 
 
 thread = threading.Thread(target=watch_tower, kwargs=current_context)
 thread.daemon = True
-thread.start()
+# thread.start()
 
 
 # If the user intends to kill the server, not wait for DuckDB to gracefully shutdown.
