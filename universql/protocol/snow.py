@@ -43,7 +43,8 @@ for module in [
     "universql.warehouse.snowflake",
     "universql.warehouse.redshift",
     "universql.plugins.snow",
-    "universql.plugins.ui",
+    # "universql.plugins.ui",
+    "universql.plugins.saas.server",
 ]:
     __import__(module)
 
@@ -301,7 +302,7 @@ def get_requirements(path):
         return []
 
 
-@app.get("/{rest_of_path:path}")
+@app.get("/streamlit/{rest_of_path:path}")
 async def streamlit_renderer(request: Request, rest_of_path: str) -> JSONResponse:
     settings = {"requirements": get_requirements(rest_of_path), "entrypoint": "page.py", "streamlitConfig": {},
                 "files": get_files(rest_of_path)}
