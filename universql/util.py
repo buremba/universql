@@ -20,11 +20,14 @@ from starlette.requests import Request
 import requests
 from requests.exceptions import RequestException
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)s %(name)s %(levelname)-6s %(message)s',
+# Configure logging level from environment variable
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+logging.basicConfig(level=getattr(logging, log_level, logging.INFO), 
+                    format='%(asctime)s.%(msecs)s %(name)s %(levelname)-6s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 
 sentry_sdk.init(
-    dsn="https://7dd8ba359188efce454c24defced2f13@o29344.ingest.us.sentry.io/4508141310836736",
+    # dsn="https://7dd8ba359188efce454c24defced2f13@o29344.ingest.us.sentry.io/4508141310836736",
     # Set traces_sample_rate to 1.0 to capture 100%
     # of transactions for tracing.
     traces_sample_rate=1.0,
@@ -473,8 +476,8 @@ def initialize_context():
         logging.getLogger().setLevel(logging.INFO)
 
         # not running through CLI
-        from universql.main import snowflake
-        globals()["current_context"] = get_context_params(snowflake)
+        from universql.main import snowflake, postgresql
+        globals()["current_context"] = get_context_params(postgresql)
     else:
         globals()["current_context"] = context.params
 

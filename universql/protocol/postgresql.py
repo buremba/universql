@@ -1,29 +1,35 @@
 import asyncio
+import base64
 import datetime
 import uuid
+import ssl
+import tempfile
+import os
 
 import dateutil.parser
 import hashlib
 import io
 import json
 import logging
-import os
 import random
 import socket
 import struct
 from typing import Dict, List, Optional
 
+from fastapi import FastAPI
 import pyarrow
 import sqlglot
 
-from universql.protocol.session import Sessions, UniverSQLSession
-from universql.warehouse.postgresql import PyPgType, PostgresqlCatalog
+from universql.plugin import APPS
+from universql.protocol.session import Sessions, UniverSQLSession, sessions as global_sessions
+from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES
+from universql.warehouse.postgresql import PyPgType
 
 # register all warehouses and plugins
 for module in [
-    "universql.warehouse.duckdb",
     "universql.warehouse.postgresql",
     "universql.plugins.ui",
+    "universql.plugins.websocket.websocket",
 ]:
     __import__(module)
 
@@ -177,20 +183,6 @@ def _arrow_type_to_bvtype(arrow_type: pyarrow.DataType) -> PyPgType:
         return PyPgType.TEXT
 
 
-def _has_results(query_result) -> bool:
-    """Check if a query result has results, handling both PyArrow Tables and DuckDBQueryResult objects."""
-    if hasattr(query_result, 'schema') and hasattr(query_result, 'num_columns'):
-        # PyArrow Table - check if it has columns and meaningful content
-        # Empty tables or tables with no columns should not be considered as having results
-        return query_result.num_columns > 0 and query_result.num_rows > 0
-    elif hasattr(query_result, 'has_results'):
-        # DuckDBQueryResult or similar custom objects
-        return query_result.has_results()
-    else:
-        # Fallback - assume it has results
-        return True
-
-
 def _get_status(query_result) -> str:
     """Get status from query result, handling both PyArrow Tables and DuckDBQueryResult objects."""
     if hasattr(query_result, 'schema') and hasattr(query_result, 'num_columns'):
@@ -316,7 +308,7 @@ class AsyncBVBuffer(object):
         return struct.unpack("!i", data)[0]
 
 
-class BVContext:
+class PGContext:
     def __init__(
             self, session: UniverSQLSession, params: Dict[str, str]
     ):
@@ -350,8 +342,9 @@ class BVContext:
     def describe_portal(self, name: str):
         stmt, params, result_fmt = self.portals[name]
         sql, param_oids = self.stmts[stmt]
-        # todo: parse params? LIMIT 0?
-        query_result = self.execute_sql(sql=sql, params=params, result_fmt=result_fmt)
+        final_sql = self._substitute_parameters(sql, params)
+        query_result = self._route_query(final_sql)
+        logger.debug(f"Describe portal: {final_sql}, result: {query_result}")
         self.result_cache[name] = query_result
         return query_result
 
@@ -364,7 +357,7 @@ class BVContext:
                 params.append(type[2])
             else:
                 raise Exception(f"Unsupported parameter type: {typeoid}")
-        return self.execute_sql(sql, params)
+        return self._route_query(sql)
 
     def execute_portal(self, name: str):
         if name in self.result_cache:
@@ -374,8 +367,9 @@ class BVContext:
         else:
             stmt, params, result_fmt = self.portals[name]
             sql, param_oids = self.stmts[stmt]
-            # parse the params?
-            qr = self.execute_sql(sql=sql, params=params, result_fmt=result_fmt)
+            # Substitute parameters in SQL
+            final_sql = self._substitute_parameters(sql, params)
+            qr = self._route_query(final_sql)
             return qr
 
     def add_statement(self, name: str, sql: str, param_oids: List[int]):
@@ -398,9 +392,65 @@ class BVContext:
     def sync(self):
         if self.has_error:
             self.has_error = False
+            # If we're in a transaction and had an error, rollback the transaction
+            if self.session.in_transaction():
+                logger.debug(f"[{self.session.session_id}] Auto-rolling back failed transaction on SYNC")
+                self.session.set_transaction_state(False)
 
-    def execute_sql(self, sql: str, params=None, result_fmt=None):
-        """Execute SQL using the UniversSQL session"""
+    def _substitute_parameters(self, sql: str, params: List) -> str:
+        """Substitute $1, $2, etc. parameters with actual values."""
+        if not params:
+            return sql
+        
+        final_sql = sql
+        for i, param in enumerate(params):
+            placeholder = f"${i + 1}"
+            # Simple parameter substitution - escape single quotes and wrap in quotes
+            if param is None:
+                param_str = "NULL"
+            elif isinstance(param, str):
+                # Escape single quotes and wrap in quotes
+                escaped_param = param.replace("'", "''")
+                param_str = f"'{escaped_param}'"
+            elif isinstance(param, (int, float)):
+                param_str = str(param)
+            elif isinstance(param, bool):
+                param_str = "TRUE" if param else "FALSE"
+            else:
+                # Default: convert to string and quote
+                escaped_param = str(param).replace("'", "''")
+                param_str = f"'{escaped_param}'"
+            
+            final_sql = final_sql.replace(placeholder, param_str)
+        
+        return final_sql
+
+    async def _route_query(self, sql: str) -> pyarrow.Table:
+        """Route query through websocket if available, otherwise execute directly."""
+        from universql.protocol.session import sessions as global_sessions
+        
+        # Debug: Log credentials being used for websocket lookup
+        logger.debug(f"[{self.session.session_id}] Looking for websocket with credentials: {self.session.credentials}")
+        
+        # Check if there's a linked websocket for this session
+        websocket = global_sessions.find_websocket_by_credentials(self.session.credentials)
+        
+        logger.debug(f"[{self.session.session_id}] Found websocket: {websocket is not None}")
+        
+        if websocket:
+            logger.info(f"[{self.session.session_id}] 🚀 Routing query through WebSocket")
+            try:
+                await websocket.send_json({
+                    "type": "query_routed",
+                    "sql": sql,
+                    "session_id": self.session.session_id
+                })
+                logger.info(f"[{self.session.session_id}] ✅ Notified WebSocket of query: {sql[:50]}...") 
+            except Exception as e:
+                logger.warning(f"[{self.session.session_id}] WebSocket notification failed: {e}")
+        else:
+            logger.debug(f"[{self.session.session_id}] No websocket found, executing directly")
+        
         return self.session.do_query(sql)
 
 
@@ -439,86 +489,50 @@ async def send_row_description(query_result, writer: asyncio.StreamWriter):
     await writer.drain()
 
 
-async def send_data_rows(query_result, writer: asyncio.StreamWriter, limit: int = 0) -> int:
+async def send_data_rows(query_result: pyarrow.Table, writer: asyncio.StreamWriter, limit: int = 0) -> int:
     cnt = 0
     converters = []
 
-    # Handle PyArrow Table
-    if hasattr(query_result, 'schema') and hasattr(query_result, 'num_columns'):
-        num_columns = query_result.num_columns
-        num_rows = query_result.num_rows
+    num_columns = query_result.num_columns
+    num_rows = query_result.num_rows
 
-        # Setup converters for PyArrow table
-        for i in range(num_columns):
-            field = query_result.schema.field(i)
-            bvtype = _arrow_type_to_bvtype(field.type)
-            pgtype = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)
-            # Default to text format for PyArrow tables
-            converters.append((pgtype[1], True))
+    # Setup converters for PyArrow table
+    for i in range(num_columns):
+        field = query_result.schema.field(i)
+        bvtype = _arrow_type_to_bvtype(field.type)
+        pgtype = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)
+        # Default to text format for PyArrow tables
+        converters.append((pgtype[1], True))
 
-        # Convert to row-wise format
-        for row_idx in range(num_rows):
-            buf = BVBuffer()
-            for col_idx in range(num_columns):
-                column_array = query_result.column(col_idx)
-                r = column_array[row_idx].as_py()  # Convert PyArrow scalar to Python value
+    # Convert to row-wise format
+    for row_idx in range(num_rows):
+        buf = BVBuffer()
+        for col_idx in range(num_columns):
+            column_array = query_result.column(col_idx)
+            r = column_array[row_idx].as_py()  # Convert PyArrow scalar to Python value
 
-                if r is None:
-                    buf.write_int32(-1)
-                else:
-                    converter, do_encode = converters[col_idx]
-                    v = converter(r)
-                    if do_encode:
-                        v = v.encode("utf-8")
-                    buf.write_int32(len(v))
-                    buf.write_bytes(v)
-
-            out = buf.get_value()
-            row_sig = struct.pack(
-                "!cih",
-                ServerResponse.DATA_ROW,
-                len(out) + 6,
-                num_columns,
-            )
-            writer.write(row_sig + out)
-            cnt += 1
-            if limit > 0 and cnt >= limit:
-                break
-    else:
-        # Handle DuckDBQueryResult or similar objects
-        num_columns = query_result.column_count()
-        for i in range(num_columns):
-            bvtype = query_result.column(i)[1]
-            pgtype = BVTYPE_TO_PGTYPE.get(bvtype, PG_UNKNOWN)
-            if not query_result.result_format or query_result.result_format[i] == 0:
-                converters.append((pgtype[1], True))
+            if r is None:
+                buf.write_int32(-1)
             else:
-                converters.append((pgtype[2], False))
+                converter, do_encode = converters[col_idx]
+                v = converter(r)
+                if do_encode:
+                    v = v.encode("utf-8")
+                buf.write_int32(len(v))
+                buf.write_bytes(v)
 
-        for row in query_result.rows():
-            buf = BVBuffer()
-            for j in range(num_columns):
-                r = row[j]
-                if r is None:
-                    buf.write_int32(-1)
-                else:
-                    converter, do_encode = converters[j]
-                    v = converter(r)
-                    if do_encode:
-                        v = v.encode("utf-8")
-                    buf.write_int32(len(v))
-                    buf.write_bytes(v)
-            out = buf.get_value()
-            row_sig = struct.pack(
-                "!cih",
-                ServerResponse.DATA_ROW,
-                len(out) + 6,
-                num_columns,
-            )
-            writer.write(row_sig + out)
-            cnt += 1
-            if limit > 0 and cnt >= limit:
-                break
+        # Write the complete row after processing all columns
+        out = buf.get_value()
+        row_sig = struct.pack(
+            "!cih",
+            ServerResponse.DATA_ROW,
+            len(out) + 6,
+            num_columns,
+        )
+        writer.write(row_sig + out)
+        cnt += 1
+        if limit > 0 and cnt >= limit:
+            break
     await writer.drain()
     return cnt
 
@@ -538,7 +552,7 @@ async def send_parameter_description(param_oids: List[int], writer: asyncio.Stre
     await writer.drain()
 
 
-async def send_error(exception, writer: asyncio.StreamWriter, ctx: Optional[BVContext] = None):
+async def send_error(exception, writer: asyncio.StreamWriter, ctx: Optional[PGContext] = None):
     estr = str(exception)
     logger.error(estr)
     buf = BVBuffer()
@@ -552,89 +566,245 @@ async def send_error(exception, writer: asyncio.StreamWriter, ctx: Optional[BVCo
     if ctx:
         ctx.mark_error()
 
-
 class PostgresqlHandler:
     """Async PostgreSQL protocol handler."""
 
     def __init__(self, server: 'PostgresqlServer'):
         self.server = server
 
+    def _create_sni_callback(self):
+        """Create SNI callback that stores server name in SSL context."""
+        def sni_callback(ssl_sock, server_name, ssl_ctx):
+            if server_name:
+                logger.info("Client requested host via SNI: %s", server_name)
+                server_name_str = server_name.decode('utf-8') if isinstance(server_name, bytes) else server_name
+                ssl_ctx.sni_server_name = server_name_str
+            else:
+                ssl_ctx.sni_server_name = None
+        return sni_callback
+
     async def handle_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Handle a single PostgreSQL client connection."""
-        # Set TCP_NODELAY for better latency
-        writer.get_extra_info('socket').setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True)
+        client_socket = writer.get_extra_info('socket')
+        client_host, client_port = client_socket.getpeername()[:2]
+        logger.info(f"Client connected from: {client_host}:{client_port}")
+        
+        client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True)
         
         r = AsyncBVBuffer(reader)
         ctx = None
         try:
-            ctx = await self.handle_startup(r, writer)
+            ctx, r, writer = await self.handle_startup(r, writer)
             if ctx:
                 self.server.ctxts[ctx.process_id] = ctx
+                logger.debug(f"Connection established for user '{ctx.session.credentials.get('user')}', waiting for messages...")
             
             while ctx:
                 try:
-                    type_code = await r.read_byte()
+                    # Add timeout for reading messages to prevent hanging
+                    logger.debug("Waiting for next message from client...")
+                    if not ctx.authenticated:
+                        # Shorter timeout during authentication phase (30 seconds)
+                        timeout = 30.0
+                        logger.debug("Authentication phase - using 30s timeout")
+                    else:
+                        # Longer timeout for normal operation (60 seconds)
+                        timeout = 60.0
+                    
+                    type_code = await asyncio.wait_for(r.read_byte(), timeout=timeout)
+                    logger.debug(f"Received message type: {type_code}")
+                except asyncio.TimeoutError:
+                    if not ctx.authenticated:
+                        logger.error(f"Authentication timeout for user '{ctx.session.credentials.get('user')}' - client did not send expected response")
+                        # Send authentication timeout error
+                        await self.send_error("28000", "Authentication timeout - client did not respond", writer)
+                    else:
+                        logger.warning(f"Message timeout for user '{ctx.session.credentials.get('user')}'")
+                    break
                 except asyncio.IncompleteReadError:
                     # Client disconnected
+                    logger.debug("Client disconnected (IncompleteReadError)")
+                    break
+                except Exception as e:
+                    logger.error(f"Error reading type code: {e}")
                     break
                     
                 if not type_code or type_code == ClientCommand.TERMINATE:
                     # we're done
+                    logger.debug("Client terminated connection")
                     break
 
-                msglen = await r.read_uint32()
-                if msglen > 4:
-                    payload = await r.read_bytes(msglen - 4)
-                else:
-                    payload = None
-
-                if not ctx.authenticated:
-                    if type_code == ClientCommand.PASSWORD_MESSAGE:
-                        # Check what type of authentication we requested
-                        if ctx.auth_type == 'plain':
-                            # We requested plain-text password
-                            await self.handle_plain_password(ctx, payload, writer)
-                        else:
-                            # We requested MD5 password (or default)
-                            await self.handle_md5_password(ctx, payload, writer)
+                try:
+                    logger.debug(f"Reading message length for type: {type_code}")
+                    msglen = await asyncio.wait_for(r.read_uint32(), timeout=30.0)
+                    logger.debug(f"Message length: {msglen}")
+                    
+                    if msglen > 4:
+                        logger.debug(f"Reading payload of {msglen - 4} bytes")
+                        payload = await asyncio.wait_for(r.read_bytes(msglen - 4), timeout=30.0)
+                        logger.debug(f"Payload read successfully, length: {len(payload) if payload else 0}")
                     else:
-                        raise Exception("Not authenticated")
-                elif type_code == ClientCommand.QUERY:
-                    await self.handle_query(ctx, payload, writer)
-                elif type_code == ClientCommand.PARSE:
-                    await self.handle_parse(ctx, payload, writer)
-                elif type_code == ClientCommand.BIND:
-                    await self.handle_bind(ctx, payload, writer)
-                elif type_code == ClientCommand.DESCRIBE:
-                    await self.handle_describe(ctx, payload, writer)
-                elif type_code == ClientCommand.EXECUTE:
-                    await self.handle_execute(ctx, payload, writer)
-                elif type_code == ClientCommand.CLOSE:
-                    await self.handle_close(ctx, payload, writer)
-                elif type_code == ClientCommand.SYNC:
-                    ctx.sync()
-                    await self.send_ready_for_query(ctx, writer)
-                elif type_code == ClientCommand.FLUSH:
-                    ctx.flush()
-                else:
-                    raise Exception("Unknown type_code: %s" % type_code)
+                        payload = None
+                        logger.debug("No payload for this message")
+                except asyncio.TimeoutError:
+                    logger.error(f"Timeout reading message length/payload for type: {type_code}")
+                    break
+                except Exception as e:
+                    logger.error(f"Error reading message length/payload: {e}")
+                    break
+
+                logger.debug(f"Processing message type: {type_code}, length: {msglen}, authenticated: {ctx.authenticated}")
+
+                try:
+                    if not ctx.authenticated:
+                        if type_code == ClientCommand.PASSWORD_MESSAGE:
+                            # Check what type of authentication we requested
+                            logger.debug(f"Received password message, auth_type: {ctx.auth_type}")
+                            if ctx.auth_type == 'plain':
+                                # We requested plain-text password
+                                logger.debug("Processing plain-text password")
+                                await self.handle_plain_password(ctx, payload, writer)
+                            else:
+                                # We requested MD5 password (or default)
+                                logger.debug("Processing MD5 password")
+                                await self.handle_md5_password(ctx, payload, writer)
+                        else:
+                            logger.error(f"Not authenticated, received unexpected message type: {type_code} (expected {ClientCommand.PASSWORD_MESSAGE})")
+                            # Send error response for unexpected message
+                            await self.send_error("28000", f"Authentication required, but received unexpected message type: {type_code}", writer)
+                            break
+                    elif type_code == ClientCommand.QUERY:
+                        await self.handle_query(ctx, payload, writer)
+                    elif type_code == ClientCommand.PARSE:
+                        await self.handle_parse(ctx, payload, writer)
+                    elif type_code == ClientCommand.BIND:
+                        await self.handle_bind(ctx, payload, writer)
+                    elif type_code == ClientCommand.DESCRIBE:
+                        await self.handle_describe(ctx, payload, writer)
+                    elif type_code == ClientCommand.EXECUTE:
+                        await self.handle_execute(ctx, payload, writer)
+                    elif type_code == ClientCommand.CLOSE:
+                        await self.handle_close(ctx, payload, writer)
+                    elif type_code == ClientCommand.SYNC:
+                        logger.debug("Handling SYNC command")
+                        ctx.sync()
+                        await self.send_ready_for_query(ctx, writer)
+                    elif type_code == ClientCommand.FLUSH:
+                        logger.debug("Handling FLUSH command")
+                        ctx.flush()
+                    else:
+                        logger.error(f"Unknown message type_code: {type_code}")
+                        await self.send_error("08P01", f"Unknown message type: {type_code}", writer)
+                        break
+                except Exception as e:
+                    logger.exception(f"Error processing message type {type_code}: {e}")
+                    await send_error(e, writer, ctx)
+                    # Don't break here unless it's a critical error
         except Exception as e:
-            logger.exception(e)
+            logger.exception(f"Critical error in connection handling: {e}")
             await send_error(e, writer)
         finally:
+            logger.debug(f"Cleaning up connection for user: {ctx.session.credentials.get('user') if ctx else 'unknown'}")
             if ctx:
                 self.server.sessions.close_session(ctx.session.session_id)
                 if ctx.process_id in self.server.ctxts:
                     del self.server.ctxts[ctx.process_id]
             writer.close()
             await writer.wait_closed()
+            logger.debug("Connection cleanup completed")
 
-    async def handle_startup(self, r: AsyncBVBuffer, writer: asyncio.StreamWriter) -> BVContext:
+    async def handle_startup(self, r: AsyncBVBuffer, writer: asyncio.StreamWriter):
         msglen = await r.read_uint32() - 4
         code = await r.read_uint32()
         if code == 80877103:  ## SSL request
-            await self.send_notice(writer)
+            if self.server.ssl_certfile and self.server.ssl_keyfile:
+                writer.write(b'S')
+                await writer.drain()
+                logger.debug("SSL request accepted - upgrading connection to SSL")
+                
+                # Create SSL context for the upgrade
+                ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                ssl_context.set_servername_callback(self._create_sni_callback())
+                
+                # Check if we're using localhost computing and have embedded certificates
+                is_localhost = (
+                    self.server.host in ['localhostcomputing.com', 'localhost', '127.0.0.1', '::1', '0.0.0.0'] or
+                    self.server.host.endswith('.localhostcomputing.com')
+                )
+                
+                if is_localhost and LOCALHOST_UNIVERSQL_COM_BYTES:
+                    logger.debug("Using embedded SSL certificates for localhost computing")
+                    # Decode the embedded certificates
+                    cert_data = base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert'])
+                    key_data = base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['key'])
+                    
+                    # Create temporary files for the certificates
+                    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pem') as cert_file:
+                        cert_file.write(cert_data)
+                        cert_file_path = cert_file.name
+                    
+                    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.key') as key_file:
+                        key_file.write(key_data)
+                        key_file_path = key_file.name
+                    
+                    try:
+                        ssl_context.load_cert_chain(cert_file_path, key_file_path)
+                    finally:
+                        # Clean up temporary files
+                        try:
+                            os.unlink(cert_file_path)
+                            os.unlink(key_file_path)
+                        except:
+                            pass
+                else:
+                    # Use provided certificate files
+                    ssl_context.load_cert_chain(self.server.ssl_certfile, self.server.ssl_keyfile)
+                
+                # Get the current transport and protocol
+                transport = writer.transport
+                current_protocol = transport.get_protocol()
+                loop = asyncio.get_event_loop()
+                
+                try:
+                    # Create a new reader for the SSL connection
+                    new_reader = asyncio.StreamReader()
+                    new_protocol = asyncio.StreamReaderProtocol(new_reader)
+                    
+                    # Upgrade the connection to SSL
+                    ssl_transport = await loop.start_tls(
+                        transport, 
+                        new_protocol, 
+                        ssl_context, 
+                        server_side=True
+                    )
+                    
+                    # Create new writer for the SSL connection  
+                    new_writer = asyncio.StreamWriter(ssl_transport, new_protocol, new_reader, loop)
+                    
+                    # Update our local references
+                    writer = new_writer
+                    r = AsyncBVBuffer(new_reader)
+                    
+                    logger.debug("SSL upgrade completed successfully")
+                    
+                except Exception as e:
+                    logger.error(f"SSL upgrade failed: {e}")
+                    # Close the original connection on SSL upgrade failure
+                    try:
+                        writer.close()
+                        await writer.wait_closed()
+                    except:
+                        pass
+                    return None, r, writer
+            else:
+                # Reject SSL
+                writer.write(b'N')
+                await writer.drain()
+                logger.debug("SSL request rejected - server has no SSL configuration")
+            
+            # Recursively handle the next startup message (should be the actual startup)
             return await self.handle_startup(r, writer)
+            
         elif code == 196608:  # Protocol 3.0
             msg = [
                 x.decode("utf-8")
@@ -645,39 +815,89 @@ class PostgresqlHandler:
 
             from universql.util import current_context
 
+            # Extract SNI server name from SSL transport if available
+            sni_server_name = None
+            if hasattr(writer, 'transport') and hasattr(writer.transport, 'get_extra_info'):
+                ssl_object = writer.transport.get_extra_info('ssl_object')
+                if ssl_object and hasattr(ssl_object, 'context') and hasattr(ssl_object.context, 'sni_server_name'):
+                    sni_server_name = ssl_object.context.sni_server_name
+
             # Extract PostgreSQL connection parameters from the parsed URL
-            credentials = {}
+            credentials = {"server_id": sni_server_name}
             
             # Get URL credentials if available
             url_credentials = current_context.get('url')
             if url_credentials:
-                # Only include PostgreSQL connection parameters, exclude scheme and other non-DB params
-                pg_params = ['host', 'port', 'database', 'user', 'password', 'sslmode', 'sslcert', 'sslkey', 'sslrootcert']
-                for key in pg_params:
-                    if key in url_credentials and url_credentials[key] is not None:
-                        credentials[key] = url_credentials[key]
-            
-            # Override with client-provided parameters if present
+                # If url_credentials is a string, parse it; otherwise assume it's already a dict-like object
+                from urllib.parse import urlparse, parse_qs
+
+                if isinstance(url_credentials, str):
+                    parsed = urlparse(url_credentials)
+                    if parsed.scheme and parsed.scheme.startswith('postgres'):
+                        if parsed.hostname:
+                            credentials['host'] = parsed.hostname
+                        if parsed.port:
+                            credentials['port'] = parsed.port
+                        if parsed.path and len(parsed.path) > 1:
+                            credentials['database'] = parsed.path.lstrip('/')
+                        if parsed.username:
+                            credentials['user'] = parsed.username
+                        if parsed.password:
+                            credentials['password'] = parsed.password
+
+                        # Extract query params such as sslmode
+                        qparams = parse_qs(parsed.query)
+                        for k, v in qparams.items():
+                            if v:
+                                credentials[k] = v[0]
+                else:
+                    # Assume dict-like
+                    pg_params = ['host', 'port', 'database', 'user', 'password', 'sslmode', 'sslcert', 'sslkey', 'sslrootcert']
+                    for key in pg_params:
+                        if key in url_credentials and url_credentials[key] is not None:
+                            credentials[key] = url_credentials[key]
+
+
+            if "application_name" in params:
+                credentials["application_name"] = params["application_name"]
+
             if "user" in params:
                 credentials["user"] = params["user"]
             if "database" in params:
                 credentials["database"] = params["database"]
-            if "application_name" in params:
-                credentials["application_name"] = params["application_name"]
 
-            # Create session with proper context and credentials
-            session = UniverSQLSession(current_context, str(uuid.uuid4()), "postgresql", "postgresql", credentials, {})
-            self.server.sessions.register_session(session)
-            ctx = BVContext(session, params)
-            await self.send_authentication_md5(ctx, writer)
-            return ctx
+            logger.debug(f"🔍 PostgreSQL startup looking for session with credentials: {credentials}")
+            session = self.server.sessions.find_session_by_credentials(sni_server_name, credentials)
+            logger.debug(f"🔍 find_session_by_credentials returned: {session.session_id if session else None}")
+
+            if not session:
+                import uuid as _uuid
+                session = UniverSQLSession(
+                    context=current_context,
+                    session_id=str(_uuid.uuid4()),
+                    base_engine="postgresql",
+                    target_engine="websocket",  
+                    credentials=credentials,
+                    session_parameters={},
+                )
+                self.server.sessions.register_session(session)
+                logger.debug(f"🆕 Created new PostgreSQL session: {session.session_id}")
+            else:
+                logger.debug(f"✅ Found session via credentials: {session.session_id}, base_engine: {session.base_engine}, context keys: {list(session.context.keys())}")
+
+            ctx = PGContext(session, params)
+            await self.send_authentication_md5(sni_server_name, ctx, writer)
+            return ctx, r, writer
+            
         elif code == 80877102:  ## Cancel request
             process_id, secret_key = await r.read_uint32(), await r.read_uint32()
             ctx = self.server.ctxts.get(process_id)
             if ctx and ctx.secret_key == secret_key:
                 self.server.sessions.close_session(ctx.session.session_id)
                 del self.server.ctxts[ctx.process_id]
-            return None
+            return None, r, writer
+        elif code == 796357408:  ## HTTP:
+            raise Exception(f"HTTP request received")
         else:
             raise Exception(f"Unsupported startup message: {code}")
 
@@ -687,76 +907,193 @@ class PostgresqlHandler:
         )
         await writer.drain()
 
-    async def send_authentication_md5(self, ctx: BVContext, writer: asyncio.StreamWriter):
-        # If we don't have a password from the URL, request plain-text password instead of MD5
-        # This allows us to capture the actual password for backend authentication
-        if not ctx.session.credentials.get('password'):
+    async def send_authentication_md5(self, server_id: str, ctx: PGContext, writer: asyncio.StreamWriter):
+        """Decide between requesting MD5 or plain-text password based on the global session registry."""
+        # Request plain-text authentication if we don't already have a password for this session/user.
+        request_plain = ctx.session.credentials.get('password') is None
+        
+        # Debug logging - use proper Sessions lookup with server_id and credentials
+        user = ctx.session.credentials.get('user')
+        
+        existing_session = self.server.sessions.find_session_by_credentials(server_id, ctx.session.credentials)
+        logger.debug(f"🔐 Auth decision for user '{user}': request_plain={request_plain}, existing_session={existing_session is not None}")
+        if existing_session:
+            logger.debug(f"🔐 Existing session has password: {existing_session.credentials.get('password') is not None}")
+
+        if request_plain:
             # Request plain-text password (authentication type 3)
             ctx.auth_type = 'plain'
-            writer.write(
-                struct.pack("!cii", ServerResponse.AUTHENTICATION_REQUEST, 8, 3)
+            writer.write(struct.pack("!cii", ServerResponse.AUTHENTICATION_REQUEST, 8, 3))
+            logger.info(
+                "🔐 Requesting plain-text auth for user '%s' (existing session needs password)",
+                ctx.session.credentials.get('user'),
             )
+            logger.debug("Plain-text auth request sent, waiting for password message...")
         else:
-            # We have password from URL, proceed with MD5 authentication
+            # Default to MD5 authentication (more compatible with standard clients)
             ctx.auth_type = 'md5'
             ctx.salt = os.urandom(4)
-            writer.write(
-                struct.pack("!cii", ServerResponse.AUTHENTICATION_REQUEST, 12, 5)
-            )
+            writer.write(struct.pack("!cii", ServerResponse.AUTHENTICATION_REQUEST, 12, 5))
             writer.write(ctx.salt)
-        await writer.drain()
+            logger.info(
+                "🔐 Using MD5 auth for user '%s' (standard PostgreSQL authentication)",
+                ctx.session.credentials.get('user'),
+            )
+            logger.debug("MD5 auth request sent, waiting for password message...")
 
-    async def handle_md5_password(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+        await writer.drain()
+        logger.debug("Authentication request flushed to client")
+
+    async def handle_md5_password(self, ctx: PGContext, payload: bytes, writer: asyncio.StreamWriter):
+        logger.debug(f"Handling MD5 password, payload length: {len(payload) if payload else 0}")
+        
         # Extract the password from the client request
         client_password_hash = payload.decode("utf-8").rstrip("\x00")
         
-        # Store the password hash for potential backend use
-        ctx.session.credentials['password_hash'] = client_password_hash
-        logger.debug("Password hash captured from client authentication")
+        logger.debug(f"Password hash captured from client authentication: '{client_password_hash}'")
+        
+        # This is a limitation - MD5 auth doesn't give us the plain password
+        logger.warning("🔐 MD5 authentication used - Password not stored in session")
         
         # Accept the authentication at proxy level
+        logger.debug("Sending authentication OK for MD5")
         await self.send_authentication_ok(writer)
+        logger.debug("Authentication OK sent, starting post-auth for MD5")
         await self.handle_post_auth(ctx, writer)
+        logger.debug("Post-auth completed successfully for MD5")
 
-    async def handle_plain_password(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
-        # Extract plain-text password from client request
-        plain_password = payload.decode("utf-8").rstrip("\x00")
+    async def handle_plain_password(self, ctx: PGContext, payload: bytes, writer: asyncio.StreamWriter):
+        logger.debug(f"Handling plain password, payload length: {len(payload) if payload else 0}")
         
-        # Store the plain password for backend authentication
-        ctx.session.credentials['password'] = plain_password
-        logger.debug("Plain-text password captured from client authentication")
-        
-        # Accept the authentication at proxy level
-        await self.send_authentication_ok(writer)
-        await self.handle_post_auth(ctx, writer)
+        try:
+            # Extract plain-text password from client request
+            plain_password = payload.decode("utf-8").rstrip("\x00")
+            logger.debug(f"Extracted password from client (length: {len(plain_password)})")
+            
+            # Store the plain password for backend authentication
+            # This should override any URL-provided password
+            ctx.session.credentials['password'] = plain_password
+            logger.debug(f"Plain-text password captured from client authentication")
+            logger.info(f"🔐 Updated credentials with client password for user='{ctx.session.credentials.get('user')}'")
+            
+            # Accept the authentication at proxy level
+            logger.debug("Sending authentication OK for plain-text")
+            await self.send_authentication_ok(writer)
+            logger.debug("Authentication OK sent, starting post-auth for plain-text")
+            await self.handle_post_auth(ctx, writer)
+            logger.debug("Post-auth completed successfully for plain-text")
+            
+        except Exception as e:
+            logger.error(f"Error in handle_plain_password: {e}")
+            await self.send_error("28000", f"Authentication failed: {e}", writer)
+            raise
 
-    async def handle_post_auth(self, ctx: BVContext, writer: asyncio.StreamWriter):
+    async def handle_post_auth(self, ctx: PGContext, writer: asyncio.StreamWriter):
+        logger.debug("Starting post-auth: sending parameter status messages")
+        # Send parameter status messages that JDBC clients expect to prevent client info errors
         await self.send_parameter_status({
-            "server_version": "universql",
+            "server_version": "16.0",  # Use a realistic PostgreSQL version
+            "server_encoding": "UTF8",
             "client_encoding": "UTF8",
-            "DateStyle": "ISO",
+            "DateStyle": "ISO, MDY",
+            "TimeZone": "UTC",
+            "integer_datetimes": "on",
+            "IntervalStyle": "postgres",
+            "application_name": ctx.session.credentials.get('application_name', 'universql'),
+            "is_superuser": "off",
+            "session_authorization": ctx.session.credentials.get('user', 'universql'),
+            "standard_conforming_strings": "on",
+            # Additional parameters that DBeaver expects
+            "search_path": '"$user", public',
+            "default_tablespace": "",
+            "default_transaction_isolation": "read committed",
+            "default_transaction_read_only": "off",
+            "default_transaction_deferrable": "off",
+            "statement_timeout": "0",
+            "lock_timeout": "0",
+            "idle_in_transaction_session_timeout": "0",
+            "row_security": "off",
+            "lc_collate": "en_US.UTF-8",
+            "lc_ctype": "en_US.UTF-8",
+            "lc_messages": "en_US.UTF-8",
+            "lc_monetary": "en_US.UTF-8",
+            "lc_numeric": "en_US.UTF-8",
+            "lc_time": "en_US.UTF-8",
+            "shared_preload_libraries": "",
+            "dynamic_shared_memory_type": "posix",
+            "wal_level": "replica",
+            "max_wal_senders": "10",
+            "max_replication_slots": "10",
+            "wal_keep_segments": "0",
+            "wal_sender_timeout": "60s",
+            "max_connections": "100",
         }, writer)
+        logger.debug("Parameter status messages sent, sending backend key data")
         await self.send_backend_key_data(ctx, writer)
+        logger.debug("Backend key data sent, sending ready for query")
         await self.send_ready_for_query(ctx, writer)
+        logger.debug("Ready for query sent, setting authenticated=True")
         ctx.authenticated = True
+        logger.info(f"🎉 Authentication completed successfully for user '{ctx.session.credentials.get('user')}'")
         return
 
-    async def handle_query(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+    async def handle_query(self, ctx: PGContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handle query")
         decoded = payload.decode("utf-8").rstrip("\x00")
         logger.debug(f"Executing SQL: {decoded!r}")
+
+        # Check for SET commands that might contain serverid (DBeaver user properties)
+        decoded_upper = decoded.strip().upper()
+        # Check if transaction is in failed state
+        if ctx.has_error and ctx.session.in_transaction():
+            # Allow ROLLBACK and COMMIT commands even in failed transaction state
+            if not (decoded_upper.startswith('ROLLBACK') or decoded_upper.startswith('COMMIT') or decoded_upper.startswith('END')):
+                error_msg = "current transaction is aborted, commands ignored until end of transaction block"
+                await self.send_error("25P02", error_msg, writer)
+                await self.send_ready_for_query(ctx, writer)
+                return
+
+        # Auto-start transaction for queries that need it (but not for transaction control commands)
+        should_auto_start_transaction = (
+            not ctx.session.in_transaction() and 
+            not any(decoded_upper.startswith(cmd) for cmd in ['BEGIN', 'START', 'COMMIT', 'ROLLBACK', 'END', 'SET '])
+        )
+        
+        if should_auto_start_transaction:
+            logger.debug(f"[{ctx.session.session_id}] Auto-starting transaction for query")
+            ctx.session.set_transaction_state(True)
+
         try:
             # Execute query in a thread pool to avoid blocking the event loop
             loop = asyncio.get_event_loop()
-            query_result = await loop.run_in_executor(None, ctx.session.do_query, decoded)
+            
+            async def execute_query():
+                try:
+                    result: pyarrow.Table = await ctx._route_query(decoded)
+                    return result
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    raise
+            
+            # Add timeout to prevent DBeaver from hanging on slow queries
+            query_result : pyarrow.Table = await asyncio.wait_for(
+                loop.run_in_executor(None, execute_query),
+                timeout=300.0  # 5 minute timeout
+            )
             logger.debug(f"Query result type: {type(query_result)}")
+        except asyncio.TimeoutError:
+            logger.error(f"Query timed out after 300 seconds: {decoded!r}")
+            await send_error(Exception("Query timed out after 300 seconds"), writer, ctx)
+            await self.send_ready_for_query(ctx, writer)
+            return
         except Exception as e:
             logger.error(f"Error executing query: {e}")
-            await send_error(e, writer)
+            await send_error(e, writer, ctx)
             await self.send_ready_for_query(ctx, writer)
             return
 
-        if _has_results(query_result):
+        if query_result.num_rows > 0:
             logger.debug("Query has results, sending row description")
             await send_row_description(query_result, writer)
             logger.debug("Sending data rows")
@@ -769,7 +1106,7 @@ class PostgresqlHandler:
             await self.send_command_complete(f"{status}\x00", writer)
         await self.send_ready_for_query(ctx, writer)
 
-    async def handle_parse(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+    async def handle_parse(self, ctx: PGContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling parse")
         ba = bytearray(payload)
         stmt_idx = ba.index(NULL_BYTE)
@@ -785,7 +1122,7 @@ class PostgresqlHandler:
         ctx.add_statement(stmt, sql, param_oids)
         await self.send_parse_complete(writer)
 
-    async def handle_bind(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+    async def handle_bind(self, ctx: PGContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling bind")
         ba = bytearray(payload)
         portal_idx = ba.index(NULL_BYTE)
@@ -838,7 +1175,7 @@ class PostgresqlHandler:
         ctx.add_portal(portal, stmt, params, result_formats)
         await self.send_bind_complete(writer)
 
-    async def handle_describe(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+    async def handle_describe(self, ctx: PGContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling describe")
         ba = bytearray(payload)
         describe_type = ba[0]
@@ -846,7 +1183,13 @@ class PostgresqlHandler:
             portal = ba[1: len(ba) - 1].decode("utf-8")
             try:
                 loop = asyncio.get_event_loop()
-                query_result = await loop.run_in_executor(None, ctx.describe_portal, portal)
+                query_result = await asyncio.wait_for(
+                    loop.run_in_executor(None, ctx.describe_portal, portal),
+                    timeout=30.0  # 30 second timeout for describe operations
+                )
+            except asyncio.TimeoutError:
+                await send_error(Exception("Describe operation timed out"), writer, ctx)
+                return
             except Exception as e:
                 await send_error(e, writer, ctx)
                 return
@@ -854,7 +1197,13 @@ class PostgresqlHandler:
             stmt = ba[1: len(ba) - 1].decode("utf-8")
             try:
                 loop = asyncio.get_event_loop()
-                query_result = await loop.run_in_executor(None, ctx.describe_statement, stmt)
+                query_result = await asyncio.wait_for(
+                    loop.run_in_executor(None, ctx.describe_statement, stmt),
+                    timeout=30.0  # 30 second timeout for describe operations
+                )
+            except asyncio.TimeoutError:
+                await send_error(Exception("Describe operation timed out"), writer, ctx)
+                return
             except Exception as e:
                 await send_error(e, writer, ctx)
                 return
@@ -862,13 +1211,19 @@ class PostgresqlHandler:
             await send_parameter_description(param_oids, writer)
         else:
             raise Exception(f"Unknown describe type: {describe_type}")
-        if _has_results(query_result):
+        if query_result.num_rows > 0:
             await send_row_description(query_result, writer)
+        else:
+            # Send NoData response when there are no results to describe
+            writer.write(struct.pack("!ci", ServerResponse.NO_DATA, 4))
+            await writer.drain()
 
-    async def handle_execute(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+    async def handle_execute(self, ctx: PGContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling execute")
         if ctx.has_error:
             logger.info("Skipping execute due to previous error")
+            error_msg = "current transaction is aborted, commands ignored until end of transaction block"
+            await self.send_error("25P02",error_msg, writer)
             return
         ba = bytearray(payload)
         portal_idx = ba.index(NULL_BYTE)
@@ -877,11 +1232,17 @@ class PostgresqlHandler:
         query_result = None
         try:
             loop = asyncio.get_event_loop()
-            query_result = await loop.run_in_executor(None, ctx.execute_portal, portal)
+            query_result = await asyncio.wait_for(
+                loop.run_in_executor(None, ctx.execute_portal, portal),
+                timeout=300.0  # 5 minute timeout for execute operations
+            )
+        except asyncio.TimeoutError:
+            await send_error(Exception("Execute operation timed out"), writer, ctx)
+            return
         except Exception as e:
             await send_error(e, writer, ctx)
             return
-        if _has_results(query_result):
+        if query_result.num_rows > 0:
             row_count = await send_data_rows(query_result, writer, limit)
             if limit == 0 or row_count < limit:
                 await self.send_command_complete("SELECT %d\x00" % row_count, writer)
@@ -895,7 +1256,7 @@ class PostgresqlHandler:
             status = _get_status(query_result)
             await self.send_command_complete(f"{status}\x00", writer)
 
-    async def handle_close(self, ctx: BVContext, payload: bytes, writer: asyncio.StreamWriter):
+    async def handle_close(self, ctx: PGContext, payload: bytes, writer: asyncio.StreamWriter):
         logger.debug("Handling close")
         close_type = payload[0]
         if close_type == ord("S"):
@@ -922,7 +1283,7 @@ class PostgresqlHandler:
         )
         await writer.drain()
 
-    async def send_ready_for_query(self, ctx: Optional[BVContext], writer: asyncio.StreamWriter):
+    async def send_ready_for_query(self, ctx: Optional[PGContext], writer: asyncio.StreamWriter):
         logger.debug("Sending ready for query")
         status = ctx.transaction_status() if ctx else TransactionStatus.IDLE
         writer.write(struct.pack("!cic", ServerResponse.READY_FOR_QUERY, 5, status))
@@ -964,20 +1325,49 @@ class PostgresqlHandler:
         writer.write(out)
         await writer.drain()
 
+    async def send_error(self, errorcode: str, message: str, writer: asyncio.StreamWriter):
+        buf = BVBuffer()
+        # Severity
+        buf.write_byte(b"S")
+        buf.write_string("ERROR")
+        # SQL State (25P02 = in_failed_transaction_state)
+        buf.write_byte(b"C")
+        buf.write_string(errorcode)
+        # Message
+        buf.write_byte(b"M")
+        buf.write_string(message)
+        buf.write_byte(NULL_BYTE)
+        
+        out = buf.get_value()
+        err_sig = struct.pack("!ci", ServerResponse.ERROR_RESPONSE, len(out) + 4)
+        writer.write(err_sig + out)
+        await writer.drain()
+
 
 class PostgresqlServer:
     """Async PostgreSQL server using asyncio."""
 
-    def __init__(self, host='0.0.0.0', port=5432):
+    def __init__(self, host='0.0.0.0', postgresql_port=5436, api_port=55432, ssl_certfile=None, ssl_keyfile=None):
         self.host = host
-        self.port = port
-        self.sessions = Sessions()
+        self.port = postgresql_port  # PostgreSQL proxy port
+        self.api_port = api_port  # FastAPI port
+        self.ssl_certfile = ssl_certfile
+        self.ssl_keyfile = ssl_keyfile
         self.ctxts = {}
         self.handler = PostgresqlHandler(self)
         self.server = None
+        self.app = FastAPI()
+        self.sessions = global_sessions
 
     async def start(self):
-        """Start the async PostgreSQL server."""
+        """Start the async PostgreSQL server with integrated FastAPI."""
+        import uvicorn
+        
+        # Install all apps (including MCP server)
+        for app_to_be_installed in APPS:
+            app_to_be_installed(self.app)
+
+        # Start PostgreSQL protocol server (without SSL - we handle SSL upgrade manually)
         self.server = await asyncio.start_server(
             self.handler.handle_connection,
             self.host,
@@ -987,11 +1377,34 @@ class PostgresqlServer:
         )
         
         addr = self.server.sockets[0].getsockname()
-        logger.info(f"PostgreSQL server started on {addr[0]}:{addr[1]}")
+        ssl_status = "SSL-capable" if (self.ssl_certfile and self.ssl_keyfile) else "non-SSL"
+        logger.info(f"PostgreSQL server started on {ssl_status} {addr[0]}:{addr[1]}")
         
-        async with self.server:
-            await self.server.serve_forever()
-
+        # Configure uvicorn server for FastAPI
+        config = uvicorn.Config(
+            self.app,
+            host=self.host,
+            port=self.api_port,
+            loop="asyncio",
+            log_level="info"
+        )
+        fastapi_server = uvicorn.Server(config)
+        
+        logger.info(f"FastAPI server (MCP endpoints) starting on {self.host}:{self.api_port}")
+        
+        fastapi_task = asyncio.create_task(fastapi_server.serve())
+        
+        try:
+            async with self.server:
+                await self.server.serve_forever()
+        finally:
+            # Clean up FastAPI server
+            fastapi_task.cancel()
+            try:
+                await fastapi_task
+            except asyncio.CancelledError:
+                pass
+            
     async def stop(self):
         """Stop the async PostgreSQL server."""
         if self.server:

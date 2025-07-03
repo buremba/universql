@@ -90,3 +90,141 @@ cp .env.example .env
 ```bash
 docker compose up
 ```
+
+## PostgreSQL Protocol Support
+
+UniverSQL provides a PostgreSQL wire protocol proxy that allows you to connect with any PostgreSQL client.
+
+### Basic Usage
+
+```bash
+# Start PostgreSQL proxy (non-SSL)
+universql postgresql --url postgresql://user:password@host:5432/database --port 5436
+
+# Start with SSL using localhostcomputing.com certificates
+universql postgresql --url postgresql://user:password@host:5432/database --host localhostcomputing.com --port 5436
+
+# Connect with any PostgreSQL client
+psql "host=localhostcomputing.com port=5436 dbname=database user=user password=password sslmode=require"
+```
+
+### SSL Support
+
+UniverSQL PostgreSQL proxy supports SSL encryption using built-in `localhostcomputing.com` certificates:
+
+- **Automatic SSL**: When using `--host localhostcomputing.com`, SSL is automatically enabled
+- **Custom Certificates**: Use `--ssl_certfile` and `--ssl_keyfile` for custom certificates  
+- **Client Compatibility**: Works with any PostgreSQL client that supports SSL (psql, DBeaver, etc.)
+- **Protocol Compliance**: Proper SSL upgrade negotiation following PostgreSQL wire protocol
+
+#### SSL Examples
+
+```bash
+# Automatic SSL with localhostcomputing.com
+universql postgresql --host localhostcomputing.com --port 5436
+
+# Custom SSL certificates
+universql postgresql --ssl_certfile /path/to/cert.pem --ssl_keyfile /path/to/key.pem --port 5436
+
+# Connect with SSL required
+psql "host=localhostcomputing.com port=5436 dbname=database sslmode=require"
+```
+
+#### DBeaver SSL Configuration
+
+When connecting with DBeaver:
+
+1. **Main Tab**: Set host to `localhostcomputing.com` (or `127.0.0.1` if using custom certs)
+2. **SSL Tab**: Check "Use SSL" 
+3. **SSL Tab**: All SSL parameters are optional - the built-in certificates are used automatically
+4. **SSL Mode**: Can be set to "require" for secure connections
+
+The server will automatically handle SSL upgrade when clients request it, responding with 'S' for SSL-capable servers or 'N' for non-SSL servers.
+
+### Features
+
+- **Full PostgreSQL Protocol**: Support for prepared statements, transactions, and authentication
+- **WebSocket Integration**: Queries can be routed through WebSocket connections  
+- **FastAPI Integration**: Built-in REST API and MCP (Model Context Protocol) support
+- **SSL/TLS Encryption**: Secure connections using localhostcomputing.com certificates
+- **JDBC Support**: Full compatibility with JDBC clients like DBeaver, IntelliJ IDEA, and enterprise applications
+
+#### JDBC Integration
+
+UniverSQL supports all JDBC-based PostgreSQL clients through the [jaydebeapi](https://github.com/baztian/jaydebeapi) integration:
+
+**Prerequisites:** Java 8+ is **required** for JDBC testing and development. Tests will **fail** if Java is not available.
+
+```bash
+# Install Java (macOS)
+brew install openjdk@17
+
+# Install Java (Ubuntu/Debian)
+sudo apt-get install openjdk-17-jdk
+
+# Install Java (CentOS/RHEL)
+sudo yum install java-17-openjdk-devel
+```
+
+```python
+import jaydebeapi
+
+# Non-SSL JDBC connection
+conn = jaydebeapi.connect(
+    "org.postgresql.Driver",
+    "jdbc:postgresql://127.0.0.1:5436/postgres",
+    {"user": "username", "password": "password"},
+    "/path/to/postgresql-42.7.7.jar"
+)
+
+# SSL JDBC connection
+conn = jaydebeapi.connect(
+    "org.postgresql.Driver", 
+    "jdbc:postgresql://localhostcomputing.com:5436/postgres?ssl=true&sslmode=require",
+    {"user": "username", "password": "password"},
+    "/path/to/postgresql-42.7.7.jar"
+)
+```
+
+**JDBC Driver Management:**
+- **Latest Version**: PostgreSQL JDBC driver v42.7.7 (automatically downloaded)
+- **Source**: Maven Central (not PostgreSQL.org)
+- **Caching**: Drivers cached in `.cache/jdbc_drivers/` for reuse
+- **Auto-Download**: First test run downloads and caches the driver
+
+**Supported JDBC Clients:**
+- DBeaver Community & Enterprise
+- IntelliJ IDEA Database Tools
+- Eclipse Data Tools Platform
+- SQuirreL SQL Client
+- Any application using PostgreSQL JDBC driver
+
+#### Development & Testing
+
+```bash
+# Setup development environment with JDBC testing
+make setup
+
+# Check if Java is available
+make check-java
+
+# Show JDBC driver cache information
+make cache-info
+
+# Run all PostgreSQL tests (auto-detects Java)
+make test-all-postgresql
+
+# Test JDBC integration specifically (requires Java - will FAIL if missing)
+make test-jdbc
+```
+
+**Cache Management:**
+```bash
+# Clean JDBC cache only
+make clean-jdbc
+
+# Clean all test artifacts and cache
+make clean
+```
+
+**Note:** JDBC tests now **fail** (not skip) if Java is missing, ensuring proper CI/CD pipeline behavior.

@@ -10,21 +10,17 @@ import threading
 import typing
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-from fastmcp.server.auth import BearerAuthProvider
-from fastmcp.server.auth.providers.bearer import RSAKeyPair
 
 import click
 import duckdb
 from fastapi import FastAPI
-from fastmcp import FastMCP
-import psycopg2
-import uvicorn
 
 from universql.agent.cloudflared import start_cloudflared
-from universql.protocol.postgresql import PostgresqlServer
+from universql.protocol.pg_ruff import PostgresqlServer
 from universql.protocol.session import UniverSQLSession
 from universql.util import LOCALHOST_UNIVERSQL_COM_BYTES, Catalog, LOCALHOSTCOMPUTING_COM, \
     DEFAULTS, initialize_context, detect_catalog_type
+from universql.plugin import register
 
 logger = logging.getLogger("🏠")
 
@@ -88,6 +84,9 @@ def common_options(func):
                   help='Path to the SQL file to execute and exit.')
     @click.option('--auth-file', type=click.Path(exists=True),
                   help='Path to auth file with user:password pairs')
+    @click.option('--frontend-dir', type=click.Path(exists=True),
+                  help='Path to the Vite frontend build directory (e.g., /path/to/dist)',
+                  envvar='FRONTEND_DIR')
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
@@ -102,63 +101,326 @@ def cli():
 @cli.command(
     epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
 @click.option('--url',
-              help='The Postgresql server to connect',
-              prompt='The server URL', envvar='DATABASE_URL')
-@click.option('--port', help='Port for PostgreSQL proxy server (default: 5436)', default=5436, envvar='POSTGRESQL_PORT')
+              help='The Postgresql server to proxy to',
+               envvar='DATABASE_URL', required=False)
+@click.option('--port', help='Port for PostgreSQL proxy server (default: 5432)', default=5432, envvar='POSTGRESQL_PORT')
+@click.option('--api-port', help='Port for FastAPI and WebSocket servers (default: 8084)', default=8084, envvar='API_PORT')
 @common_options
-def postgresql(url, port, host, **kwargs):
+def postgresql(url, port, api_port, host, ssl_keyfile, ssl_certfile, tunnel, frontend_dir, **kwargs):
     logger.info(f"UniverSQL is starting reverse proxy for Postgresql server on {url}")
 
-    # Parse the PostgreSQL URL
-    parsed_url = urlparse(url)
+    # Initialize context first
+    initialize_context()
+
+    if url is not None:
+        parsed_url = urlparse(url)
     
-    # Extract connection parameters
-    url_credentials = {
-        'scheme': parsed_url.scheme,
-        'host': parsed_url.hostname,
-        'port': parsed_url.port or 5432,
-        'database': parsed_url.path.lstrip('/') if parsed_url.path else None,
-        'user': parsed_url.username,
-        'password': parsed_url.password,
-    }
+        url_credentials = {
+            'scheme': parsed_url.scheme,
+            'host': parsed_url.hostname,
+            'port': parsed_url.port or 5432,
+            'database': parsed_url.path.lstrip('/') if parsed_url.path else None,
+            'user': parsed_url.username,
+            'password': parsed_url.password,
+        }
+        
+        # Parse query parameters (like sslmode)
+        if parsed_url.query:
+            query_params = parse_qs(parsed_url.query)
+            for key, value in query_params.items():
+                url_credentials[key] = value[0] if len(value) == 1 else value
+        
+        # Store the parsed URL in context for the protocol handler
+        from universql.util import current_context
+        current_context['url'] = url_credentials
     
-    # Parse query parameters (like sslmode)
-    if parsed_url.query:
-        query_params = parse_qs(parsed_url.query)
-        for key, value in query_params.items():
-            url_credentials[key] = value[0] if len(value) == 1 else value
+    # Store frontend directory in context for UI plugin
+    from universql.util import current_context
+    if frontend_dir:
+        current_context['frontend_dir'] = str(frontend_dir)
+        logger.info(f"📁 Frontend directory specified: {frontend_dir}")
+    
+    bind_host = host
+
+    if host == LOCALHOSTCOMPUTING_COM:
+        # DNS resolution check similar to Snowflake implementation
+        try:
+            addr_list = socket.getaddrinfo(LOCALHOSTCOMPUTING_COM, None)
+            resolved_ips = [info[4][0] for info in addr_list]
+            logger.info(f"DNS for {LOCALHOSTCOMPUTING_COM} resolves to: {resolved_ips}")
+            if "127.0.0.1" not in resolved_ips:
+                 logger.error(
+                     f"The DNS setting for {LOCALHOSTCOMPUTING_COM} doesn't include 127.0.0.1, refusing to start. Please update UniverSQL or DNS settings.")
+            else:
+                 # Attempt to force IPv4 binding
+                 ipv4_address = resolve_host_to_ipv4(LOCALHOSTCOMPUTING_COM)
+                 if ipv4_address:
+                     logger.info(f"Attempting to bind specifically to IPv4 address: {ipv4_address}")
+                     bind_host = ipv4_address
+                 else:
+                     logger.warning(f"Could not explicitly resolve {LOCALHOSTCOMPUTING_COM} to IPv4. Falling back to hostname binding.")
+
+        except socket.gaierror as e:
+            logger.warning(f"Unable to resolve DNS for {LOCALHOSTCOMPUTING_COM}. Check internet connection or DNS settings. Error: {e}")
+
+    if tunnel == 'cloudflared':
+        start_cloudflared(port, kwargs.get('metrics_port', 5675))
+        if os.getenv('USE_LOCALCOMPUTING_COM') == '1':
+            bind_host = "0.0.0.0"
+        else:
+            bind_host = '127.0.0.1'
+            logger.info("Cloudflared tunnel enabled, binding server to 127.0.0.1")
+    elif tunnel == 'ngrok':
+        logger.error("Ngrok is not supported yet. Please use cloudflared.")
+        sys.exit(1)
+
+    # Check for cert-manager provided certificates
+    cert_manager_cert = os.getenv('SSL_CERT_PATH')
+    cert_manager_key = os.getenv('SSL_KEY_PATH')
+    
+    # Use cert-manager certs if available and files exist
+    if cert_manager_cert and cert_manager_key and os.path.exists(cert_manager_cert) and os.path.exists(cert_manager_key):
+        ssl_certfile = cert_manager_cert
+        ssl_keyfile = cert_manager_key
+        logger.info(f"🔒 Using cert-manager provided certificates: {ssl_certfile}")
+
+    # Determine if SSL should be used based on host, explicit files, or env var
+    use_ssl = (host == LOCALHOSTCOMPUTING_COM or ssl_certfile is not None or os.getenv('USE_LOCALCOMPUTING_COM') == '1') and tunnel != 'cloudflared'
+
+    if use_ssl:
+        logger.info(f"Attempting to start PostgreSQL server with SSL on {bind_host}:{port}")
+        with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=False) as cert_file:
+            cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
+            cert_file.flush()
+            with tempfile.NamedTemporaryFile(suffix='key.pem', delete=False) as key_file:
+                key_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['key']))
+                key_file.flush()
+
+                try:
+                    server = PostgresqlServer(
+                        bind_host, port, api_port, 
+                        ssl_certfile=ssl_certfile or cert_file.name,
+                        ssl_keyfile=ssl_keyfile or key_file.name
+                    )
+                    # Store connection info in server app state for API endpoints
+                    server.app.state.host = bind_host
+                    server.app.state.port = port
+                    server.app.state.api_port = api_port
+                    server.app.state.ssl_enabled = True
+                    
+                    logger.info(f"PostgreSQL proxy listening on {bind_host}:{port} with SSL")
+                    logger.info(f"FastAPI server (MCP) will be available on {bind_host}:{api_port}")
+                    logger.info("Starting UniverSQL PostgreSQL server with SSL and integrated MCP support")
+                    
+                    import asyncio
+                    asyncio.run(server.start())
+                except Exception as e:
+                    logger.critical(f"Unable to start the SSL server on {bind_host}:{port}", exc_info=e)
+                    if isinstance(e, socket.error) and "address already in use" in str(e).lower():
+                        logger.error(f"Port {port} is already in use on {bind_host}. Check for other running instances or services.")
+                    elif isinstance(e, socket.error) and "cannot assign requested address" in str(e).lower():
+                         logger.error(f"Cannot assign requested address {bind_host}. Check network configuration and if the address is valid for this host.")
+                    raise e
+                finally:
+                    # Clean up temp files
+                    try:
+                        os.unlink(cert_file.name)
+                        os.unlink(key_file.name)
+                    except:
+                        pass
+    else:
+        logger.info(f"Attempting to start PostgreSQL server without SSL on {bind_host}:{port}")
+        try:
+            server = PostgresqlServer(bind_host, port, api_port)
+            # Store connection info in server app state for API endpoints
+            server.app.state.host = bind_host
+            server.app.state.port = port
+            server.app.state.api_port = api_port
+            server.app.state.ssl_enabled = False
+            
+            logger.info(f"PostgreSQL proxy listening on {bind_host}:{port}")
+            logger.info(f"FastAPI server (MCP) will be available on {bind_host}:{api_port}")
+            logger.info("Starting UniverSQL PostgreSQL server with integrated MCP support")
+            
+            import asyncio
+            asyncio.run(server.start())
+        except Exception as e:
+            logger.critical(f"Unable to start the non-SSL server on {bind_host}:{port}", exc_info=e)
+            if isinstance(e, socket.error) and "address already in use" in str(e).lower():
+                logger.error(f"Port {port} is already in use on {bind_host}. Check for other running instances or services.")
+            elif isinstance(e, socket.error) and "cannot assign requested address" in str(e).lower():
+                 logger.error(f"Cannot assign requested address {bind_host}. Check network configuration and if the address is valid for this host.")
+            raise e
+
+
+@cli.command(
+    epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
+@click.option('--account',
+              help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
+              prompt='Account ID (example: rt21601.europe-west2.gcp)', envvar='SNOWFLAKE_ACCOUNT')
+@click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, envvar='SERVER_PORT')
+@click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
+              help='Type of the Snowflake account. Automatically detected from the account if not provided.')
+@common_options
+def snowflake(file, host, port, ssl_keyfile, ssl_certfile, account, catalog, metrics_port, tunnel, frontend_dir, **kwargs):
+    context__params = click.get_current_context().params
+    auto_catalog_mode = catalog is None
+    context__params["catalog"] = detect_catalog_type(account, catalog)
+
+    adjective = "apparently" if auto_catalog_mode else ""
+    logger.info(f"UniverSQL is starting reverse proxy for {account}.snowflakecomputing.com, "
+                f"it's {adjective} a {context__params['catalog']} server.")
+
+    bind_host = host # Start with the provided host
 
     initialize_context()
     
-    # Store the parsed URL in context for the protocol handler
+    # Store frontend directory in context for UI plugin
     from universql.util import current_context
-    current_context['url'] = url_credentials
+    if frontend_dir:
+        current_context['frontend_dir'] = str(frontend_dir)
+        logger.info(f"📁 Frontend directory specified: {frontend_dir}")
 
-    server = PostgresqlServer(host, port)
-    logger.info(f"Listening on {host}:{port}")
+    if host == LOCALHOSTCOMPUTING_COM:
+        # Existing DNS resolution check (informational)
+        try:
+            # Use getaddrinfo for a more comprehensive check, including IPv4/IPv6
+            addr_list = socket.getaddrinfo(LOCALHOSTCOMPUTING_COM, None)
+            resolved_ips = [info[4][0] for info in addr_list]
+            logger.info(f"DNS for {LOCALHOSTCOMPUTING_COM} resolves to: {resolved_ips}")
+            if "127.0.0.1" not in resolved_ips:
+                 logger.error(
+                     f"The DNS setting for {LOCALHOSTCOMPUTING_COM} doesn't include 127.0.0.1, refusing to start. Please update UniverSQL or DNS settings.")
+                 # Decide if you want to exit or just warn
+                 # sys.exit(1) # Uncomment if this should be fatal
+            else:
+                 # Attempt to force IPv4 binding
+                 ipv4_address = resolve_host_to_ipv4(LOCALHOSTCOMPUTING_COM)
+                 if ipv4_address:
+                     logger.info(f"Attempting to bind specifically to IPv4 address: {ipv4_address}")
+                     bind_host = ipv4_address
+                 else:
+                     logger.warning(f"Could not explicitly resolve {LOCALHOSTCOMPUTING_COM} to IPv4. Falling back to hostname binding.")
+                     # Keep bind_host as LOCALHOSTCOMPUTING_COM
 
-    # FastAPI server for MCP integration
-    app = FastAPI(title="UniverSQL PostgreSQL API", version="1.0.0")
-    
-    # Add health check endpoint
-    @app.get("/health")
-    async def health_check():
-        return {"status": "healthy", "service": "universql-postgresql"}
-    
-    # Add database info endpoint
-    @app.get("/db/info")
-    async def database_info():
-        return {
-            "database_type": "postgresql",
-            "proxy_host": host,
-            "proxy_port": port,
-            "target": url_credentials.get('host', 'unknown')
-        }
-    
-    config = uvicorn.Config(app, host=host, port=8000, loop="asyncio", lifespan="on")
-    api_server = uvicorn.Server(config)
+        except socket.gaierror as e:
+            logger.warning(f"Unable to resolve DNS for {LOCALHOSTCOMPUTING_COM}. Check internet connection or DNS settings. Error: {e}")
+            # Decide how to proceed - maybe fall back to 127.0.0.1 or exit?
+            # bind_host = '127.0.0.1' # Option: Fallback safely
+            # sys.exit(1)           # Option: Exit if resolution fails
 
-    # MCP Server for data analysis and SQL operations
+    if tunnel == 'cloudflared':
+        start_cloudflared(port, metrics_port)
+        if os.getenv('USE_LOCALCOMPUTING_COM') == '1':
+            # If using cloudflared tunnel AND specifically forcing localcomputing.com via env var (unusual case),
+            # bind to all interfaces for the tunnel to connect.
+             bind_host = "0.0.0.0"
+        else:
+            # Default cloudflared behavior usually involves binding to localhost
+             bind_host = '127.0.0.1'
+             logger.info("Cloudflared tunnel enabled, binding server to 127.0.0.1")
+
+    elif tunnel == 'ngrok':
+        logger.error("Ngrok is not supported yet. Please use cloudflared.")
+        sys.exit(1)
+
+    # Determine if SSL should be used based on host, explicit files, or env var
+    use_ssl = (host == LOCALHOSTCOMPUTING_COM or ssl_certfile is not None or os.getenv('USE_LOCALCOMPUTING_COM') == '1') and tunnel != 'cloudflared'
+
+    if file is not None:
+
+        # Read the SQL file
+        with open(file, 'r') as f:
+            sql = f.read()
+
+        # Create a session and execute the query
+        session = UniverSQLSession(
+            context=context__params,
+            base_engine="snowflake",
+            session_id="file-run",
+            credentials={"account": account},
+            session_parameters={}
+        )
+
+        try:
+            result = session.do_query(sql)
+            # Print the results
+            print(result.to_pandas())
+        finally:
+            session.close()
+            sys.exit(0)
+
+    if use_ssl:
+        logger.info(f"Attempting to start server with SSL on {bind_host}:{port}")
+        with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:
+            cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
+            cert_file.flush()
+            with tempfile.NamedTemporaryFile(suffix='key.pem', delete=True) as key_file:
+                key_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['key']))
+                key_file.flush()
+
+                try:
+                    import uvicorn
+                    uvicorn.run("universql.protocol.snowflake:app",
+                                host=bind_host, # Use the potentially resolved IPv4 address
+                                port=port,
+                                ssl_keyfile=ssl_keyfile or key_file.name,
+                                ssl_certfile=ssl_certfile or cert_file.name,
+                                reload=False,
+                                use_colors=True)
+                except Exception as e: # Catch specific exceptions if possible (e.g., socket.error)
+                    logger.critical(f"Unable to start the SSL server on {bind_host}:{port}", exc_info=e)
+                    # Provide more specific advice if possible based on the error (e.g., address in use)
+                    if isinstance(e, socket.error) and "address already in use" in str(e).lower():
+                        logger.error(f"Port {port} is already in use on {bind_host}. Check for other running instances or services.")
+                    elif isinstance(e, socket.error) and "cannot assign requested address" in str(e).lower():
+                         logger.error(f"Cannot assign requested address {bind_host}. Check network configuration and if the address is valid for this host.")
+                    raise e # Re-raise the exception after logging
+    else:
+        logger.info(f"Attempting to start server without SSL on {bind_host}:{port}")
+        try:
+            import uvicorn
+            uvicorn.run("universql.protocol.snowflake:app",
+                        host=bind_host, # Use the potentially resolved IPv4 address
+                        port=port,
+                        reload=False,
+                        use_colors=True)
+        except Exception as e: # Catch specific exceptions if possible
+             logger.critical(f"Unable to start the non-SSL server on {bind_host}:{port}", exc_info=e)
+             if isinstance(e, socket.error) and "address already in use" in str(e).lower():
+                 logger.error(f"Port {port} is already in use on {bind_host}. Check for other running instances or services.")
+             elif isinstance(e, socket.error) and "cannot assign requested address" in str(e).lower():
+                  logger.error(f"Cannot assign requested address {bind_host}. Check network configuration and if the address is valid for this host.")
+             raise e # Re-raise the exception after logging
+
+
+class EndpointFilter(logging.Filter):
+    def __init__(
+            self,
+            path: str,
+            *args: typing.Any,
+            **kwargs: typing.Any,
+    ):
+        super().__init__(*args, **kwargs)
+        self._path = path
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage().find(self._path) == -1
+
+
+
+uvicorn_logger = logging.getLogger("uvicorn.access")
+uvicorn_logger.addFilter(EndpointFilter(path="/telemetry/send"))
+uvicorn_logger.addFilter(EndpointFilter(path="/queries/v1/query-request"))
+uvicorn_logger.addFilter(EndpointFilter(path="/session"))
+
+# @register()
+def install_mcp_server(app: FastAPI):
+    """Install MCP server endpoints on the FastAPI app"""
+    from universql.util import current_context
+    from fastmcp import FastMCP
+
+    # Create MCP server instance
     mcp = FastMCP(
         name="UniverSQL-PostgreSQL",
         instructions="""
@@ -174,6 +436,8 @@ def postgresql(url, port, host, **kwargs):
     def execute_sql(query: str) -> dict:
         """Executes a SQL query on the connected PostgreSQL database."""
         try:
+            # Get URL credentials from context
+            url_credentials = current_context.get('url', {})
             session = UniverSQLSession(
                 context=current_context,
                 base_engine="postgresql",
@@ -219,6 +483,7 @@ def postgresql(url, port, host, **kwargs):
     @mcp.resource("postgresql://connection")
     def get_connection_info() -> dict:
         """Provides the PostgreSQL connection configuration."""
+        url_credentials = current_context.get('url', {})
         return {
             "host": url_credentials.get('host'),
             "port": url_credentials.get('port'),
@@ -239,203 +504,27 @@ def postgresql(url, port, host, **kwargs):
         
         Available analysis types: summary, distribution, trends, anomalies"""
     
-    async def run_services():
-        """Run all services concurrently"""
-        tasks = []
-        
-        # Create tasks for each service
-        tasks.append(asyncio.create_task(server.start()))           # PostgreSQL proxy server
-        tasks.append(asyncio.create_task(api_server.serve()))       # FastAPI server on port 8000
-        tasks.append(asyncio.create_task(mcp.run_async(transport="streamable-http")))  # MCP server
-        
-        try:
-            # Wait for all tasks to complete
-            await asyncio.gather(*tasks)
-        except asyncio.CancelledError:
-            logger.info("Services cancelled, shutting down...")
-            # Cancel all tasks
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            # Wait for tasks to finish cancelling
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
-            logger.error(f"Error running services: {e}")
-            # Cancel all tasks on error
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
-
-    logger.info("Starting UniverSQL PostgreSQL services:")
-    logger.info(f"  • PostgreSQL proxy server on {host}:{port}")
-    logger.info(f"  • FastAPI server on {host}:8000")
-    logger.info("  • MCP server for data analysis tools")
+    # Add health check endpoint
+    @app.get("/health")
+    async def health_check():
+        return {"status": "healthy", "service": "universql-postgresql"}
     
-    try:
-        import asyncio
-        asyncio.run(run_services())
-    except KeyboardInterrupt:
-        logger.info("Shutting down all services...")
-    except Exception as e:
-        logger.error(f"Failed to start services: {e}")
-        raise
-        
-
-
-@cli.command(
-    epilog='[BETA] Check out docs at https://github.com/buremba/universql and let me know if you have any cool use-case on Github!')
-@click.option('--account',
-              help='The account to use. Supports both Snowflake and Polaris (ex: rt21601.europe-west2.gcp)',
-              prompt='Account ID (example: rt21601.europe-west2.gcp)', envvar='SNOWFLAKE_ACCOUNT')
-@click.option('--port', help='Port for Snowflake proxy server (default: 8084)', default=8084, envvar='SERVER_PORT')
-@click.option('--catalog', type=click.Choice([e.value for e in Catalog]),
-              help='Type of the Snowflake account. Automatically detected from the account if not provided.')
-@common_options
-def snowflake(file, host, port, ssl_keyfile, ssl_certfile, account, catalog, metrics_port, tunnel, **kwargs):
-    context__params = click.get_current_context().params
-    auto_catalog_mode = catalog is None
-    context__params["catalog"] = detect_catalog_type(account, catalog)
-
-    adjective = "apparently" if auto_catalog_mode else ""
-    logger.info(f"UniverSQL is starting reverse proxy for {account}.snowflakecomputing.com, "
-                f"it's {adjective} a {context__params['catalog']} server.")
-
-    bind_host = host # Start with the provided host
-
-    if host == LOCALHOSTCOMPUTING_COM:
-        # Existing DNS resolution check (informational)
-        try:
-            # Use getaddrinfo for a more comprehensive check, including IPv4/IPv6
-            addr_list = socket.getaddrinfo(LOCALHOSTCOMPUTING_COM, None)
-            resolved_ips = [info[4][0] for info in addr_list]
-            logger.info(f"DNS for {LOCALHOSTCOMPUTING_COM} resolves to: {resolved_ips}")
-            if "127.0.0.1" not in resolved_ips:
-                 logger.error(
-                     f"The DNS setting for {LOCALHOSTCOMPUTING_COM} doesn't include 127.0.0.1, refusing to start. Please update UniverSQL or DNS settings.")
-                 # Decide if you want to exit or just warn
-                 # sys.exit(1) # Uncomment if this should be fatal
-            else:
-                 # Attempt to force IPv4 binding
-                 ipv4_address = resolve_host_to_ipv4(LOCALHOSTCOMPUTING_COM)
-                 if ipv4_address:
-                     logger.info(f"Attempting to bind specifically to IPv4 address: {ipv4_address}")
-                     bind_host = ipv4_address
-                 else:
-                     logger.warning(f"Could not explicitly resolve {LOCALHOSTCOMPUTING_COM} to IPv4. Falling back to hostname binding.")
-                     # Keep bind_host as LOCALHOSTCOMPUTING_COM
-
-        except socket.gaierror as e:
-            logger.warning(f"Unable to resolve DNS for {LOCALHOSTCOMPUTING_COM}. Check internet connection or DNS settings. Error: {e}")
-            # Decide how to proceed - maybe fall back to 127.0.0.1 or exit?
-            # bind_host = '127.0.0.1' # Option: Fallback safely
-            # sys.exit(1)           # Option: Exit if resolution fails
-
-    if tunnel == 'cloudflared':
-        start_cloudflared(port, metrics_port)
-        if os.getenv('USE_LOCALCOMPUTING_COM') == '1':
-            # If using cloudflared tunnel AND specifically forcing localcomputing.com via env var (unusual case),
-            # bind to all interfaces for the tunnel to connect.
-             bind_host = "0.0.0.0"
-        else:
-            # Default cloudflared behavior usually involves binding to localhost
-             bind_host = '127.0.0.1'
-             logger.info("Cloudflared tunnel enabled, binding server to 127.0.0.1")
-
-    elif tunnel == 'ngrok':
-        logger.error("Ngrok is not supported yet. Please use cloudflared.")
-        sys.exit(1)
-
-    initialize_context()
-    # Determine if SSL should be used based on host, explicit files, or env var
-    use_ssl = (host == LOCALHOSTCOMPUTING_COM or ssl_certfile is not None or os.getenv('USE_LOCALCOMPUTING_COM') == '1') and tunnel != 'cloudflared'
-
-    if file is not None:
-        initialize_context()
-
-        # Read the SQL file
-        with open(file, 'r') as f:
-            sql = f.read()
-
-        # Create a session and execute the query
-        session = UniverSQLSession(
-            context=context__params,
-            base_engine="snowflake",
-            session_id="file-run",
-            credentials={"account": account},
-            session_parameters={}
-        )
-
-        try:
-            result = session.do_query(sql)
-            # Print the results
-            print(result.to_pandas())
-        finally:
-            session.close()
-            sys.exit(0)
-
-    if use_ssl:
-        logger.info(f"Attempting to start server with SSL on {bind_host}:{port}")
-        with tempfile.NamedTemporaryFile(suffix='cert.pem', delete=True) as cert_file:
-            cert_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['cert']))
-            cert_file.flush()
-            with tempfile.NamedTemporaryFile(suffix='key.pem', delete=True) as key_file:
-                key_file.write(base64.b64decode(LOCALHOST_UNIVERSQL_COM_BYTES['key']))
-                key_file.flush()
-
-                try:
-                    uvicorn.run("universql.protocol.snowflake:app",
-                                host=bind_host, # Use the potentially resolved IPv4 address
-                                port=port,
-                                ssl_keyfile=ssl_keyfile or key_file.name,
-                                ssl_certfile=ssl_certfile or cert_file.name,
-                                reload=False,
-                                use_colors=True)
-                except Exception as e: # Catch specific exceptions if possible (e.g., socket.error)
-                    logger.critical(f"Unable to start the SSL server on {bind_host}:{port}", exc_info=e)
-                    # Provide more specific advice if possible based on the error (e.g., address in use)
-                    if isinstance(e, socket.error) and "address already in use" in str(e).lower():
-                        logger.error(f"Port {port} is already in use on {bind_host}. Check for other running instances or services.")
-                    elif isinstance(e, socket.error) and "cannot assign requested address" in str(e).lower():
-                         logger.error(f"Cannot assign requested address {bind_host}. Check network configuration and if the address is valid for this host.")
-                    raise e # Re-raise the exception after logging
-    else:
-        logger.info(f"Attempting to start server without SSL on {bind_host}:{port}")
-        try:
-            uvicorn.run("universql.protocol.snowflake:app",
-                        host=bind_host, # Use the potentially resolved IPv4 address
-                        port=port,
-                        reload=False,
-                        use_colors=True)
-        except Exception as e: # Catch specific exceptions if possible
-             logger.critical(f"Unable to start the non-SSL server on {bind_host}:{port}", exc_info=e)
-             if isinstance(e, socket.error) and "address already in use" in str(e).lower():
-                 logger.error(f"Port {port} is already in use on {bind_host}. Check for other running instances or services.")
-             elif isinstance(e, socket.error) and "cannot assign requested address" in str(e).lower():
-                  logger.error(f"Cannot assign requested address {bind_host}. Check network configuration and if the address is valid for this host.")
-             raise e # Re-raise the exception after logging
-
-
-class EndpointFilter(logging.Filter):
-    def __init__(
-            self,
-            path: str,
-            *args: typing.Any,
-            **kwargs: typing.Any,
-    ):
-        super().__init__(*args, **kwargs)
-        self._path = path
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return record.getMessage().find(self._path) == -1
-
-
-
-uvicorn_logger = logging.getLogger("uvicorn.access")
-uvicorn_logger.addFilter(EndpointFilter(path="/telemetry/send"))
-uvicorn_logger.addFilter(EndpointFilter(path="/queries/v1/query-request"))
-uvicorn_logger.addFilter(EndpointFilter(path="/session"))
+    # Add database info endpoint  
+    @app.get("/db/info")
+    async def database_info():
+        url_credentials = current_context.get('url', {})
+        return {
+            "database_type": "postgresql",
+            "proxy_host": getattr(app.state, 'host', 'unknown'),
+            "proxy_port": getattr(app.state, 'port', 'unknown'),
+            "fastapi_port": getattr(app.state, 'api_port', 'unknown'),
+            "target": url_credentials.get('host', 'unknown')
+        }
+    
+    # Mount MCP HTTP app as sub-application
+    app.mount("/mcp", mcp.http_app())
+    
+    return app
 
 if __name__ == '__main__':
     cli(prog_name="universql")

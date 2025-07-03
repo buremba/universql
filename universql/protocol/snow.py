@@ -29,11 +29,9 @@ from universql.util import unpack_request_body, parameters, \
     print_dict_as_markdown_table, QueryError, LOCALHOSTCOMPUTING_COM, current_context
 from fastapi.encoders import jsonable_encoder
 from starlette.concurrency import run_in_threadpool
-from universql.protocol.session import UniverSQLSession, harakiri, kill_event, Sessions
+from universql.protocol.session import UniverSQLSession, harakiri, kill_event, sessions as sessions
 
 logger = logging.getLogger("🧵")
-
-sessions = Sessions()
 
 app = FastAPI()
 query_results = {}
@@ -46,6 +44,7 @@ for module in [
     "universql.warehouse.redshift",
     "universql.plugins.snow",
     "universql.plugins.ui",
+    "universql.plugins.websocket",
 ]:
     __import__(module)
 

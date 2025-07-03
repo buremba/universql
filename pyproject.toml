@@ -34,20 +34,13 @@ dependencies = [
     "gcsfs>=2024.6.1,<2025.0.0",
     "google-cloud-bigquery>=3.25.0,<4.0.0",
     "s3fs>=2024.6.1,<2025.0.0",
-    "aws-cdk-lib>=2.162.0,<3.0.0",
     "sentry-sdk[fastapi]>=2.17.0,<3.0.0",
-    "aws-cdk-aws-codestar-alpha>=2.162.1a0,<3.0.0",
     "marimo>=0.10.9,<1.0.0",
-    "copilotkit>=0.1.44,<1.0.0",
-    "chainlit>=2.5.5",
     "aiosqlite>=0.21.0",
-    "greenlet>=3.2.0",
-    "openai>=1.77.0",
     "psycopg2>=2.9.10",
     "mysql-mimic>=2.6.4",
-    "py-pglite>=0.1.0",
     "sqlmodel>=0.0.22",
-    "fastmcp>=2.7.1",
+    "riffq>=0.1.6"
 ]
 
 [project.urls]
@@ -59,12 +52,12 @@ dev = [
     "pylint>=2.11.1",
     "pystray>=0.19.5,<1.0.0",
     "networkx>=3.3,<4.0",
-    "streamlit>=1.38.0,<2.0.0",
-    "st-link-analysis>=0.3.0,<1.0.0",
     "shandy-sqlfmt>=0.17.0,<1.0.0",
-    "streamlit-ace>=0.1.1,<1.0.0",
     "pytest-randomly>=3.15.0,<4.0.0",
     "pytest>=8.2.0,<9.0.0",
+    "jaydebeapi>=1.2.3,<2.0.0",
+    "JPype1>=1.4.0,<2.0.0",
+    "pytest-asyncio>=1.0.0",
 ]
 
 [project.scripts]

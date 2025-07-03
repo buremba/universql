@@ -1,4 +1,6 @@
 import logging
+
+from fastapi import WebSocket
 from universql.lake.fsspec_util import get_friendly_disk_usage
 import tempfile
 import time
@@ -89,7 +91,12 @@ class UniverSQLSession:
 
     def _do_query(self, start_time: float, raw_query: str) -> pyarrow.Table:
         plugin_hooks = []
-        queries, last_executor = self._do_query_transpile(start_time, raw_query, plugin_hooks)
+        try:
+            queries, last_executor = self._do_query_transpile(start_time, raw_query, plugin_hooks)
+        except Exception as e:
+            queries = [raw_query]
+            last_executor = self.catalog_executor
+        
         for plugin in self.plugins:
             try:
                 plugin_hooks.append(plugin.start_query(queries, raw_query))
@@ -98,7 +105,9 @@ class UniverSQLSession:
                 message = f"Unable to call start_query on plugin {plugin.__class__}"
                 logger.error(message, exc_info=e)
                 raise QueryError(f"{message}: {str(e)}")
+        
         table = last_executor.get_as_table()
+        
         for hook in plugin_hooks:
             try:
                 hook.end(table)
@@ -109,16 +118,15 @@ class UniverSQLSession:
                 raise QueryError(f"{message}: {str(e)}")
         return table
 
-
-    def in_transaction(self):
-        return False
-
     def _do_query_transpile(self, start_time: float, raw_query: str, plugin_hooks: List[UQuery]) -> tuple[list[Expression], Executor | None]:
         with sentry_sdk.start_span(op="sqlglot", name="Parsing query"):
             try:
-                queries = sqlglot.parse(raw_query, read=self.base_engine)
+                # Use dialect rewrite mapping for SQLGlot
+                sqlglot_dialect = SQLGLOT_DIALECT_REWRITES.get(self.base_engine, self.base_engine)
+                queries = sqlglot.parse(raw_query, read=sqlglot_dialect)
             except ParseError as e:
                 queries = None
+                logger.error(f"[{self.session_id}] Unable to parse query with SQLGlot: {e.args}")
                 raise QueryError(f"Unable to parse query with SQLGlot: {e.args}")
 
         last_executor = None
@@ -212,7 +220,15 @@ class UniverSQLSession:
 
     def do_query(self, raw_query: str) -> pyarrow.Table:
         start_time = time.perf_counter()
+        
+        # Handle empty or whitespace-only queries
+        if not raw_query or not raw_query.strip():
+            logger.debug(f"[{self.session_id}] Empty query received, returning empty result")
+            # Return empty PyArrow table for empty queries
+            return pyarrow.Table.from_pylist([])
+        
         logger.info(f"[{self.session_id}] Transpiling query \n{prepend_to_lines(raw_query)}")
+        
         self.processing = True
         try:
             return self._do_query(start_time, raw_query)
@@ -257,26 +273,169 @@ class UniverSQLSession:
 
 class Sessions:
     def __init__(self):
-        self._sessions = {}
+        self._sessions: dict[str, UniverSQLSession] = {}
+        self._links: dict[str, dict] = {}
+        # Add indexes for faster lookups
+        self._user_index: dict[str, str] = {}  # user -> server_id
+        self._credential_hash_index: dict[str, str] = {}  # hash -> server_id
 
-    def register_session(self, session : UniverSQLSession):
+    def _hash_credentials(self, credentials: dict) -> str:
+        """Create a hash key for fast credential lookup"""
+        import hashlib
+        key_parts = [
+            str(credentials.get("server_id") or ""),
+            str(credentials.get("user") or ""),
+            str(credentials.get("password") or "")
+        ]
+        return hashlib.md5("|".join(key_parts).encode()).hexdigest()
+
+    def register_session(self, session: UniverSQLSession):
+        """Register a session instance so it can be discovered by different protocol implementations."""
         self._sessions[session.session_id] = session
+    
+    def get_link(self, server_id: str) -> dict:
+        return self._links.get(server_id)
+    
+    def set_link(self, server_id: str, link: dict):
+        self._links[server_id] = link
+        
+        # Update indexes for fast credential lookup
+        credentials = link.get("credentials", {})
+        if credentials:
+            user = credentials.get("user")
+            if user:
+                self._user_index[user] = server_id
+            
+            cred_hash = self._hash_credentials(credentials)
+            self._credential_hash_index[cred_hash] = server_id
+
+    def find_websocket_by_credentials(self, credentials: dict) -> Optional[Any]:
+        """Find a websocket connection that matches the provided credentials.
+        
+        Uses O(1) hash-based lookup for improved performance.
+        Falls back to legacy O(n) search if hash lookup fails.
+        """
+        # Try fast hash-based lookup first
+        cred_hash = self._hash_credentials(credentials)
+        server_id = self._credential_hash_index.get(cred_hash)
+        
+        if server_id and server_id in self._links:
+            link = self._links[server_id]
+            websocket = link.get("websocket")
+            if websocket:
+                logger.debug(f"Found websocket via hash lookup for credentials hash: {cred_hash[:8]}...")
+                return websocket
+        
+        # Fallback to legacy search for compatibility
+        user = credentials.get("user")
+        server_id = credentials.get("server_id") or credentials.get("user")
+        password = credentials.get("password")
+
+        for link_server_id, server in self._links.items():
+            link = self._links[link_server_id]
+            stored_credentials = link.get("credentials", {})
+            e_server_id = stored_credentials.get("server_id") or stored_credentials.get("user")
+
+            logger.debug(f"[{link_server_id}] 🔍 Legacy lookup - comparing credentials")
+            
+            if e_server_id == server_id and \
+                stored_credentials.get("user") == user and \
+                stored_credentials.get("password") == password:
+                    websocket = link.get("websocket")
+                    if websocket:
+                        logger.info(f"[{link_server_id}] 🔍 Found websocket via legacy lookup")
+                        
+                        # Update hash index for future fast lookups
+                        cred_hash = self._hash_credentials(credentials)
+                        self._credential_hash_index[cred_hash] = link_server_id
+                        
+                        return websocket
+
+        return None
 
     def get_session(self, id: str) -> Optional[UniverSQLSession]:
         return self._sessions.get(id)
 
+    def detach_websocket(self, session_id: str):
+        """Detach websocket connection for a given session."""
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+            
+        credentials = session.credentials
+        server_id = credentials.get("server_id")
+        user = credentials.get("user")
+        
+        # Find and clear the websocket from the link
+        for key in [server_id, user, session_id]:
+            if key and key in self._links:
+                link = self._links[key]
+                if link.get("websocket"):
+                    link["websocket"] = None
+                break
+
+    def _remove_from_indexes(self, server_id: str, credentials: dict):
+        """Remove entries from indexes for cleanup"""
+        if not credentials:
+            return
+            
+        # Remove from user index
+        user = credentials.get("user")
+        if user and self._user_index.get(user) == server_id:
+            del self._user_index[user]
+        
+        # Remove from credential hash index
+        cred_hash = self._hash_credentials(credentials)
+        if self._credential_hash_index.get(cred_hash) == server_id:
+            del self._credential_hash_index[cred_hash]
+
     def close_session(self, session_id: str):
-        session = self._sessions[session_id]
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+            
+        # Detach websocket first
+        self.detach_websocket(session_id)
+        
+        # Remove from sessions
         del self._sessions[session_id]
+        
+        # Clean up links and indexes
+        credentials = session.credentials
+        server_id = credentials.get("server_id")
+        user = credentials.get("user")
+        
+        # Remove the link if this session was the primary one
+        for key in [server_id, user, session_id]:
+            if key and key in self._links:
+                link = self._links[key]
+                stored_credentials = link.get("credentials", {})
+                
+                # Remove from indexes before deleting link
+                self._remove_from_indexes(key, stored_credentials)
+                
+                if link.get("primary_session") == session:
+                    del self._links[key]
+                break
+        
         session.close()
 
     def exit(self):
-        for token, session in self._sessions.items():
+        for session_id, session in list(self._sessions.items()):
             session.close()
+        
+        # Clear all data structures
+        self._sessions.clear()
+        self._links.clear()
+        self._user_index.clear()
+        self._credential_hash_index.clear()
 
 ENABLE_DEBUG_WATCH_TOWER = False
 WATCH_TOWER_SCHEDULE_SECONDS = 2
 kill_event = threading.Event()
+
+# Global, singleton registry instance that can be imported elsewhere
+sessions = Sessions()
 
 
 def watch_tower(**kwargs):
@@ -321,3 +480,4 @@ def harakiri(sig, frame):
 #     else:
 #         print(f'Repeat sigint to confirm killing {processing_sessions} running queries.')
 #         last_intent_to_kill = time.time()
+
